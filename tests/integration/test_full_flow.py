@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -151,17 +152,27 @@ def _run_graph(
     return trend_researcher.invoke(initial_state, {"configurable": configurable})
 
 
-def _progress_labels(messages: list[Any]) -> list[str]:
-    """進捗メッセージからノード名を出現順に取り出す（連続する同一ノードは 1 件に畳む）。"""
-    labels: list[str] = []
-    prefixes = tuple(f"[{i}/7]" for i in range(1, 8))
+def _node_phases(messages: list[Any]) -> list[tuple[str, str]]:
+    """進捗行から (ノード名, フェーズ) を出現順に取り出す。
+
+    重複は畳まない。ノードごとに「開始」「完了」が 1 回ずつ並ぶことを
+    そのまま検証できるようにするため（重複を許す畳み込みは、進捗行が
+    二重に emit されても緑になる）。
+    """
+    phases: list[tuple[str, str]] = []
     for message in messages:
         content = message.content if hasattr(message, "content") else str(message)
-        if content.startswith(prefixes):
-            label = content.split(" ", 2)[1]
-            if not labels or labels[-1] != label:
-                labels.append(label)
-    return labels
+        if not re.match(r"^\[\d/7\] ", content):
+            continue
+        rest = content.split("] ", 1)[1]
+        node, _, tail = rest.partition(" ... ")
+        phases.append((node, tail.split("（")[0]))
+    return phases
+
+
+def _all_phases(*nodes: str) -> list[tuple[str, str]]:
+    """指定ノードが「開始 → 完了」の順で並ぶ期待値を作る。"""
+    return [(node, phase) for node in nodes for phase in ("開始", "完了")]
 
 
 # --- 境界応答を固定プールにした実行フィクスチャ ---------------------------------
@@ -285,7 +296,8 @@ def test_x_flow_progress_messages_follow_node_order(fake_model_factory, x_flow) 
 
     contents = [m.content for m in result["messages"]]
     assert "検索クエリ: オタク 困りごと, 推し活 大変, 同人 在庫" in contents
-    assert _progress_labels(result["messages"]) == [
+    # 7 ノード × (開始 + 完了) = 14 行。重複も欠落も許さない。
+    assert _node_phases(result["messages"]) == _all_phases(
         "parse_instruction",
         "plan_search",
         "search",
@@ -293,7 +305,7 @@ def test_x_flow_progress_messages_follow_node_order(fake_model_factory, x_flow) 
         "analyze_content",
         "extract_common",
         "compile_report",
-    ]
+    )
 
 
 # --- YouTube: 正常系（出力形式の差） ---------------------------------------------
@@ -358,12 +370,12 @@ def test_empty_search_skips_the_rest_of_the_pipeline(
     assert fetch.call_count == 0
     assert fake_model_factory.prompts_for("analyze_content") == []
     assert fake_model_factory.prompts_for("extract_common") == []
-    assert _progress_labels(result["messages"]) == [
+    assert _node_phases(result["messages"]) == _all_phases(
         "parse_instruction",
         "plan_search",
         "search",
         "compile_report",
-    ]
+    )
 
 
 # --- 境界の失敗経路（data-model 1.3: partial / raises） ---------------------------

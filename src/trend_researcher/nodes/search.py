@@ -35,7 +35,8 @@ def search_node(state: AgentState, config: RunnableConfig) -> dict:
     )
 
     emitter.emit(3, NODE_SEARCH, "完了", detail=f"{len(candidates)} 件を選定")
-    progress_messages.extend(emitter.get_messages())
+    # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
+    progress_messages = emitter.get_messages()
     # 検索クエリをユーザーに表示
     progress_messages.append(AIMessage(content=f"検索クエリ: {', '.join(queries)}"))
     return {"candidates": candidates, "published_after": instruction.published_after, "messages": progress_messages}

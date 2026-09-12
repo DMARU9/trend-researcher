@@ -66,7 +66,8 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
         except Exception as exc:  # noqa: BLE001
             emitter.emit(7, NODE_COMPILE_REPORT, f"キャッシュ書き込み失敗: {exc}")
 
-    progress_messages.extend(emitter.get_messages())
+    # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
+    progress_messages = emitter.get_messages()
 
     # チャット表示用は常に Markdown で描画（CLI の出力形式指定は影響しない）
     from langchain_core.messages import AIMessage

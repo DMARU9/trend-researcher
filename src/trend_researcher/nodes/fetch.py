@@ -38,5 +38,6 @@ def fetch_node(state: AgentState, config: RunnableConfig) -> dict:
         "完了",
         detail=f"コンテキスト取得 {len(contexts)} 件（追加文脈なし {no_context} 件）",
     )
-    progress_messages.extend(emitter.get_messages())
+    # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
+    progress_messages = emitter.get_messages()
     return {"candidates": candidates, "contexts": contexts, "notes": notes, "messages": progress_messages}

@@ -127,7 +127,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 **契約**: `contracts/test-layout.md`（LAYOUT-004-4）、`contracts/coverage-policy.md` COV-004 の未実行行表
 
 - [X] T027 [P] [US3] `tests/unit/test_parse_instruction.py` を強化する。優先順位の 3 分岐（明示設定 > 本文の自然言語 > LLM の解釈）、漢数字と期間表現（「5件」「半年以内」）、明示的な日付（「2025-01-01 以降」）、解釈できない日付文字列（例外にしない）、構造化ブロックを返さない応答（トピック＝指示本文全体＋既定値）を固定する。`frozen_now` で時刻を固定する（FR-011 / COV-004 の `nodes/parse_instruction.py` 未実行行 54 / 61-64 / 72 / 75 / 102 / 112-117）
-- [ ] T028 [P] [US3] `tests/unit/test_extract_common.py` を新規作成する。見出しと本文のみの出力からのテーマ名・説明の抽出と全コンテンツへの紐づけ、空出力（テーマ一覧が空）、崩れた出力（見出しのみ・本文欠落）、表形式と箇条書きの両方の解釈を固定する（FR-012 / COV-004 の `nodes/extract_common.py` 未実行行 57-59 / 76-86）
+- [X] T028 [P] [US3] `tests/unit/test_extract_common.py` を新規作成する。見出しと本文のみの出力からのテーマ名・説明の抽出と全コンテンツへの紐づけ、空出力（テーマ一覧が空）、崩れた出力（見出しのみ・本文欠落）、表形式と箇条書きの両方の解釈を固定する（FR-012 / COV-004 の `nodes/extract_common.py` 未実行行 57-59 / 76-86）
 - [ ] T029 [P] [US3] `tests/unit/test_analyze_content.py` を新規作成する。ソースの整形、活用アイデア表の解析、列不足・見出しのみ・区切り行のみの行破棄（例外にしない）、構造化ブロックがない場合のフォールバック要約を固定する（FR-012 / COV-004 の `nodes/analyze_content.py` 未実行行 30 / 44 / 48 / 72-73）
 - [ ] T030 [P] [US3] `tests/unit/test_parse.py` を強化する。崩れた表（列不足・区切り行のみ・見出しのみ）と JSON ブロックを含まない応答を追加し、見出し・区切り行のスキップを検証する既存の重複ケースを統合する（FR-012 / FR-017）
 - [ ] T031 [P] [US3] `tests/unit/test_plan_search.py` を強化する。検索クエリからの年号・期間表現の除去、空になった行の破棄、クエリ数の上限を固定する（FR-012 / COV-004 の `nodes/plan_search.py` 未実行行 42 / 64）
@@ -467,4 +467,51 @@ T026 のファイルシステム境界テスト（data-model 1.3 の `cache_dir 
 復元後の `sha256sum` はいずれも変異前と一致（`nodes/parse_instruction.py`: `aa9e4a8358f4f65bd74e78fbe0de85f2a80c06957fca97889b98d2685ce22af` / `__main__.py`: `22935b81d82cd1e5af1c52af501e26226dec7c45b27a00708aeebe8c205988db`）。復元後のフルスイートは **413 passed**（T026 完了時点は 354 passed。内訳: `test_parse_instruction.py` が 6 → 63 件、`test_full_flow.py` に CLI 配線 2 件を追加）。
 
 `nodes/parse_instruction.py` のカバレッジは 107 stmts / 1 miss / **99%**。未実行は `_period_to_date` 末尾の `return None`（101 行目）で、**正規表現由来のラベルは必ず月表現か `_RELATIVE_PERIOD_DAYS` のキーに一致するため到達しない**防御行（唯一の呼び出し元は `_extract_published_after_from_text` で、そのラベルは `(半年|[0-9０-９一二三四五六七八九十]+[ヶカ]?月|1年|年|本年|今年|最近)` のいずれか）。位取り不正の漢数字（`二三十月以内`）は同じ関数の `if months is None: return None` で先に `None` になるため、そちらは `test_unrecognized_period_is_not_a_filter` で実行済み。COV-004 の目標（既定値で 90%）は満たす。`ruff check` は変更 4 ファイルすべて clean、`mypy src/trend_researcher` は **36 errors / 12 files**（本セッション開始時のベースライン 37 errors / 12 files から増加なし）。
+
+### T028 で検出した節分割の不整合: `#### 説明` が別テーマになる（2026-09-13 実測）
+
+`tests/unit/test_extract_common.py` の入力表を作るために `_split_sections` / `_parse_themes` を実測したところ、`### テーマ` の下に `#### 説明` / `#### 代表抜粋` を置く形（コード自身が `extract_section(body, "説明")` / `extract_section(body, "代表抜粋")` で解釈しようとしている形）で、次の 2 つが同時に起きていた。
+
+| 入力（`### テーマA` + `#### 説明` + `#### 代表抜粋`） | 修正前 | 修正後 |
+|----------------------------------------------------|--------|--------|
+| 生成されるテーマ数 | **3**（`テーマA` / `説明` / `代表抜粋`） | **1**（`テーマA`） |
+| `テーマA` の `description` | `テーマA`（見出し名へフォールバック） | `説明A` |
+| `テーマA` の `example_quotes` | `[]` | `["抜粋A1", "抜粋A2"]` |
+| `_parse_themes` の `extract_section(body, "説明")` | **到達不能**（`body` に見出し行が残らない） | 到達する |
+
+原因は `_split_sections` が `#{3,4}` のすべてを見出し境界にしていたこと。節の先頭以外に見出し行が残らないため、`_parse_themes` が本文から `説明` / `代表抜粋` を探す経路は必ず空振りし、逆にその見出しが独立したテーマとして抽出されていた（宣言と実装の不一致。FR-023）。
+
+対処: `_split_sections` を「現在の節と同じか浅い見出しだけを節境界にし、深い見出しは同じ節に残す」実装へ変更（見出しレベルを追跡。前書き＝見出しで始まらない塊は従来どおり `hm` 不一致で破棄）。プロンプトが要求する形式（`### テーマ` + `- 説明:`）の結果は変更前と同一であることを実測で確認済み。
+
+### T028 で検出した進捗メッセージの重複: ノードの戻り値に「開始」が 2 行入る（2026-09-13 実測）
+
+`test_progress_messages_report_the_theme_count` で `len(out["messages"]) == 2` が失敗して検出した。7 ノードすべてが同じ形（`progress_messages = emitter.get_messages()` で「開始」まで取得 → 完了 emit 後に `extend(emitter.get_messages())` で「開始」を再び足す）で、戻り値は `[開始, 開始, 完了]` になっていた。
+
+| 観測点 | 修正前 | 修正後 |
+|--------|--------|--------|
+| ノード単体の戻り値（`extract_common`） | 3 件（`開始` が重複） | **2 件**（`開始` / `完了`） |
+| グラフ実行後の `state["messages"]` の進捗行 | **14 行**（7 ノード × 2） | 14 行（同じ） |
+
+グラフの state で重複が消えていたのは LangGraph `add_messages` が**同一オブジェクトの id で畳み込む**ため（`ProgressEmitter.get_messages()` は同じ `AIMessage` インスタンスを返すリストのコピーなので、2 回目は同一 id として置換される）。つまり進捗表示は「オブジェクト同一性による畳み込み」に依存して正しく見えていた。`extend` を `= emitter.get_messages()`（コピーの取り直し）に変え、依存を外した。同一オブジェクトを返す実装を変える（毎回新しい `AIMessage` を作る等）と、進捗行が 2 倍に膨らむ状態だった。
+
+変異探針（後述の 3）で確認したとおり、**統合テスト（graph 経由）ではこの重複を検出できない**（畳み込みが先に効く）。検出できるのはノード単体の戻り値を見るテストだけなので、`tests/unit/test_extract_common.py` と `tests/unit/test_parse_instruction.py` の進捗テストを「戻り値の完全一致」にした。あわせて `tests/integration/test_full_flow.py` の `_progress_labels`（連続する同一ノードを畳む）を `_node_phases`（畳まない）＋ `_all_phases` へ置き換え、進捗が 14 行（7 ノード × 開始/完了）であることを重複・欠落なく固定した。
+
+### T028: 変異探針（2026-09-13 実測）
+
+**1 件ずつ実施**し、各件で「改変 → 失敗確認 → 復元 → `sha256sum` 一致 → フルスイート再実行 → `git status --short`」を完了させた。
+
+| 変異 | 落ちるテスト | 実測 |
+|------|--------------|------|
+| （1）`if current and (level == 0 or line_level <= level):` から深さ比較を除去（旧 `_split_sections`） | `test_nested_explanation_heading_is_used_as_description` / `test_nested_field_headings_do_not_become_themes` / `test_quotes_come_from_nested_excerpt_heading` | **3 failed / 27 passed** |
+| （2）`extract_common` の進捗を `extend` に戻す | `test_progress_messages_report_the_theme_count` / `test_progress_messages_report_zero_themes` | **2 failed / 28 passed** |
+| （3）`search` の進捗を `extend` に戻す | なし（`test_x_flow_progress_messages_follow_node_order` は **1 passed**） | **検出不能**（`add_messages` の同一オブジェクト畳み込みが先に効くため。上の「観測点」表を参照） |
+| （4）`supporting = ids` を空リストに固定 | `test_supporting_ids_are_all_analyses` / `test_supporting_ids_follow_the_analysis_order` | **2 failed / 28 passed** |
+| （5）本文欠落時のフォールバック（`if not body and theme_name: body = theme_name`）を削除 | `test_theme_name_only_uses_the_heading_as_description` | **1 failed / 29 passed** |
+
+復元後の `sha256sum` はいずれも変異前と一致（`nodes/extract_common.py`: `fc344384ef11be48a4ef7cea02a32289a91e7c7af5bf987588508ad41cb304c3` / `nodes/search.py`: `e5a876690307a531f571b1dc069525866603bcaf7f78d541e730dc5b7677afef`）。復元後のフルスイートは **443 passed**（T027 完了時点は 413 passed。`test_extract_common.py` 30 件を新規追加）。`nodes/extract_common.py` のカバレッジは 73 stmts / 0 miss / **100%**。
+
+### T028 のスコープ外とした点
+
+- 表形式のテーマ出力（`| テーマ | 説明 |` のみ）は **0 件**のまま固定した。プロンプト（`X_EXTRACT_COMMON_PROMPT` / `YOUTUBE_EXTRACT_COMMON_PROMPT`）が要求するのは `### テーマ名` + `- 説明:` の形式であり、表をテーマ表として解釈する経路は実装に存在しない。挙動を変えるのは仕様追加になるため、`test_no_theme_output_yields_an_empty_list` の 1 ケースとして「例外にせず 0 件」だけを固定した。
+- `text = result.content if hasattr(result, "content") else str(result)` の `else` 側（`content` を持たない戻り値）は、プロダクションの LLM クライアントが常に `AIMessage` を返すため到達しない防御分岐であり、テストを付けていない。
 

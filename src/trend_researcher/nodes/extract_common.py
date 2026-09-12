@@ -44,21 +44,33 @@ def extract_common(state: AgentState, config: RunnableConfig) -> dict:
     themes = _parse_themes(text, [a.id for a in analyses])
 
     emitter.emit(6, NODE_EXTRACT_COMMON, "完了", detail=f"{len(themes)} 件の共通テーマ")
-    progress_messages.extend(emitter.get_messages())
+    # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
+    progress_messages = emitter.get_messages()
     return {"common_themes": themes, "messages": progress_messages}
 
 
 def _split_sections(text: str) -> list[list[str]]:
-    heading_re = re.compile(r"^#{3,4}\s+(.*)$")
+    """見出し（`###` / `####`）ごとに節へ分割する。
+
+    節の境界は「現在の節と同じか浅い見出し」に限り、深い見出しは同じ節に
+    残す。`### テーマ` の下の `#### 説明` / `#### 代表抜粋` を節境界にすると、
+    `_parse_themes` が `説明` や `代表抜粋` という名前の別テーマを生成し、
+    本来のテーマの説明文が失われるため（FR-023）。
+    """
+    heading_re = re.compile(r"^(#{3,4})\s+.*$")
     sections: list[list[str]] = []
     current: list[str] = []
+    level = 0  # 0 = 見出しで始まっていない（前書き）
     for line in text.splitlines():
-        if heading_re.match(line):
-            if current:
+        m = heading_re.match(line)
+        if m:
+            line_level = len(m.group(1))
+            if current and (level == 0 or line_level <= level):
                 sections.append(current)
-            current = [line]
-        else:
-            current.append(line)
+                current = []
+            if not current:
+                level = line_level
+        current.append(line)
     if current:
         sections.append(current)
     return sections

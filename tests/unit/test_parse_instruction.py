@@ -374,8 +374,7 @@ def test_defaults_for_trends_language_and_sort(fake_model_factory: Any) -> None:
 def test_progress_messages_report_topic_and_count(fake_model_factory: Any) -> None:
     out = _run(fake_model_factory, "20件の動画を調べて")
     contents = [m.content for m in out["messages"]]
-    assert "[1/7] parse_instruction ... 開始" in contents
-    assert (
-        '[1/7] parse_instruction ... 完了（トピック: "LLM のトピック" / 件数: 20）'
-        in contents
-    )
+    assert contents == [
+        "[1/7] parse_instruction ... 開始",
+        '[1/7] parse_instruction ... 完了（トピック: "LLM のトピック" / 件数: 20）',
+    ]

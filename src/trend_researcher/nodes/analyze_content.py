@@ -113,5 +113,6 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
     analyses = asyncio.run(_analyze_all(candidates, contexts_by_id, provider))
 
     emitter.emit(5, NODE_ANALYZE_CONTENT, "完了", detail=f"{len(analyses)} 件を要約")
-    progress_messages.extend(emitter.get_messages())
+    # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
+    progress_messages = emitter.get_messages()
     return {"analyses": analyses, "messages": progress_messages}

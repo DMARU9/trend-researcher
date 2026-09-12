@@ -191,5 +191,6 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     )
 
     emitter.emit(1, NODE_PARSE_INSTRUCTION, "完了", detail=f'トピック: "{topic}" / 件数: {max_results}')
-    progress_messages.extend(emitter.get_messages())
+    # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
+    progress_messages = emitter.get_messages()
     return {"instruction": instruction, "messages": progress_messages}
