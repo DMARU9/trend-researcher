@@ -148,7 +148,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 - [X] T033 [US4] **変異探針 M1** を実施する。`src/trend_researcher/nodes/compile_report.py` の出典構築を `[]` に改変し、`uv run pytest -q` が落ちることを確認して復元する。落ちなければ T032 / T024 を強化する（data-model 1.6）
 - [X] T034 [US4] **変異探針 M2** を実施する。`src/trend_researcher/graph.py` の `_route_after_search` を常に `continue` に改変し、スイートが落ちることを確認して復元する。落ちなければ T016 を強化する（FR-015 / data-model 1.6）
 - [X] T035 [US4] **変異探針 M3** を実施する。`src/trend_researcher/progress.py` の `ProgressEmitter.TOTAL` を 8 に改変し、スイートが落ちることを確認して復元する。落ちなければ T015 を強化する（FR-015 / data-model 1.6）
-- [ ] T036 [US4] 縮退処理に対する追加の探針を実施する（quickstart 手順 5.3）。リトライループの打ち切り、`tools/transcript.py` の形式判定を `_parse_vtt` のみに、`nodes/compile_report.py` のキャッシュ書き込みの `try` 除去、`cache.read_json` の例外化、`providers/x.py` の重複除去（`seen` 判定）の除去。5 件すべてが検出されることを確認する（SC-004）
+- [X] T036 [US4] 縮退処理に対する追加の探針を実施する（quickstart 手順 5.3）。リトライループの打ち切り、`tools/transcript.py` の形式判定を `_parse_vtt` のみに、`nodes/compile_report.py` のキャッシュ書き込みの `try` 除去、`cache.read_json` の例外化、`providers/x.py` の重複除去（`seen` 判定）の除去。5 件すべてが検出されることを確認する（SC-004）
 - [ ] T037 [US4] 重複テストを統合し、旧ファイルを削除する。`tests/test_graph.py` の配線検証は `tests/integration/test_graph_wiring.py` へ、`tests/test_configuration.py` の設定検証は `tests/unit/test_configuration.py`（新規作成。旧ファイルの内容を吸収して強化）へ移したことを確認してから両ファイルを削除する。互換シムは残さない（FR-017 / 憲法 原則 VI / data-model 1.7）
 - [ ] T038 [US4] 無効テストの判定記録を実績で更新する。`specs/001-test-suite-hardening/data-model.md` 1.7 の `resolution` 列（`strengthened` / `merged` / `removed` / `kept_with_reason`）と `evidence` 列を、実際の処置と変異探針の結果で埋める（FR-016 / SC-006）
 - [ ] T039 [US4] テストの収集範囲と配置を監査する。`uv run pytest -q --collect-only` で件数を確認し、`tests/integration/cli_harness.py` が収集されていないこと、ルート直下にテストファイルが残っていないこと、`tests/unit/` と `tests/integration/` の 2 層に収まっていることを確認する（FR-016 / LAYOUT-001-1〜3 / LAYOUT-001-6 / LAYOUT-001-7）
@@ -689,3 +689,27 @@ T026 のファイルシステム境界テスト（data-model 1.3 の `cache_dir 
   - `test_every_node_reports_start_and_done`（7 ノードぶんの開始・完了。LAYOUT-006-4）
 - 対抗措置（data-model 1.7 / test-layout LAYOUT-006 の「`TOTAL` を変更するとテストが落ちる」）が**実測で成立**した。**T015 の追加強化は不要**。
 - 復元: `sha256sum` 一致（`58044c02480d7f7f7bc3159d1a8951088a905236d19a49c2c413e5e050f2a164`）→ 復元後フルスイート **539 passed** → `git status --short` 清浄。
+
+### T036: 縮退処理の変異探針 5 件の結果（2026-09-13 実測）
+
+quickstart 手順 5.3 の 5 件を **1 件ずつ**（改変 → フルスイート → 復元 → `sha256sum` 一致）実施した。**5 件すべて検出**（SC-004）。
+
+| 変異 | 対象ファイル | 検出テスト | 実測 |
+|------|--------------|------------|------|
+| リトライループの打ち切り（再試行を 1 回に） | `tools/x_search.py` | `test_search_tweets_exhausts_retries_and_raises_last_error` / `test_search_tweets_recovers_after_transient_failure` / `test_search_tweets_with_zero_retries_returns_empty` | **3 failed / 536 passed** |
+| 字幕の形式判定を `_parse_vtt` のみに | `tools/transcript.py` | `test_fetch_transcript_reads_json3_file` / `test_fetch_transcript_broken_json3_file_yields_empty_text` | **2 failed / 537 passed** |
+| キャッシュ書き込みの `try` を外す | `nodes/compile_report.py` | `test_cache_write_failure_is_reported_and_execution_continues` / `test_cache_write_failure_does_not_add_a_note` / `test_unwritable_cache_dir_is_recorded_and_the_run_succeeds`（E2E） | **3 failed / 536 passed** |
+| `read_json` の存在チェックを外す（例外化） | `cache.py` | `test_read_json_returns_none_when_file_is_missing` / `test_read_json_returns_none_when_directory_is_missing` | **2 failed / 537 passed** |
+| X の重複除去（`seen` 判定）を外す | `providers/x.py` | `test_x_provider_relevance_dedupe_keeps_first_occurrence` / `test_x_provider_relevance_truncates_after_dedupe` / `test_x_provider_likes_dedupes_pool_before_sorting` / `test_x_likes_sort_orders_candidates_descending_without_duplicates` / CLI 契約 3 件（`test_cli_001_03` / `test_cli_002_05` / `test_cli_002_05_002_03`） | **7 failed / 532 passed** |
+
+対象ファイルの変異前 sha256（復元後に一致を確認）:
+
+| ファイル | sha256 |
+|----------|--------|
+| `tools/x_search.py` | `59f7a4e2073770d04db35ac33d347f1875dbd67eda59b57cda4137384b2e6596` |
+| `tools/transcript.py` | `942fef782fecf6822dbf7bcad57ad18c2dd29099d0802152cd95eb87f0a4cfc0` |
+| `nodes/compile_report.py` | `de3eaca795c20c672e7a930430b812587ceba0fdc7725233a7a98a301d63b95b` |
+| `cache.py` | `73175d3fdc7f1b9f093cf2f39edc3c15893a5a9cc7932fc705f06ef3188c1a60` |
+| `providers/x.py` | `c02fbb1580bbe1abc779af9eb47b98f34600ab2d0d329b8e90968092f4724d34` |
+
+復元後のフルスイートは **539 passed**、`git status --short` は清浄。5 件とも「落ちなければ T0xx を強化する」の条件に該当しなかったため、**追加のテスト強化は不要**。重複除去の探針が CLI 契約（`test_cli_001_03_fewer_results_exit_zero`）まで落ちたのは、候補の重複が候補数 → 終了コード判定に波及するため。
