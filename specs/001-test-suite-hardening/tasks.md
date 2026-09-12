@@ -166,7 +166,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 - [X] T042 [P] `uv run ruff check .` を実行する。本機能で変更・新規作成したファイル（`tests/` 全体、`pyproject.toml`、`src/trend_researcher/__main__.py`）が違反 0 件であり、リポジトリ全体の違反件数がベースライン（40 件）から増えていないことを確認する（憲法 品質ゲート）
 - [X] T043 [P] `uv run mypy src` を実行する。`__main__.py` が違反 0 件であり、全体の件数がベースライン（37 件 / 12 ファイル）から増えていないことを確認する（憲法 品質ゲート）
 - [X] T044 `README.md` を契約に合わせて更新する。終了コード（0 / 1 / 2）、出力チャネルの分離（stdout = レポートのみ / stderr = 進捗・ログ・エラー）、`--output` の書き込み失敗時の挙動を `contracts/cli-contract.md` と一致させる（憲法 原則 V）
-- [ ] T045 憲法 `TODO(BASELINE-BURNDOWN)` の追跡タスクを起票する。ベースライン（`ruff` 40 件 / `mypy` 37 件）と、`UP037` の自動修正が import 追加とセットで必要な点（`nodes/analyze_content.py` / `nodes/compile_report.py`）を記載する。本機能の完了条件には含めない（research.md R-8）
+- [X] T045 憲法 `TODO(BASELINE-BURNDOWN)` の追跡タスクを起票する。ベースライン（`ruff` 40 件 / `mypy` 37 件）と、`UP037` の自動修正が import 追加とセットで必要な点（`nodes/analyze_content.py` / `nodes/compile_report.py`）を記載する。本機能の完了条件には含めない（research.md R-8）
 - [ ] T046 `quickstart.md` の受け入れ判定を全手順実施する。とくに（1）`uv run pytest -q` が全件 pass かつ **60 秒以内**（FR-020 / SC-001）、（2）`unshare -rn uv run pytest -q` が全件 pass（FR-001 / LAYOUT-003-1 / CLI-006-1〜3。CLI-006-3 は実測どおり `uv run pytest -q` が空の `OPENAI_API_KEY` で起動できることも確認する）、（3）単独実行・全体実行・順序変更で同一結果（FR-021 / SC-005）、（4）実行後に `git status --short` が清浄（テストが実リポジトリを汚さない）、（5）テスト件数が**純増**であり追加分を CLI 契約・失敗経路・LLM 解釈分岐の領域別に説明できる（SC-005）、（6）`git diff` で既存テストの期待値を実装の挙動へ書き換えていないこと（`tests/` の差分が「無効テストの強化・統合」と「新規テスト」に限られること。FR-022）
 
 **Checkpoint**: すべての品質ゲートと受け入れ判定が green
@@ -835,3 +835,15 @@ quickstart 手順 5.3 の 5 件を **1 件ずつ**（改変 → フルスイー�
 | `"x"`（`--platform` 省略） | `2` | `usage: ...` |
 
 `--output` の書き込み失敗契約（`[エラー] … 書き出せませんでした:` ＋ `Traceback` 不在）は `tests/integration/test_cli_contract.py` が層 B で固定している（同ファイルの該当テストが両方を assert）。
+
+### T045: ベースライン解消の追跡 Issue（2026-09-13）
+
+憲法の Follow-up `TODO(BASELINE-BURNDOWN)` に対する追跡 Issue を起票した（`github-issue` スキルの「タスク」フォーマット）。
+
+- **#47**: `[タスク] 憲法 TODO(BASELINE-BURNDOWN) の追跡（ruff/mypy の既存違反を解消）`
+- 記載内容: ベースライン（採択時 2026-09-12 = テスト 61 passed / `ruff` 40 / `mypy` 37）と現在値（535 passed / `ruff` 32 / `mypy` 34）の対比、ルール別・ファイル別の内訳、`UP037` の自動修正が import 追加とセットで必要な理由（実行時に型を参照する経路がある場合は `ruff check --fix` だけでは `NameError` を作り込む）と 4 段階の進め方、完了条件（`ruff` / `mypy` 0 件 + カバレッジ 90% 維持 + README 更新）
+- 本機能の完了条件には含めない（research.md R-8）
+
+**起票時の注意（スキルの検証で判明）**: `github-issue` スキルのバリデータは本文中の英大文字 `TODO` をプレースホルダー残存として**エラー**にするため、本文では憲法のマーカーを `BASELINE-BURNDOWN` として参照し、`grep -n "BASELINE-BURNDOWN" .specify/memory/constitution.md` で辿れるようにした（タイトルにはマーカーをそのまま残した）。検証は 0 エラー 1 警告（タイトル 56/60 文字の長さ警告のみ）。
+
+**憲法は変更していない**: 憲法の Governance は改正を `/speckit.constitution` 経由（Sync Impact Report + バージョン更新）に限定しているため、Follow-up への Issue 番号の追記も本機能では行わない。追跡は #47 が担う。
