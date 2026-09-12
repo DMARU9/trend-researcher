@@ -1,31 +1,38 @@
 <!--
 Sync Impact Report
 ==================
-Version change: 1.0.0 → 1.1.0
-Rationale: MINOR（原則の追加）。リファクタリング時の後方互換性の扱いを原則 VI として
-  明文化した。既存原則の削除・再定義は行っていない。
+Version change: 1.1.0 → 1.2.0
+Rationale: MINOR（品質ゲートの実質的な拡張）。移行措置を終了し、ゲートの適用範囲を
+  「変更したファイル」から「リポジトリ全体」へ広げた。Core Principles の削除・再定義は
+  行っていない（I〜VI は変更なし）。
 
-Modified principles:
-  - VI. リファクタリングは後方互換を要求しない（新規追加）
-  - I〜V は変更なし（V との境界を原則 VI で明示）
-
-Added sections: なし（Core Principles に原則 VI を追加）
-Removed sections: なし
+Modified principles: なし（Core Principles は変更なし）
+Changed sections:
+  - 「開発ワークフローと品質ゲート」: 「既存違反のベースライン（移行措置）」節を削除し、
+    「リポジトリ全体の green（移行措置の終了）」節に置き換え。`ruff check .` / `mypy src` は
+    0 件を維持する MUST、抑制（`# noqa`・設定での除外）を根拠なく追加しない MUST NOT を明記
+  - DoD から「（移行期間中は変更ファイル分の green）」の暫定記述を削除
+Removed sections: なし（「既存違反のベースライン（移行措置）」は小節単位で終了）
 
 Templates requiring updates:
-  ✅ .specify/templates/plan-template.md（Constitution Check にゲート VI を追加）
-  ✅ .specify/templates/tasks-template.md（リファクタリングタスクの互換シム禁止を追記）
-  ✅ .github/agents/speckit.tasks.agent.md（変更不要。憲法を参照する汎用記述のため）
-  ✅ README.md（変更不要。判断基準は憲法側に集約するため）
+  ✅ .specify/templates/（変更不要。品質ゲートは plan の Constitution Check 経由で参照）
+  ✅ .github/copilot-instructions.md（変更不要。憲法を参照するのみ）
+  ✅ README.md（「テスト・Lint・型チェック（品質ゲート）」を 0 件維持へ更新）
+  ✅ specs/001-test-suite-hardening/（変更不要。burndown を本機能の完了条件外とし、
+    追跡タスク #47 へ分離した計画時の判断は履歴として維持する）
 
 History:
   - v1.0.0（2026-09-12）: 初期テンプレートから初版採択。原則 I〜V、技術制約と品質基準、
     開発ワークフローと品質ゲート、Governance を具体化。
+  - v1.1.0（2026-09-12）: 原則 VI（リファクタリングは後方互換を要求しない）を追加。
+  - v1.2.0（2026-09-13）: 移行措置を終了。`ruff` / `mypy` の既存違反を全件解消し、
+    ゲートをリポジトリ全体へ拡張（追跡タスク #47 の完了を受けた改正）。
 
-Follow-up TODOs:
-  - TODO(BASELINE-BURNDOWN): 採択時点の実測値（2026-09-12）= テスト 61 passed /
-    ruff 40 errors / mypy 37 errors。リポジトリ全体を green にする追跡タスクを
-    `/speckit.tasks` で起票する（移行措置は「開発ワークフローと品質ゲート」節）。
+Follow-up TODOs: なし
+  - 解消済み（2026-09-13）: BASELINE-BURNDOWN。採択時の実測値はテスト 61 passed /
+    ruff 40 errors / mypy 37 errors だった。テスト 547 passed（行カバレッジ 90% 以上）/
+    ruff 0 errors / mypy 0 errors まで解消し、抑制（`# noqa`・`pyproject.toml` の除外）を
+    使わずに 0 を達成した。
 -->
 
 # Trend Researcher Constitution
@@ -201,17 +208,18 @@ stdout / stderr / 終了コードはテストで固定できる契約である�
 2. `uv run ruff check .`
 3. `uv run mypy src`
 
-**既存違反のベースライン（移行措置）**: 本憲法の採択時点で、リポジトリ全体の `ruff` /
-`mypy` には既存違反が残っている。移行期間中は次の規則で扱う MUST。
+**リポジトリ全体の green（移行措置の終了・2026-09-13）**: 採択時に残っていた既存違反
+（`ruff` 40 件 / `mypy` 37 件）は全件解消済みであり、移行措置は終了した。以後は次に従う MUST。
 
-- 新規ファイルおよび変更したファイルはゲートを green にして提出する MUST
-  （boy-scout ルール）。
-- ベースラインの違反件数を増やしてはならない（MUST NOT）。増加は新規違反として扱う。
-- リポジトリ全体を green にする作業は追跡タスクとして起票し、解消する MUST。
+- リポジトリ全体でゲートを green に保つ MUST（`uv run ruff check .` / `uv run mypy src` は
+  0 件）。特定ファイルだけを対象にした運用は認めない。
+- 違反を減らすための抑制（`# noqa`、`pyproject.toml` の除外設定・ルール無効化）は、
+  根本的な修正が不可能である根拠を示せる場合に限り許容する MUST（YAGNI と同様、
+  先回りで追加してはならない MUST NOT）。
 - `pytest` は既存を含めて常に全件 green を維持する MUST（テストには移行措置を適用しない）。
 
 **完了の定義（DoD）**: 実装コード、対応するテスト、影響する README / spec / tasks の
-更新、上記 3 ゲートの結果（移行期間中は変更ファイル分の green）が揃って完了とする。
+更新、上記 3 ゲートの結果（すべて green）が揃って完了とする。
 手動スモーク（README の実 API 実行例）は確認として推奨するが、完了条件ではない。
 
 **レビュー観点**: (a) 出力契約（stdout / stderr / 終了コード）の維持、(b) 外部 I/O が
@@ -234,4 +242,4 @@ stdout / stderr / 終了コードはテストで固定できる契約である�
   固定するテストを残す MUST。
 - 実行時の開発ガイダンスは `README.md` と `.github/copilot-instructions.md` を参照する。
 
-**Version**: 1.1.0 | **Ratified**: 2026-09-12 | **Last Amended**: 2026-09-12
+**Version**: 1.2.0 | **Ratified**: 2026-09-12 | **Last Amended**: 2026-09-13
