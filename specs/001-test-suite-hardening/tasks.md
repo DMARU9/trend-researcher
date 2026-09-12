@@ -165,7 +165,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 - [X] T041 `uv run pytest -q` を実行し、対象範囲の**合計**行カバレッジが 90% 以上であることを確認する。未達の場合は `contracts/coverage-policy.md` COV-004 の未実行行表に沿って該当ストーリーのテストを追加・強化する（個別モジュールの下限は要求しない。FR-019 / SC-002）
 - [X] T042 [P] `uv run ruff check .` を実行する。本機能で変更・新規作成したファイル（`tests/` 全体、`pyproject.toml`、`src/trend_researcher/__main__.py`）が違反 0 件であり、リポジトリ全体の違反件数がベースライン（40 件）から増えていないことを確認する（憲法 品質ゲート）
 - [X] T043 [P] `uv run mypy src` を実行する。`__main__.py` が違反 0 件であり、全体の件数がベースライン（37 件 / 12 ファイル）から増えていないことを確認する（憲法 品質ゲート）
-- [ ] T044 `README.md` を契約に合わせて更新する。終了コード（0 / 1 / 2）、出力チャネルの分離（stdout = レポートのみ / stderr = 進捗・ログ・エラー）、`--output` の書き込み失敗時の挙動を `contracts/cli-contract.md` と一致させる（憲法 原則 V）
+- [X] T044 `README.md` を契約に合わせて更新する。終了コード（0 / 1 / 2）、出力チャネルの分離（stdout = レポートのみ / stderr = 進捗・ログ・エラー）、`--output` の書き込み失敗時の挙動を `contracts/cli-contract.md` と一致させる（憲法 原則 V）
 - [ ] T045 憲法 `TODO(BASELINE-BURNDOWN)` の追跡タスクを起票する。ベースライン（`ruff` 40 件 / `mypy` 37 件）と、`UP037` の自動修正が import 追加とセットで必要な点（`nodes/analyze_content.py` / `nodes/compile_report.py`）を記載する。本機能の完了条件には含めない（research.md R-8）
 - [ ] T046 `quickstart.md` の受け入れ判定を全手順実施する。とくに（1）`uv run pytest -q` が全件 pass かつ **60 秒以内**（FR-020 / SC-001）、（2）`unshare -rn uv run pytest -q` が全件 pass（FR-001 / LAYOUT-003-1 / CLI-006-1〜3。CLI-006-3 は実測どおり `uv run pytest -q` が空の `OPENAI_API_KEY` で起動できることも確認する）、（3）単独実行・全体実行・順序変更で同一結果（FR-021 / SC-005）、（4）実行後に `git status --short` が清浄（テストが実リポジトリを汚さない）、（5）テスト件数が**純増**であり追加分を CLI 契約・失敗経路・LLM 解釈分岐の領域別に説明できる（SC-005）、（6）`git diff` で既存テストの期待値を実装の挙動へ書き換えていないこと（`tests/` の差分が「無効テストの強化・統合」と「新規テスト」に限られること。FR-022）
 
@@ -806,3 +806,32 @@ quickstart 手順 5.3 の 5 件を **1 件ずつ**（改変 → フルスイー�
 **同条件での比較（`--no-site-packages` + 専用キャッシュ + ベースライン worktree）**: 22 件 / 6 ファイル（`analyze_content.py` 8 / `compile_report.py` 7 / `providers/base.py` 3 / `tools/parse.py` 2 / `tools/transcript.py` 1 / `providers/x.py` 1）→ **20 件 / 5 ファイル**（`tools/parse.py` の 2 件は T030 の `extract_json_block` 修正で解消）。どのファイルも件数は増えていない。
 
 **注意（計測の落とし穴）**: mypy の件数は site-packages（インストール済み依存の型情報）を見るかどうかで変わる（同一ツリーで 34 件 ↔ 20 件）。増減の判定は**同一条件どうし**で行う必要がある。また `--config-file` を変えた測定は `.mypy_cache` を共有すると前回のパスを再掲するため、条件を変えるときは `--cache-dir` を分けるか `rm -rf .mypy_cache` する。
+
+### T044: README の契約整合（2026-09-13 実測）
+
+`contracts/cli-contract.md` と突き合わせて `README.md` を更新した（契約の「変更手順」3 番）。
+
+| 更新箇所 | 内容 |
+|----------|------|
+| 終了コード | 3 値の**条件**を追加（0: 生成 / 0 件 / 件数不足 / 書き出し成功 / `--help`、1: 例外 / 時間上限 / レポート未生成 / 書き込み失敗、2: 指示の省略・空・空白のみ / `--platform` の省略・未知の値 / 未知の `--format`・`--sort` / `--since` 形式 / `--max-results` 非整数）。「3 値以外を返さない」も明記 |
+| 出力チャネル | stdout = レポートのみ（`--output` 時は 0 バイト）、stderr = 進捗・ログ・警告・エラー。メッセージ接頭辞 `[エラー]` / `[警告]` / `[情報]` / `[完了]`。実行例（`--output` 成功／失敗）を追加 |
+| `--output` の書き込み失敗 | `[エラー] レポートを <PATH> に書き出せませんでした: <理由>` を stderr に出して終了コード 1、**Traceback は出さない**。親ディレクトリ欠落・書込不可・ディレクトリ指定の 3 経路 |
+| オプション表 | `--platform` の既定値を `x` と誤記していたのを**必須**に修正（契約 CLI-001-12 / CLI-005 と矛盾していた）。`INSTRUCTION` に「空文字・空白のみ不可（終了コード 2）」を追記 |
+| 列挙値 | 大文字小文字を区別し、正規化しないことを追記（`--platform X` / `--format JSON` / `--sort Relevance` は引数エラー） |
+| 品質ゲート | `uv run pytest -q` が合計カバレッジ 90% 未満で非ゼロ終了することを追記。`ruff` 40 / `mypy` 37（2026-09-12 時点）の既存違反は「新規に増やさない」が条件である旨を追記 |
+
+**README の記載の実測裏付け（層 A、ネットワーク不要）**:
+
+| 入力 | 実測終了コード | stderr 先頭 |
+|------|---------------|-------------|
+| `--help` | `0` | （なし） |
+| `"" --platform x` | `2` | `[エラー] 指示を指定してください。` |
+| `"   " --platform youtube` | `2` | `[エラー] 指示を指定してください。` |
+| `"x" --platform X` | `2` | `usage: ...` |
+| `"x" --format JSON` | `2` | `usage: ...` |
+| `"x" --sort Relevance` | `2` | `usage: ...` |
+| `"x" --since 2024/01/01` | `2` | `usage: ...` |
+| `"x" --max-results abc` | `2` | `usage: ...` |
+| `"x"`（`--platform` 省略） | `2` | `usage: ...` |
+
+`--output` の書き込み失敗契約（`[エラー] … 書き出せませんでした:` ＋ `Traceback` 不在）は `tests/integration/test_cli_contract.py` が層 B で固定している（同ファイルの該当テストが両方を assert）。

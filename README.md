@@ -21,10 +21,17 @@ uv sync --extra dev
 変更を提出する前に、次の 3 つがすべて通ることを確認します（`.specify/memory/constitution.md`）。
 
 ```bash
-uv run pytest -q      # テスト（ネットワーク・認証情報不要で完走する）
+uv run pytest -q      # テスト（ネットワーク・認証情報不要で完走する）＋行カバレッジ計測
 uv run ruff check .   # Lint
 uv run mypy src       # 型チェック
 ```
+
+`uv run pytest -q` は同時に行カバレッジを計測し、対象範囲の**合計が 90% を下回ると非ゼロ終了**します
+（`pyproject.toml` の `[tool.coverage.report] fail_under = 90`）。未実行行は
+`--cov-report=term-missing` で表示されるため、そのまま追記できます。
+
+`ruff` と `mypy` には変更前から存在する違反（`ruff` 40 件 / `mypy` 37 件、2026-09-12 時点）があり、
+**新規に増やさないこと**が提出条件です。既存分の解消は別タスクで扱います。
 
 テストには実 API（OpenAI / X / YouTube）を使いません。外部呼び出しは `tools/` と
 `providers/` の境界でモックします。実 API での確認は下記の手動スモークとして行い、
@@ -143,8 +150,8 @@ uv run python -m trend_researcher \
 
 | オプション | 既定値 | 説明 |
 |-----------|--------|------|
-| `INSTRUCTION`（位置引数） | 必須 | 自然言語のリサーチ指示 |
-| `--platform {x,youtube}` | `x` | 対象プラットフォーム |
+| `INSTRUCTION`（位置引数） | 必須 | 自然言語のリサーチ指示（空文字・空白のみは不可 → 終了コード 2） |
+| `--platform {x,youtube}` | 必須 | 対象プラットフォーム（省略すると終了コード 2） |
 | `--format {markdown,json}` | `markdown` | 最終レポートの出力形式 |
 | `--max-results N` | `5` | 解析対象の件数 |
 | `--lang CODE` | `ja` | 字幕取得の優先言語（YouTube 用） |
@@ -154,18 +161,40 @@ uv run python -m trend_researcher \
 | `--trends` | なし | トレンドワード探索モード（X 用・予約） |
 | `--cache-dir PATH` | `cache/` | 中間成果物の永続化先 |
 
+列挙値（`--platform` / `--format` / `--sort`）は**大文字小文字を区別**します。
+`--platform X`、`--format JSON`、`--sort Relevance` はいずれも未知の値として引数エラー（終了コード 2）になります。
+
 ### 出力チャネル
 
-- **stdout**: 最終レポートのみ（Markdown または JSON）
-- **stderr**: 進捗・ログ・エラー（FR-013）
+- **stdout**: 最終レポート（Markdown または JSON）**のみ**。進捗行もエラーメッセージも出しません。
+  `--output` を指定したときは**レポートを stdout に出さない**（0 バイト）
+- **stderr**: 進捗（`[n/7] <node> ... 開始` / `完了`）・ログ・警告・エラー。
+  メッセージは `[エラー]` / `[警告]` / `[情報]` / `[完了]` の接頭辞で始まります
+
+```bash
+# 例: レポートをファイルに出す（stdout には何も出さず、完了メッセージは stderr に出る）
+uv run python -m trend_researcher "Claude Code の使い方" --platform x --output out.md
+# stderr: [完了] レポートを out.md に書き出しました。
+
+# 例: 書き込み先の親ディレクトリが存在しない（--output の書き込み失敗）
+uv run python -m trend_researcher "Claude Code の使い方" --platform x --output /tmp/no_such_dir/out.md
+# stderr: [エラー] レポートを /tmp/no_such_dir/out.md に書き出せませんでした: <理由>
+# 終了コード: 1（Traceback は出しません）
+```
+
+`--output` の書き込み失敗は、親ディレクトリの欠落・書込不可・ディレクトリの指定のいずれでも
+`[エラー] レポートを <PATH> に書き出せませんでした: <理由>` を stderr に出して終了コード 1 になります。
 
 ### 終了コード
 
-| コード | 意味 |
-|--------|------|
-| 0 | 成功 |
-| 1 | 実行時エラー |
-| 2 | 引数エラー |
+| コード | 意味 | 条件の例 |
+|--------|------|----------|
+| `0` | 成功 | レポートの生成 / 検索結果が 0 件 / 要求件数より取得件数が少ない / `--output` への書き出し成功 / `--help` |
+| `1` | 実行時エラー | 実行中の例外 / 時間上限 / レポート未生成 / `--output` の書き込み失敗 |
+| `2` | 引数エラー | 指示の省略・空文字・空白のみ / `--platform` の省略または未知の値 / 未知の `--format`・`--sort` / `--since` が `YYYY-MM-DD` 以外 / `--max-results` が整数以外 |
+
+この 3 値以外を返しません（`0` = 成功、`1` = 実行時エラー、`2` = 引数エラー）。
+契約の全条件は `specs/001-test-suite-hardening/contracts/cli-contract.md` を参照してください。
 
 ## アーキテクチャ
 
