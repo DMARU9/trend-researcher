@@ -39,7 +39,8 @@ def _clean_query(query: str) -> str:
 def plan_search(state: AgentState, config: RunnableConfig) -> dict:
     """指示から検索クエリを生成する（X: 複数 / YouTube: 単一）。"""
     configurable = Configuration.from_runnable_config(config)
-    platform = state.get("platform") or configurable.platform
+    # platform: ユーザー入力（state）> Configuration。以降 instruction.platform で上書きするため str として扱う
+    platform: str = state.get("platform") or configurable.platform
     provider = get_provider(platform)
     emitter = make_emitter()
     emitter.emit(2, NODE_PLAN_SEARCH, "開始", detail="LLM が検索クエリを生成中")

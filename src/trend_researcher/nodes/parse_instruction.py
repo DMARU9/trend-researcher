@@ -131,8 +131,8 @@ def _extract_count_from_text(text: str) -> int | None:
 def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     """自然言語指示からトピック・件数・投稿日下限を抽出する。"""
     configurable = Configuration.from_runnable_config(config)
-    # platform: ユーザー入力（state）> Configuration
-    platform = state.get("platform") or configurable.platform
+    # platform: ユーザー入力（state）> Configuration。以降 provider.name で上書きするため str として扱う
+    platform: str = state.get("platform") or configurable.platform
     provider = get_provider(platform)
     emitter = make_emitter()
     emitter.emit(1, NODE_PARSE_INSTRUCTION, "開始")
@@ -140,7 +140,10 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
 
     # instruction_raw: ユーザーの最新メッセージから抽出
     messages = state.get("messages", [])
-    raw = messages[-1].content if messages else ""
+    content = messages[-1].content if messages else ""
+    # `content` は本文ブロックのリストにもなりうる（LangChain の標準形式）。
+    # 以降は文字列前提の解析（正規表現・`ResearchInstruction.raw_text`）なので文字列化する。
+    raw = content if isinstance(content, str) else str(content)
     model = build_model("research")
     prompt = provider.parse_instruction_prompt.format(instruction=raw)
     result = model.invoke(prompt)

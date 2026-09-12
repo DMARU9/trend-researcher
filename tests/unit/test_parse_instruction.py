@@ -380,6 +380,27 @@ def test_defaults_for_trends_language_and_sort(fake_model_factory: Any) -> None:
     assert instruction.raw_text == "機械学習の動画を調べて"
 
 
+def test_list_content_is_stringified(fake_model_factory: Any) -> None:
+    """`messages[-1].content` が本文ブロックのリストでも文字列化して扱う。
+
+    LangChain のメッセージ `content` はテキスト以外に本文ブロックのリストを取りうる
+    （マルチモーダル形式）。本ノードは以降を正規表現と `ResearchInstruction.raw_text: str`
+    で扱うため、`str` 以外は文字列化する。文字列化を外すと `re.search` が `TypeError`
+    で落ちる。件数抽出が文字列化後のテキストに効いていることも併せて固定する。
+    """
+    node_state: dict[str, Any] = {
+        "messages": [HumanMessage(content=[{"type": "text", "text": "20件の動画を調べて"}])],
+        "platform": "x",
+    }
+    with fake_model_factory.install({"parse_instruction": LLM_PLAIN}):
+        out = parse_instruction(node_state, _config())
+
+    raw_text = out["instruction"].raw_text
+    assert isinstance(raw_text, str)
+    assert "20件の動画を調べて" in raw_text
+    assert out["instruction"].max_results == 20
+
+
 # --- 進捗メッセージ -----------------------------------------------------------
 
 
