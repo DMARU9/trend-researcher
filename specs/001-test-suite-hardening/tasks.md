@@ -43,10 +43,10 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 
 **Purpose**: テスト基盤の初期化と依存の追加。既存テストは変更しない。
 
-- [ ] T001 `pyproject.toml` の `[project.optional-dependencies].dev` に `pytest-cov>=5.0.0` を追加し、`[tool.pytest.ini_options].testpaths = ["tests"]` を設定して `uv sync --extra dev` を実行する（COV-001-4 / LAYOUT-001-7）
-- [ ] T002 [P] `tests/conftest.py` を新規作成する（共有フィクスチャの置き場所。docstring と import のみ。憲法 原則 I の配置規約 / LAYOUT-001-5）
-- [ ] T003 [P] `tests/integration/conftest.py` を新規作成する（層固有フィクスチャの置き場所。憲法 原則 I の配置規約 / LAYOUT-001-5）
-- [ ] T004 変更前のベースラインを記録する（`uv run pytest -q` が 61 passed、`uv run pytest -q --cov=trend_researcher --cov-report=term-missing` の合計が **82%（1,206 文 / 未実行 214）**、`uv run pytest -q --collect-only | grep -c "::"` が 61 件。`research.md` R-2 / R-4 と `contracts/coverage-policy.md` COV-003 の値に一致することを確認し、`## Implementation Notes` に記録する）
+- [X] T001 `pyproject.toml` の `[project.optional-dependencies].dev` に `pytest-cov>=5.0.0` を追加し、`[tool.pytest.ini_options].testpaths = ["tests"]` を設定して `uv sync --extra dev` を実行する（COV-001-4 / LAYOUT-001-7）
+- [X] T002 [P] `tests/conftest.py` を新規作成する（共有フィクスチャの置き場所。docstring と import のみ。憲法 原則 I の配置規約 / LAYOUT-001-5）
+- [X] T003 [P] `tests/integration/conftest.py` を新規作成する（層固有フィクスチャの置き場所。憲法 原則 I の配置規約 / LAYOUT-001-5）
+- [X] T004 変更前のベースラインを記録する（`uv run pytest -q` が 61 passed、`uv run pytest -q --cov=trend_researcher --cov-report=term-missing` の合計が **82%（1,206 文 / 未実行 214）**、`uv run pytest -q --collect-only | grep -c "::"` が 61 件。`research.md` R-2 / R-4 と `contracts/coverage-policy.md` COV-003 の値に一致することを確認し、`## Implementation Notes` に記録する）
 
 **Checkpoint**: テスト基盤が用意され、ベースラインが再現する
 
@@ -58,9 +58,9 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 
 **⚠️ CRITICAL**: 境界モックと非決定性の固定が不十分なままテストを書くと、憲法 原則 II（オフライン）と FR-021（決定性）に違反するテストが量産される。必ず先に完了させる。
 
-- [ ] T005 `tests/conftest.py` に境界モックフィクスチャ 5 種（`fake_x_search` / `fake_x_threads` / `fake_yt_search` / `fake_yt_transcript` / `fake_model_factory`）を実装する。差し替え対象は `tools/` / `providers/` の境界に限定し、`nodes/` の内部関数は差し替えない（data-model 1.2 / LAYOUT-003-3）。`fake_model_factory` はノード単位で応答を指定できる形にし、プロンプト本文の部分一致によるディスパッチを実装しない（R-7 / LAYOUT-004-4）
-- [ ] T006 `tests/conftest.py` に非決定性固定フィクスチャ 3 種（`frozen_now` / `no_retry_sleep` / `tmp_cache_dir`）を実装する。`frozen_now` は `MagicMock(wraps=datetime)` で `now` のみ固定し `fromisoformat` は実物へ委譲する。`no_retry_sleep` は `trend_researcher.tools.x_search.asyncio.sleep` をスパイし、観測した待機値を断言できるようにする。`tmp_cache_dir` は実リポジトリの `cache/` を汚さない（data-model 1.2 / FR-010 / LAYOUT-003-4 / LAYOUT-004-1）
-- [ ] T007 `tests/unit/test_fixtures.py` を新規作成し、T005・T006 の各フィクスチャが**実際に境界を差し替えている**ことを検証する（例: `fake_x_search` 適用中に本物の境界を呼ぶと失敗すること、`no_retry_sleep` 適用中に実時間が消費されないこと）。静かに無効化されたフィクスチャは憲法 原則 I の「収集されない fixture」と同じ欠陥クラスである（FR-016 の「無効なテストの排除」/ LAYOUT-005-3）
+- [X] T005 `tests/conftest.py` に境界モックフィクスチャ 5 種（`fake_x_search` / `fake_x_threads` / `fake_yt_search` / `fake_yt_transcript` / `fake_model_factory`）を実装する。差し替え対象は `tools/` / `providers/` の境界に限定し、`nodes/` の内部関数は差し替えない（data-model 1.2 / LAYOUT-003-3）。`fake_model_factory` はノード単位で応答を指定できる形にし、プロンプト本文の部分一致によるディスパッチを実装しない（R-7 / LAYOUT-004-4）
+- [X] T006 `tests/conftest.py` に非決定性固定フィクスチャ 3 種（`frozen_now` / `no_retry_sleep` / `tmp_cache_dir`）を実装する。`frozen_now` は `MagicMock(wraps=datetime)` で `now` のみ固定し `fromisoformat` は実物へ委譲する。`no_retry_sleep` は `trend_researcher.tools.x_search.asyncio.sleep` をスパイし、観測した待機値を断言できるようにする。`tmp_cache_dir` は実リポジトリの `cache/` を汚さない（data-model 1.2 / FR-010 / LAYOUT-003-4 / LAYOUT-004-1）
+- [X] T007 `tests/unit/test_fixtures.py` を新規作成し、T005・T006 の各フィクスチャが**実際に境界を差し替えている**ことを検証する（例: `fake_x_search` 適用中に本物の境界を呼ぶと失敗すること、`no_retry_sleep` 適用中に実時間が消費されないこと）。静かに無効化されたフィクスチャは憲法 原則 I の「収集されない fixture」と同じ欠陥クラスである（FR-016 の「無効なテストの排除」/ LAYOUT-005-3）
 
 **Checkpoint**: 共有フィクスチャが動作し、実効性がテストで担保された
 
