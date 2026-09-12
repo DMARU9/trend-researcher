@@ -25,11 +25,56 @@ _RELATIVE_PERIOD_DAYS = {
     "最近": 92,
 }
 
+#: 漢数字の位取り（一〜九）。`十` は `_to_number` で位取りとして扱う。
+_KANJI_DIGITS = {
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+
+#: 件数抽出の前に取り除く年号・期間表現（件数ではない。FR-011）。
+_PERIOD_EXPRESSION_RE = re.compile(
+    r"(?:半年"
+    r"|[0-9０-９一二三四五六七八九十]+[ヶカ]?月"
+    r"|[0-9０-９一二三四五六七八九十]+年"
+    r"|本年|今年"
+    r"|最近\s*[0-9０-９]+日)"
+    r"(?:\s*以内)?"
+)
+
+#: 件数の単位（「5件」「五本」の「件」「本」）。
+_COUNT_UNITS = "個|件|本|つ|カ国|か国|社|人"
+
+
+def _to_number(text: str) -> int | None:
+    """算用数字または漢数字（一〜九・十・十一〜九十九）を整数へ変換する。"""
+    if text.isdigit():
+        return int(text)
+    if text == "十":
+        return 10
+    tens_text, sep, ones_text = text.partition("十")
+    if sep:
+        if len(tens_text) > 1 or len(ones_text) > 1:
+            return None
+        tens = _KANJI_DIGITS.get(tens_text, 1) if tens_text else 1
+        ones = _KANJI_DIGITS.get(ones_text, 0) if ones_text else 0
+        return tens * 10 + ones
+    return _KANJI_DIGITS.get(text)
+
 
 def _extract_published_after_from_text(text: str) -> datetime | None:
     """自然言語から投稿日下限（published_after）を抽出。"""
     now = datetime.now(UTC)
-    m = re.search(r"(半年|三ヶ月|3ヶ月|三カ月|3カ月|[0-9０-９]+[ヶカ]?月|1年|年|本年|今年|最近)\s*以内", text)
+    m = re.search(
+        r"(半年|[0-9０-９一二三四五六七八九十]+[ヶカ]?月|1年|年|本年|今年|最近)\s*以内",
+        text,
+    )
     if m:
         return _period_to_date(m.group(1), now)
     if re.search(r"(今年|本年)", text):
@@ -41,9 +86,11 @@ def _extract_published_after_from_text(text: str) -> datetime | None:
 
 
 def _period_to_date(label: str, now: datetime) -> datetime | None:
-    num_m = re.search(r"([0-9０-９]+)\s*[ヶカ]?\s*月", label)
+    num_m = re.search(r"([0-9０-９一二三四五六七八九十]+)\s*[ヶカ]?\s*月", label)
     if num_m:
-        months = int(num_m.group(1))
+        months = _to_number(num_m.group(1))
+        if months is None:
+            return None
         total_months = now.year * 12 + (now.month - 1) - months
         y = total_months // 12
         mo = total_months % 12 + 1
@@ -66,13 +113,18 @@ def _parse_date_from_text(text: str) -> datetime | None:
 
 
 def _extract_count_from_text(text: str) -> int | None:
-    kanji = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
-    m = re.search(r"(\d+)\s*(?:個|件|本|つ|カ国|か国|社|人)?", text)
+    """指示本文から件数を取り出す（算用数字 → 漢数字）。
+
+    年号・期間表現（「2025年」「半年以内」）は件数ではないため先に取り除く。
+    取り除かないと「2025年の動画を10件」が 2025 件と解釈される（FR-011）。
+    """
+    text = _PERIOD_EXPRESSION_RE.sub("", text)
+    m = re.search(rf"([0-9０-９]+)\s*(?:{_COUNT_UNITS})?", text)
     if m:
         return int(m.group(1))
-    for k, v in kanji.items():
-        if re.search(rf"{k}\s*(?:個|件|本|つ|カ国|か国|社|人)", text):
-            return v
+    m = re.search(rf"([一二三四五六七八九十]+)\s*(?:{_COUNT_UNITS})", text)
+    if m:
+        return _to_number(m.group(1))
     return None
 
 
@@ -98,7 +150,7 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     topic = str(parsed.get("topic", "")).strip() or raw
     # 件数: ユーザー入力（state）> Configuration > 自然言語 > LLM
     input_max = state.get("max_results")
-    if input_max is not None and input_max != 5:  # ユーザー入力がある場合
+    if input_max is not None:  # ユーザー入力がある場合（未指定はキー不在。FR-011）
         max_results = int(input_max)
     elif configurable.max_results != 5:  # Configuration設定がある場合
         max_results = configurable.max_results

@@ -126,7 +126,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 
 **契約**: `contracts/test-layout.md`（LAYOUT-004-4）、`contracts/coverage-policy.md` COV-004 の未実行行表
 
-- [ ] T027 [P] [US3] `tests/unit/test_parse_instruction.py` を強化する。優先順位の 3 分岐（明示設定 > 本文の自然言語 > LLM の解釈）、漢数字と期間表現（「5件」「半年以内」）、明示的な日付（「2025-01-01 以降」）、解釈できない日付文字列（例外にしない）、構造化ブロックを返さない応答（トピック＝指示本文全体＋既定値）を固定する。`frozen_now` で時刻を固定する（FR-011 / COV-004 の `nodes/parse_instruction.py` 未実行行 54 / 61-64 / 72 / 75 / 102 / 112-117）
+- [X] T027 [P] [US3] `tests/unit/test_parse_instruction.py` を強化する。優先順位の 3 分岐（明示設定 > 本文の自然言語 > LLM の解釈）、漢数字と期間表現（「5件」「半年以内」）、明示的な日付（「2025-01-01 以降」）、解釈できない日付文字列（例外にしない）、構造化ブロックを返さない応答（トピック＝指示本文全体＋既定値）を固定する。`frozen_now` で時刻を固定する（FR-011 / COV-004 の `nodes/parse_instruction.py` 未実行行 54 / 61-64 / 72 / 75 / 102 / 112-117）
 - [ ] T028 [P] [US3] `tests/unit/test_extract_common.py` を新規作成する。見出しと本文のみの出力からのテーマ名・説明の抽出と全コンテンツへの紐づけ、空出力（テーマ一覧が空）、崩れた出力（見出しのみ・本文欠落）、表形式と箇条書きの両方の解釈を固定する（FR-012 / COV-004 の `nodes/extract_common.py` 未実行行 57-59 / 76-86）
 - [ ] T029 [P] [US3] `tests/unit/test_analyze_content.py` を新規作成する。ソースの整形、活用アイデア表の解析、列不足・見出しのみ・区切り行のみの行破棄（例外にしない）、構造化ブロックがない場合のフォールバック要約を固定する（FR-012 / COV-004 の `nodes/analyze_content.py` 未実行行 30 / 44 / 48 / 72-73）
 - [ ] T030 [P] [US3] `tests/unit/test_parse.py` を強化する。崩れた表（列不足・区切り行のみ・見出しのみ）と JSON ブロックを含まない応答を追加し、見出し・区切り行のスキップを検証する既存の重複ケースを統合する（FR-012 / FR-017）
@@ -420,4 +420,51 @@ T026 のファイルシステム境界テスト（data-model 1.3 の `cache_dir 
 | （2）`cache_dir = state.get("cache_dir") or configurable.cache_dir` から後半を除去 | `test_report_is_written_to_the_configured_cache_dir` / `test_unwritable_cache_dir_is_recorded_and_the_run_succeeds` | **2 failed / 17 passed** |
 
 復元後の `sha256sum` はいずれも変異前と一致（`graph.py`: `35552d6f9f4ab8e189cfab8f24c555bc90f0a2b2863f635d95a2c26919646252` / `compile_report.py`: `6ba5f03dec3f15d6bf1ecfaca3a85fe5d28ee5eca5b2d5f3a13bc40c893d26dd`）。復元後のフルスイートは **354 passed**（T025 完了時点は 339 passed）。
+
+### T027 で検出した件数抽出の誤り（2026-09-13 実測）
+
+`tests/unit/test_parse_instruction.py` の入力表を作るために `_extract_count_from_text` / `_extract_published_after_from_text` / `_period_to_date` を実測したところ、4 クラスの誤りが出た。いずれも FR-011（明示設定 > 本文の自然言語 > LLM の解釈）に反するか、解釈の取りこぼしになる。FR-023 に基づき本機能の範囲で修正した。
+
+| 入力 | 修正前 | 修正後 | 原因 |
+|------|--------|--------|------|
+| `"2025年の動画"` | `2025` | `None` | `_extract_count_from_text` が本文中の最初の数字を無条件に拾っていた |
+| `"5月の動画を3件"` | `5` | `3` | 同上（期間表現の月数を件数と誤認） |
+| `"2025年の動画を10件調べて"` | `2025` | `10` | 同上（年号を件数と誤認） |
+| `"十二件の動画"` | `2` | `12` | 漢数字が `一〜十` の 1 文字ずつの辞書で、`二` が先に一致していた |
+| `"二三十件の動画"` | `2` | `None` | 位取りとして不正な数字列を解釈していた（`_to_number` が `None`、単位必須の正規表現で不一致） |
+| `"三カ月以内の動画"` | `None`（期間が効かない） | カレンダー 3 か月前 | `_extract_published_after_from_text` が `三ヶ月\|3ヶ月\|三カ月\|3カ月` の列挙で、`十二ヶ月` など生成できない組み合わせを取りこぼしていた |
+
+対処:
+- `_to_number(text)`（算用数字／漢数字一〜九・十・十一〜九十九）を追加。`tens_text` / `ones_text` が 2 文字以上なら位取りとして不正とみなし `None`。
+- `_PERIOD_EXPRESSION_RE` を追加し、件数抽出の**前**に年号・期間表現（`2025年` / `半年` / `最近30日` / `三カ月` など）を取り除く。取り除いたうえで `([0-9０-９]+)\s*(?:単位)?`、次に `([一二三四五六七八九十]+)\s*(?:単位)` を探す（漢数字は単位必須。`_COUNT_UNITS = "個|件|本|つ|カ国|か国|社|人"`）。
+- 期間表現の正規表現を列挙から `[0-9０-９一二三四五六七八九十]+[ヶカ]?月` へ一般化（期間判定・件数除去で同じ語彙を使う）。
+
+実装中に自分で入れた正規表現の不具合も検出している: `r"(?:半年|...|最近\s*[0-9０-９]+日)(?:\s*以内)?"` を最初 `r"\s*以内?"` と書いたため `\s*` と `?` の適用範囲がずれ、コンパイル済みのグループが `2025年` に一致しなくなっていた（`(?:\s*以内)?` に修正）。
+
+### T027 で検出した FR-011 の取り違え: 明示指定 5 が未指定として扱われる（2026-09-13 実測）
+
+| 項目 | 内容 |
+|------|------|
+| 現象 | `parse_instruction` の優先順位が `if input_max is not None and input_max != 5:` で、**state の明示指定が既定値と同じ 5 のときだけ**「未指定」と同一視され、本文の自然言語（例「20件」）に負けていた |
+| 併存していた配線 | `__main__._run_async` が `initial_state["max_results"] = args.max_results or 5` と、**未指定でも常に 5 を state に載せていた**。「未指定」と「5 件指定」を区別する手段が state に存在しなかった |
+| 対処 | （a）`__main__` は `args.max_results is not None` のときだけ `initial_state` に載せる（キー不在＝未指定。FR-011）。（b）`parse_instruction` の条件から `and input_max != 5` を除去 |
+| 検証 | `test_explicit_state_count_of_five_beats_instruction_text`（単体）＋ `test_cli_omits_max_results_from_state_when_not_given` / `test_cli_passes_explicit_max_results_even_when_it_is_the_default`（CLI 配線、`tests/integration/test_full_flow.py`） |
+
+同クラスの点検: `platform` / `output_format` / `published_after` / `use_trends` / `sort_by` / `transcript_language` は `state` → `configurable` → 既定の順にフォールバックしておりセンチネルを持たない。**Configuration 側の `elif configurable.max_results != 5:` は残している**（`Configuration.max_results` は `default=5` の `int` で「未設定」を表現できないため。CLI 経由の明示 5 は上記 (a) で state 側が先に捕まえるので、CLI から到達できる不整合は解消済み）。Configuration スキーマを `int | None` へ変える案は公開設定の意味を変えるため本機能の範囲外と判断した。
+
+### T027: 変異探針（2026-09-13 実測）
+
+**1 件ずつ実施**し、各件で「改変 → 失敗確認 → 復元 → `sha256sum` 一致 → フルスイート再実行 → `git status --short`」を完了させた。
+
+| 変異 | 落ちるテスト | 実測 |
+|------|--------------|------|
+| （1）`if input_max is not None:` に `and input_max != 5` を戻す | `test_explicit_state_count_of_five_beats_instruction_text` | **1 failed / 62 passed** |
+| （2）`_period_to_date` / `_extract_published_after_from_text` の月数を算用数字のみに戻す | `test_kanji_month_within_is_resolved_like_digits` / `test_twelve_kanji_months_backs_off_a_year` | **2 failed / 61 passed** |
+| （3）`text = _PERIOD_EXPRESSION_RE.sub("", text)` を削除 | `test_year_and_period_expressions_are_not_counts`（`2025年` / `3年以内` / `最近30日を7件` / `5月を3件` / `10年分を3件`） | **6 failed / 57 passed** |
+| （4）漢数字の件数走査を 1 文字ずつの辞書ループ（旧実装）に戻す | `test_count_with_unit_is_extracted[十二件の動画-12]` / `test_count_without_unit_or_unsupported_numeral_is_none[二三十件の動画]` | **2 failed / 61 passed** |
+| （5）`__main__` を `initial_state["max_results"] = args.max_results or 5`（常に載せる）に戻す | `test_cli_omits_max_results_from_state_when_not_given` | **1 failed / 1 passed** |
+
+復元後の `sha256sum` はいずれも変異前と一致（`nodes/parse_instruction.py`: `aa9e4a8358f4f65bd74e78fbe0de85f2a80c06957fca97889b98d2685ce22af` / `__main__.py`: `22935b81d82cd1e5af1c52af501e26226dec7c45b27a00708aeebe8c205988db`）。復元後のフルスイートは **413 passed**（T026 完了時点は 354 passed。内訳: `test_parse_instruction.py` が 6 → 63 件、`test_full_flow.py` に CLI 配線 2 件を追加）。
+
+`nodes/parse_instruction.py` のカバレッジは 107 stmts / 1 miss / **99%**。未実行は `_period_to_date` 末尾の `return None`（101 行目）で、**正規表現由来のラベルは必ず月表現か `_RELATIVE_PERIOD_DAYS` のキーに一致するため到達しない**防御行（唯一の呼び出し元は `_extract_published_after_from_text` で、そのラベルは `(半年|[0-9０-９一二三四五六七八九十]+[ヶカ]?月|1年|年|本年|今年|最近)` のいずれか）。位取り不正の漢数字（`二三十月以内`）は同じ関数の `if months is None: return None` で先に `None` になるため、そちらは `test_unrecognized_period_is_not_a_filter` で実行済み。COV-004 の目標（既定値で 90%）は満たす。`ruff check` は変更 4 ファイルすべて clean、`mypy src/trend_researcher` は **36 errors / 12 files**（本セッション開始時のベースライン 37 errors / 12 files から増加なし）。
 

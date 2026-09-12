@@ -493,8 +493,10 @@ def test_unwritable_cache_dir_is_recorded_and_the_run_succeeds(
     assert "キャッシュ書き込み失敗" in capsys.readouterr().err
 
 
-def test_cli_wires_cache_dir_into_the_runnable_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`--cache-dir` が Configuration まで届く（`_run_async` の配線）。"""
+def _capture_cli_invocation(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], config: Config
+) -> dict[str, Any]:
+    """`_run_async` がグラフへ渡した state / config を記録する（グラフだけ差し替える）。"""
     captured: dict[str, Any] = {}
 
     class _Recorder:
@@ -504,10 +506,43 @@ def test_cli_wires_cache_dir_into_the_runnable_config(tmp_path: Path, monkeypatc
             return {"report": None}
 
     monkeypatch.setattr(main_module, "trend_researcher", _Recorder())
-    args = main_module._parse_args(["オタクの困りごと", "--platform", "x", "--cache-dir", str(tmp_path)])
-    config = Config.load(platform="x", cache_dir=str(tmp_path))
-
+    args = main_module._parse_args(argv)
     asyncio.run(main_module._run_async(args, config))
+    return captured
+
+
+def test_cli_wires_cache_dir_into_the_runnable_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--cache-dir` が Configuration まで届く（`_run_async` の配線）。"""
+    config = Config.load(platform="x", cache_dir=str(tmp_path))
+    captured = _capture_cli_invocation(
+        monkeypatch, ["オタクの困りごと", "--platform", "x", "--cache-dir", str(tmp_path)], config
+    )
 
     assert captured["config"]["configurable"]["cache_dir"] == str(tmp_path)
     assert captured["state"]["platform"] == "x"
+
+
+def test_cli_omits_max_results_from_state_when_not_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--max-results` 未指定では件数を state に載せない。
+
+    常に 5 を載せると、ノード側で「明示指定」と区別できず本文の自然言語
+    （「20件」）が無視される（FR-011）。
+    """
+    config = Config.load(platform="x", cache_dir=str(tmp_path))
+    captured = _capture_cli_invocation(monkeypatch, ["20件の動画を調べて", "--platform", "x"], config)
+
+    assert "max_results" not in captured["state"]
+
+
+def test_cli_passes_explicit_max_results_even_when_it_is_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """明示指定は既定値と同じ 5 でも state に載せる（FR-011: 明示指定が最優先）。"""
+    config = Config.load(platform="x", cache_dir=str(tmp_path))
+    captured = _capture_cli_invocation(
+        monkeypatch, ["20件の動画を調べて", "--platform", "x", "--max-results", "5"], config
+    )
+
+    assert captured["state"]["max_results"] == 5

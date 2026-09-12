@@ -7,6 +7,7 @@ import asyncio
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -86,11 +87,13 @@ async def _run_async(args: argparse.Namespace, config: Config) -> dict:
     }
 
     # ユーザー入力は messages + platform + max_results。設定は RunnableConfig（Configuration）経由で渡す。
-    initial_state = {
+    initial_state: dict[str, Any] = {
         "messages": [HumanMessage(content=args.instruction)],
         "platform": platform,
-        "max_results": args.max_results or 5,
     }
+    if args.max_results is not None:
+        # 明示指定のみを state に載せる。未指定と「5 件指定」を区別するため（FR-011）。
+        initial_state["max_results"] = args.max_results
 
     return await asyncio.wait_for(
         trend_researcher.ainvoke(initial_state, runnable_config),
