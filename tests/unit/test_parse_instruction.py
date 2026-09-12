@@ -244,6 +244,18 @@ def test_topic_falls_back_to_whole_instruction_without_block(fake_model_factory:
     assert out["instruction"].max_results == 5  # 既定値で続行する
 
 
+@pytest.mark.parametrize("response", ["[1, 2]", '"AI"', "5"], ids=["array", "string", "number"])
+def test_non_object_json_response_is_treated_as_no_block(
+    fake_model_factory: Any, response: str
+) -> None:
+    # JSON ではあるがオブジェクトでない応答。`extract_json_block` がそのまま返すと
+    # `.get()` で `AttributeError` になりノードごと落ちるため、ブロック無しとして
+    # 扱い指示本文全体にフォールバックする。
+    out = _run(fake_model_factory, "オタクの困りごとを調査したい", response=response)
+    assert out["instruction"].topic == "オタクの困りごとを調査したい"
+    assert out["instruction"].max_results == 5
+
+
 def test_empty_messages_are_treated_as_empty_instruction(fake_model_factory: Any) -> None:
     out = _run(fake_model_factory, "", response=LLM_PLAIN, messages=[])
     assert out["instruction"].topic == ""

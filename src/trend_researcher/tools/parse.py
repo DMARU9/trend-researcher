@@ -7,6 +7,20 @@ import re
 from typing import Any
 
 
+def _load_json_object(text: str) -> dict[str, Any] | None:
+    """JSON として読める「オブジェクト」のときだけ返す。
+
+    配列・文字列・数値・真偽値・`null` は構造化ブロックではないため `None` に
+    する。呼び出し側（`parse_instruction`）は戻り値を `.get()` で読むので、その
+    まま返すと `AttributeError` でノードごと落ちる。
+    """
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def extract_json_block(text: str) -> dict[str, Any] | None:
     """LLM 出力から最初の JSON オブジェクト（```json 含む）を抽出する。"""
     if not text:
@@ -14,17 +28,13 @@ def extract_json_block(text: str) -> dict[str, Any] | None:
     # ```json ... ``` を優先
     fenced = re.search(r"```json\s*(.*?)```", text, re.DOTALL)
     candidate = fenced.group(1) if fenced else text
-    try:
-        return json.loads(candidate)
-    except json.JSONDecodeError:
-        pass
+    data = _load_json_object(candidate)
+    if data is not None:
+        return data
     # 波括弧内を探す
     brace = re.search(r"\{.*\}", text, re.DOTALL)
     if brace:
-        try:
-            return json.loads(brace.group(0))
-        except json.JSONDecodeError:
-            return None
+        return _load_json_object(brace.group(0))
     return None
 
 

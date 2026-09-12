@@ -129,7 +129,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 - [X] T027 [P] [US3] `tests/unit/test_parse_instruction.py` を強化する。優先順位の 3 分岐（明示設定 > 本文の自然言語 > LLM の解釈）、漢数字と期間表現（「5件」「半年以内」）、明示的な日付（「2025-01-01 以降」）、解釈できない日付文字列（例外にしない）、構造化ブロックを返さない応答（トピック＝指示本文全体＋既定値）を固定する。`frozen_now` で時刻を固定する（FR-011 / COV-004 の `nodes/parse_instruction.py` 未実行行 54 / 61-64 / 72 / 75 / 102 / 112-117）
 - [X] T028 [P] [US3] `tests/unit/test_extract_common.py` を新規作成する。見出しと本文のみの出力からのテーマ名・説明の抽出と全コンテンツへの紐づけ、空出力（テーマ一覧が空）、崩れた出力（見出しのみ・本文欠落）、表形式と箇条書きの両方の解釈を固定する（FR-012 / COV-004 の `nodes/extract_common.py` 未実行行 57-59 / 76-86）
 - [X] T029 [P] [US3] `tests/unit/test_analyze_content.py` を新規作成する。ソースの整形、活用アイデア表の解析、列不足・見出しのみ・区切り行のみの行破棄（例外にしない）、構造化ブロックがない場合のフォールバック要約を固定する（FR-012 / COV-004 の `nodes/analyze_content.py` 未実行行 30 / 44 / 48 / 72-73）
-- [ ] T030 [P] [US3] `tests/unit/test_parse.py` を強化する。崩れた表（列不足・区切り行のみ・見出しのみ）と JSON ブロックを含まない応答を追加し、見出し・区切り行のスキップを検証する既存の重複ケースを統合する（FR-012 / FR-017）
+- [X] T030 [P] [US3] `tests/unit/test_parse.py` を強化する。崩れた表（列不足・区切り行のみ・見出しのみ）と JSON ブロックを含まない応答を追加し、見出し・区切り行のスキップを検証する既存の重複ケースを統合する（FR-012 / FR-017）
 - [ ] T031 [P] [US3] `tests/unit/test_plan_search.py` を強化する。検索クエリからの年号・期間表現の除去、空になった行の破棄、クエリ数の上限を固定する（FR-012 / COV-004 の `nodes/plan_search.py` 未実行行 42 / 64）
 
 **Checkpoint**: US3 完了。LLM 自由文の解釈が分岐ごとに独立して検証できる
@@ -559,3 +559,37 @@ T026 のファイルシステム境界テスト（data-model 1.3 の `cache_dir 
 - `text = result.content if hasattr(result, "content") else str(result)` の `else` 側は T028 と同じ理由（到達不能）でテストしていない。
 - 3 列すべてが非空の行だけを採用する変更により、`| A | B | C | D |` のような 4 列以上の行は先頭 3 列だけを採用する挙動のまま（プロンプトは 3 列を要求しているため、4 列目以降は解釈しない）。
 
+### T030 で検出した欠陥: JSON オブジェクト以外の応答で `parse_instruction` が落ちる（2026-09-13 実測）
+
+`extract_json_block` は `json.loads` の結果をそのまま返しており、型注釈（`dict[str, Any] | None`）と docstring（「最初の JSON **オブジェクト**を抽出する」）に反して配列・文字列・数値を返していた。呼び出し側（`parse_instruction` の `parsed = extract_json_block(text) or {}` → `parsed.get(...)`）は `.get()` で読むため、ノードごと `AttributeError` で落ちる。
+
+| LLM 応答 | 修正前 | 修正後 |
+|----------|--------|--------|
+| `[1, 2]` | `extract_json_block` が `[1, 2]` を返し、ノードが `AttributeError: 'list' object has no attribute 'get'` | `None`（ブロック無し扱い。`topic` は指示本文全体、`max_results` は自然言語/既定） |
+| `"hello"` | `str` を返し `AttributeError: 'str' object has no attribute 'get'` | `None` |
+| `5` | `int` を返し `AttributeError: 'int' object has no attribute 'get'` | `None` |
+
+対処: `_load_json_object`（`json.loads` の結果が `dict` のときだけ返す）を追加し、フェンス経路と波括弧経路の両方でこれを使う（`parse_instruction` は修正不要）。ノード側の回帰は `test_non_object_json_response_is_treated_as_no_block`（配列 / 文字列 / 数値の 3 ケース）で固定した。
+
+### T030 の重複統合（FR-017）
+
+`tests/unit/test_parse.py` から表の解釈に関する 3 件を削除した。`test_parse_angles_table` / `test_parse_angles_table_skips_header_and_separator` は **T029 の `tests/unit/test_analyze_content.py` が同じ関数の同じ経路を（列不足・空セル・アラインメント指定まで含めて）固定済み**、`test_fallback_summary_from_angles` は `_analyze_one` を直接呼ぶ形で、T029 がノード経由（`analyze_content`）で同じ経路を固定済みだからである。`tools/parse.py` に属する契約（JSON ブロック・箇条書き・見出し直下の本文）は `test_parse.py` に残した。
+
+### T030: 変異探針（2026-09-13 実測）
+
+**1 件ずつ実施**し、各件で「改変 → 失敗確認 → 復元 → `sha256sum` 一致 → フルスイート再実行 → `git status --short`」を完了させた。
+
+| 変異 | 落ちるテスト | 実測 |
+|------|--------------|------|
+| （1）非オブジェクトを弾くガード（`isinstance(data, dict)`）の除去 | `test_extract_json_block_ignores_non_object_json` 4 件 / `..._in_text` 1 件 / `test_non_object_json_response_is_treated_as_no_block` 3 件 | **8 failed / 83 passed** |
+| （2）フェンス優先（`candidate = fenced.group(1) if fenced else text`）の除去 | `test_extract_json_block_prefers_fenced_block` | **1 failed / 90 passed** |
+| （3）番号付きリストの代替（`\d+\.\s+`）の除去 | `test_extract_list_items_numbered` / `test_extract_list_items_ignores_lines_without_marker` | **2 failed / 89 passed** |
+| （4）次の見出しで打ち切る条件の除去 | `test_extract_section` / `test_extract_section_with_empty_body` | **2 failed / 89 passed** |
+| （5）`extract_list_items` の空テキスト早期 return の除去 | なし（**91 passed**） | **挙動不変（等価変異）**。`"".splitlines()` が空なのでループ結果も `[]` になり、この防御は冗長。挙動が変わらないことを論証できるため欠陥として扱わず、テストも付け替えていない |
+
+復元後の `sha256sum` はいずれも変異前と一致（`tools/parse.py`: `944ded6ba22c9910e686ce54fa6130af111d80ba780c0a62069122aa10901297`）。復元後のフルスイートは **506 passed**（T029 完了時点は 487 passed。`test_parse.py` は 10 → 25 件、`test_parse_instruction.py` に 3 件を追加、重複 3 件を削除）。`tools/parse.py` のカバレッジは 48 stmts / 0 miss / **100%**。
+
+### T030 のスコープ外とした点
+
+- 波括弧の探索（`re.search(r"\{.*\}", text, re.DOTALL)`）は最初の `{` から最後の `}` までを**貪欲**に取るため、「壊れたフェンス + 本文中の有効なオブジェクト」（例: `` ```json\n{"a": }\n``` `` + `補足 {"b": 2}`）は `{"b": 2}` を拾えず `None` になる。これは「最初の JSON オブジェクトを抽出する」という docstring の意図とは厳密には一致しないが、戻り値が `None`（＝ブロック無し扱い）に倒れるだけで例外にはならないため、安全側の劣化として現状を固定した（`test_extract_json_block_none_when_nothing_parses` の 2 ケース目）。入れ子オブジェクトを壊さずに直すには括弧の対応を数える走査（`json.JSONDecoder.raw_decode` を各 `{` 位置で試す）が必要で、本タスクの要件（例外にしない）を超える変更になるため触れていない。
+- `if not text: return None`（`extract_json_block`）と `if not text: return ""`（`extract_section`）も同じ理由（冗長な防御）で残した。
