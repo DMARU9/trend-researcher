@@ -16,6 +16,20 @@ cp .env.example .env
 uv sync --extra dev
 ```
 
+### テスト・Lint・型チェック（品質ゲート）
+
+変更を提出する前に、次の 3 つがすべて通ることを確認します（`.specify/memory/constitution.md`）。
+
+```bash
+uv run pytest -q      # テスト（ネットワーク・認証情報不要で完走する）
+uv run ruff check .   # Lint
+uv run mypy src       # 型チェック
+```
+
+テストには実 API（OpenAI / X / YouTube）を使いません。外部呼び出しは `tools/` と
+`providers/` の境界でモックします。実 API での確認は下記の手動スモークとして行い、
+自動テストの合否条件には含めません。
+
 ### X（Twitter）を使う場合：アカウントクッキーの登録
 
 X の検索には認証済みアカウントが必要です。`twscrape` が `accounts.db`（クッキー保存先）を利用します。

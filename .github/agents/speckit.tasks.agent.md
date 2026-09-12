@@ -138,7 +138,10 @@ The tasks.md should be immediately executable - each task must be specific enoug
 
 **CRITICAL**: Tasks MUST be organized by user story to enable independent implementation and testing.
 
-**Tests are OPTIONAL**: Only generate test tasks if explicitly requested in the feature specification or if user requests TDD approach.
+**Tests are MANDATORY**: Read `.specify/memory/constitution.md` and follow its testing principle.
+Every user story MUST include at least one test task (unit and/or integration), even when the
+feature specification does not mention testing. Tests MUST be runnable offline with external
+I/O mocked at the boundary.
 
 ### Checklist Format (REQUIRED)
 

@@ -40,7 +40,26 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+Evaluate each gate against `.specify/memory/constitution.md` and record PASS / FAIL with evidence.
+Any FAIL MUST be justified in the Complexity Tracking table; unjustified FAIL blocks implementation.
+
+- [ ] **I. テスト必須**: Spec/tasks include tests for every user story; tests can fail when the
+      behavior is removed (no tautological or unreachable assertions).
+- [ ] **II. 外部 I/O の境界分離**: All external access stays in `tools/` / `providers/`;
+      the test plan runs offline without credentials.
+- [ ] **III. 型付きパイプライン契約**: State/model/Configuration changes are propagated to all
+      nodes, providers, renderers, and tests within the same change.
+- [ ] **IV. プラットフォーム抽象**: Platform differences live in `providers/`; no new
+      `platform == ...` branches in `graph.py` / `nodes/`.
+- [ ] **V. CLI 出力契約と観測可能性**: stdout = report only, stderr = progress/logs/errors;
+      exit codes 0/1/2; `ProgressEmitter` and `cache/` persistence preserved.
+- [ ] **VI. リファクタリングの互換性方針**: Internal renames/removals need NO backward-
+      compatibility shims; all references (code, tests, README/spec) are updated in the same
+      change, and behavior is verified by tests rather than by a compatibility layer.
+      User-facing contracts (CLI flags/output/exit codes, documented env vars) are updated
+      in place, not shimmed.
+- [ ] **技術制約・品質ゲート**: `uv run pytest -q`, `uv run ruff check .`, `uv run mypy src`
+      are part of the task list.
 
 ## Project Structure
 
