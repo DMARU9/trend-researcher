@@ -487,4 +487,45 @@ def test_cli_001_07_partial_progress_still_keeps_stdout_clean(cli_runner):
     assert result.stdout_bytes == b""
 
 
+# --- CLI-001-5: 出力先への書き込み失敗（T017 で修正する欠陥） -------------
+
+
+@pytest.mark.parametrize(
+    ("kind", "filename"),
+    [
+        pytest.param("missing-parent", "no_such_dir/report.md", id="missing-parent"),
+        pytest.param("directory", "existing_dir", id="existing-directory"),
+    ],
+)
+def test_cli_001_05_output_write_failure(cli_runner, tmp_path, kind, filename):
+    """CLI-001-5 / CLI-002-3: 出力先に書き込めないときは 1 と `[エラー]` 形式の報告。
+
+    T017 の修正前は `Path.write_text` が `try` の外にあり、生の `Traceback` が
+    stderr に出るため、このテストは失敗する（research.md R-9 の欠陥）。
+    親ディレクトリが無い場合（`FileNotFoundError`）と出力先が既存ディレクトリの場合
+    （`IsADirectoryError`）で**非対称を作らない**ことも固定する。
+    """
+    target = tmp_path / filename
+    if kind == "directory":
+        target.mkdir()
+
+    result = cli_runner(*X_ARGS, "--output", str(target))
+
+    assert result.exit_code == 1
+    assert result.stdout_bytes == b""
+    assert f"[エラー] レポートを {target} に書き出せませんでした:" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_cli_001_05_write_failure_has_single_error_line(cli_runner, tmp_path):
+    """CLI-001-5: 書き込み失敗の報告は `[エラー]` で始まる 1 行に収まる。"""
+    target = tmp_path / "no_such_dir" / "report.md"
+
+    result = cli_runner(*X_ARGS, "--output", str(target))
+
+    error_lines = [line for line in result.stderr_lines() if line.startswith("[エラー] レポートを")]
+    assert len(error_lines) == 1
+
+
+
 
