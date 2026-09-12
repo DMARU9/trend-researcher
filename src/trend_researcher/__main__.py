@@ -107,6 +107,11 @@ def main(argv: list[str] | None = None) -> int:
             raise
         return 2
 
+    # 空文字・空白のみの指示は引数エラーとして扱う（外部接続より前に判定する）
+    if not args.instruction.strip():
+        print("[エラー] 指示を指定してください。", file=sys.stderr, flush=True)
+        return 2
+
     platform = args.platform
     config = Config.load(platform=platform, cache_dir=args.cache_dir, max_results=args.max_results)
 
@@ -152,7 +157,15 @@ def main(argv: list[str] | None = None) -> int:
         rendered = render_report(report)
 
     if args.output:
-        Path(args.output).write_text(rendered, encoding="utf-8")
+        try:
+            Path(args.output).write_text(rendered, encoding="utf-8")
+        except OSError as exc:
+            print(
+                f"[エラー] レポートを {args.output} に書き出せませんでした: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 1
         print(f"[完了] レポートを {args.output} に書き出しました。", file=sys.stderr, flush=True)
     else:
         print(rendered)
