@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Project specific (trend_researcher) ---
+
+# Runtime cache (used by the app)
+cache/
+
+# Structure analysis output (script/analyze_structure.py)
+artifacts/
+
+# twscrape account DB / local data
+*.db
+
+# OS / editor noise
+.DS_Store
