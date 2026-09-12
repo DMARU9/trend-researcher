@@ -111,7 +111,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 - [X] T022 [P] [US2] `tests/unit/test_cache.py` を新規作成する。書き込み契約（配置・UTF-8・非 ASCII・`default=str`）と読み戻し契約（存在しない場合は例外ではなく `None`）を固定する（FR-014 / COV-004 の `cache.py` 未実行行 21-25 / 34-38）
 - [X] T023 [P] [US2] `tests/unit/test_config.py` を新規作成する。環境変数の優先順位（`TR_*` > `XTR_*` / `YTR_*` > 既定）、`cache_dir` と `accounts_db` のパス解決、未設定・空文字の扱いを固定する（FR-019 の対象範囲 / COV-004 の `config.py` 未実行行）
 - [X] T024 [P] [US2] `tests/unit/test_compile_report.py` を新規作成する。Markdown / JSON の描画、共通テーマが 0 件の場合の `（特筆すべき共通点なし）`、備考の選定基準と投稿日フィルタ（CLI-004-8）、候補 0 件の空レポート、**キャッシュ書き込み失敗を備考に記録して継続する**縮退を固定する（FR-009 / COV-004 の `nodes/compile_report.py` 未実行行 34 / 44-45 / 62-65 / 105-107 / 136-141）
-- [ ] T025 [US2] `tests/unit/test_providers.py` を新規作成する。provider レジストリ、未知プラットフォームの拒否、行描画（表ヘッダ・ラベル・件名）の差分を固定する（FR-009 / 憲法 原則 IV）
+- [X] T025 [US2] `tests/unit/test_providers.py` を新規作成する。provider レジストリ、未知プラットフォームの拒否、行描画（表ヘッダ・ラベル・件名）の差分を固定する（FR-009 / 憲法 原則 IV）
 - [ ] T026 [US2] `tests/integration/test_full_flow.py` を強化する。`_FakeModel` の**プロンプト部分一致ディスパッチを廃止**し、`fake_model_factory` によるノード単位の応答注入へ変更する（現状は `extract_common` のプロンプトが「関連」を含むため検索クエリ応答が返り、共通テーマが 0 件になる。R-7）。あわせて境界の失敗経路（部分応答・例外）を含む経路を追加する（FR-009 / data-model 1.3 のマトリクス）
 
 **Checkpoint**: US2 完了。外部境界と永続化の失敗経路が独立に検証できる
