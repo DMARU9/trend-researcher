@@ -163,20 +163,22 @@
 | `evidence` | 変異探針の結果、または重複先のテスト ID |
 | `resolution` | `strengthened` \| `merged` \| `removed` \| `kept_with_reason` |
 
-**初期判定**（research.md R-4 で特定済み）:
+**監査結果**（T032〜T037 の処置と変異探針の実測で確定。research.md R-4 の初期判定を実績で更新）:
 
-| `test_id` | `reason` | `evidence` | `resolution` |
-|-----------|----------|------------|--------------|
-| `tests/unit/test_models.py::test_report_sources_invariant` | `tautological` | 断言が構築式と同一。M1 未検出 | `strengthened`（`compile_report` 経由に置換） |
-| `tests/test_graph.py::TestAgentState`（2 件） | `duplicate` | 同一クラス内で同一断言 | `merged` |
-| `tests/test_graph.py::TestConfiguration`（5 件） | `duplicate` | `tests/unit/test_configuration.py` と同一 | `removed` |
-| `tests/test_graph.py::TestGraphBuild`（2 件） | `weak` | `is not None` のみ。M2 未検出 | `strengthened`（配線・ルーティングを固定） |
-| `tests/unit/test_transcript.py::test_transcript_dataclass` | `weak` | production の分岐を通らない | `removed` または `strengthened` |
-| `tests/unit/test_parse.py::test_parse_angles_table_skips_header_and_separator` | `duplicate` | `test_parse_angles_table` が同一経路を検証 | `merged` |
-| `tests/unit/test_youtube_search.py::test_search_videos_limits_to_max` | `duplicate` | `test_search_videos_top_n` が件数制限を検証 | `merged` |
-| `tests/integration/test_full_flow.py::_FakeModel` | `weak`（誤検知） | 部分一致で `extract_common` に誤応答。共通テーマが 0 件に | `strengthened`（ノード単位の注入へ変更） |
+| `test_id` | `reason` | `evidence`（実測） | `resolution`（処置） |
+|-----------|----------|--------------------|----------------------|
+| `tests/unit/test_models.py::test_report_sources_invariant` | `tautological` | 断言が構築式（`sources=[c.url for c in cands]`）と同一。恒真アサートでは M1 を検出できず、M1 探針（出典構築を `[]`）は 5 failed / 534 passed — **すべてノード経由のテストが検出** | `merged`（T032: 削除し、出典構築の契約は `tests/unit/test_compile_report.py` の 1 箇所へ統合。代わりに未検証だった既定値（`sources` / `candidates` / `description`）を固定するテストを追加し、3 件の探針で検出を確認） |
+| `tests/test_graph.py::TestAgentState`（2 件） | `duplicate` | 同一ファイル内で同一断言（`"messages" in AgentState.__annotations__` の `or` 付き・なし）。production の分岐を通らない | `removed`（T037: `AgentState` の宣言を消すと LangGraph の状態更新が失敗し、E2E・CLI 契約・配線が検出する。`report` 削除の探針で **44 failed / 491 passed**） |
+| `tests/test_graph.py::TestConfiguration`（5 件） | `duplicate` | 既定値と `from_runnable_config` の解決が `tests/unit/test_configuration.py` と同一 | `merged`（T037: `tests/unit/test_configuration.py`（新規 15 件）へ吸収し旧ファイルを削除。`max_results` 既定 5 → 6 の探針で **15 failed / 520 passed**） |
+| `tests/test_graph.py::TestGraphBuild`（2 件） | `weak` | `graph is not None` / `hasattr(ainvoke)` のみで、ノード構成・ルーティングを検出できない | `strengthened`（T037: `tests/integration/test_graph_wiring.py` がノード登録・エッジ順・条件分岐・0 件短絡・進捗行数を固定。M2 探針 **7 failed / 532 passed**、M3 探針 **6 failed / 533 passed** はすべて新テストが検出） |
+| `tests/unit/test_transcript.py::test_transcript_dataclass` | `weak` | production の分岐（`fetch_transcript` / `_read_subtitle_file`）を通らない | `removed`（T020: `fetch_transcript` 経由の 17 件へ置換。T036 の探針「形式判定を `_parse_vtt` のみに」で **2 failed / 537 passed**） |
+| `tests/unit/test_parse.py::test_parse_angles_table_skips_header_and_separator` | `duplicate` | `_parse_angles_table` は `nodes/analyze_content.py` へ移動済みで、`tests/unit/test_parse.py` は当該関数を import しなくなった | `merged`（T029 / T030: `tests/unit/test_analyze_content.py` の 3 件（見出し・区切り行 / 列不足 / 空セル）へ分割。T029 探針で **7 failed / 37 passed** と **8 failed / 36 passed**） |
+| `tests/unit/test_youtube_search.py::test_search_videos_limits_to_max` | `duplicate` | 件数制限の検証が `test_search_videos_returns_top_n_and_respects_max_results` と同一 | `merged`（T023: 統合済み。T036 の探針では `providers/x.py` 側の重複除去が 7 failed で検出されることを確認） |
+| `tests/integration/test_full_flow.py::_FakeModel` | `weak`（誤検知） | プロンプト本文の部分一致で応答を選ぶフェイクが `extract_common` に誤応答し、共通テーマが 0 件になっていた | `strengthened`（T017 / T030 / T031: ノード単位の注入 `fake_model_factory` へ移行。未注入ノードは `AssertionError`。T031 の探針で **13 failed / 21 passed**） |
+| `tests/unit/test_plan_search.py`（旧・2 件） | `copy_of_impl` | `__import__("unittest").mock.patch` と手書きの `_FakeModel` / `_FakeResult` が対象モジュールの LLM 呼び出し形を写していた（LAYOUT-004-4 / R-7 違反） | `strengthened`（T031: 2 → 34 件。`fake_model_factory` へ移行し探針 9/9 検出） |
+| `tests/unit/test_models.py::test_candidate_defaults`（と `OutputSpec.table_for` の既定） | `weak` | 既定値を変えても緑（`Candidate.platform` → `"youtube"` で 538 passed、`OutputSpec.table_for` → `[]` で 538 passed） | `kept_with_reason`（T032: 両フィールドは `src/` から一度も読まれず挙動に効かないため「どの振る舞いの変異を検出するか」を説明できない。LAYOUT-005-1 / LAYOUT-005-2 によりテストを追加しない） |
 
----
+**内訳**: `strengthened` 3 件 / `merged` 4 件 / `removed` 2 件 / `kept_with_reason` 1 件（計 10 件）。M1 / M2 / M3 と縮退処理 5 件（T033〜T036）の探針で、いずれの契約も**後継テストが検出する**ことを実測で確認した（SC-006）。
 
 ## 2. 検証対象（Read-only）
 
