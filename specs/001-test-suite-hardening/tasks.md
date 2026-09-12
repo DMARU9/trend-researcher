@@ -146,7 +146,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 
 - [X] T032 [US4] `tests/unit/test_models.py` の恒真アサートを置換する。`test_report_sources_invariant` は断言が構築式と同一であり、`compile_report` の出典構築を `[]` にしても緑のままだった（M1 未検出）。`compile_report` の描画経路を通して `sources` を検証する形へ置き換える（data-model 1.7 / LAYOUT-005-3）
 - [X] T033 [US4] **変異探針 M1** を実施する。`src/trend_researcher/nodes/compile_report.py` の出典構築を `[]` に改変し、`uv run pytest -q` が落ちることを確認して復元する。落ちなければ T032 / T024 を強化する（data-model 1.6）
-- [ ] T034 [US4] **変異探針 M2** を実施する。`src/trend_researcher/graph.py` の `_route_after_search` を常に `continue` に改変し、スイートが落ちることを確認して復元する。落ちなければ T016 を強化する（FR-015 / data-model 1.6）
+- [X] T034 [US4] **変異探針 M2** を実施する。`src/trend_researcher/graph.py` の `_route_after_search` を常に `continue` に改変し、スイートが落ちることを確認して復元する。落ちなければ T016 を強化する（FR-015 / data-model 1.6）
 - [ ] T035 [US4] **変異探針 M3** を実施する。`src/trend_researcher/progress.py` の `ProgressEmitter.TOTAL` を 8 に改変し、スイートが落ちることを確認して復元する。落ちなければ T015 を強化する（FR-015 / data-model 1.6）
 - [ ] T036 [US4] 縮退処理に対する追加の探針を実施する（quickstart 手順 5.3）。リトライループの打ち切り、`tools/transcript.py` の形式判定を `_parse_vtt` のみに、`nodes/compile_report.py` のキャッシュ書き込みの `try` 除去、`cache.read_json` の例外化、`providers/x.py` の重複除去（`seen` 判定）の除去。5 件すべてが検出されることを確認する（SC-004）
 - [ ] T037 [US4] 重複テストを統合し、旧ファイルを削除する。`tests/test_graph.py` の配線検証は `tests/integration/test_graph_wiring.py` へ、`tests/test_configuration.py` の設定検証は `tests/unit/test_configuration.py`（新規作成。旧ファイルの内容を吸収して強化）へ移したことを確認してから両ファイルを削除する。互換シムは残さない（FR-017 / 憲法 原則 VI / data-model 1.7）
@@ -667,3 +667,14 @@ T026 のファイルシステム境界テスト（data-model 1.3 の `cache_dir 
 - 恒真アサート（`test_report_sources_invariant`）を削除した後（T032）でも検出されることを確認した。**T032 / T024 の追加強化は不要**。
 - 復元: `sha256sum` 一致（`de3eaca795c20c672e7a930430b812587ceba0fdc7725233a7a98a301d63b95b`）→ 復元後フルスイート **539 passed** → `git status --short` 清浄。
 - 補足: data-model 1.7 の `evidence` 列に書かれた「M1 未検出」は**旧テスト（恒真アサートのみ）の状態**を指す。現在は CLI 契約層（`test_cli_004_05_sources_are_listed`）まで含めて 3 層で検出できる。
+
+### T034: 変異探針 M2（候補なしの短絡を無効化する）の結果（2026-09-13 実測）
+
+- 変異: `src/trend_researcher/graph.py` の `_route_after_search` を `return "skip" if not candidates else "continue"` → `return "continue"`（候補 0 件でも fetch 以降へ進む）
+- 結果: **7 failed / 532 passed**。検出したテスト:
+  - `tests/integration/test_graph_wiring.py::test_route_after_search[empty]` / `[missing-key]` / `[none]`（戻り値の 3 分岐）
+  - `tests/integration/test_graph_wiring.py::test_zero_candidates_skips_fetch_and_downstream`（`fetch` 以降のノードが呼ばれないこと）
+  - `tests/integration/test_graph_wiring.py::test_zero_candidate_progress_line_count`（進捗 12 行 = 短絡経路の行数）
+  - `tests/integration/test_full_flow.py::test_empty_search_skips_the_rest_of_the_pipeline[x]` / `[youtube]`
+- data-model 1.7 の `tests/test_graph.py::TestGraphBuild`（`weak` / `is not None` のみ）を `test_graph_wiring.py` が置き換え済みであることの実測裏付けになった。**T016 の追加強化は不要**。
+- 復元: `sha256sum` 一致（`35552d6f9f4ab8e189cfab8f24c555bc90f0a2b2863f635d95a2c26919646252`）→ 復元後フルスイート **539 passed** → `git status --short` 清浄。
