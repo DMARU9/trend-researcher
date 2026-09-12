@@ -163,8 +163,8 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 
 - [X] T040 `pyproject.toml` に `[tool.coverage.run] source = ["trend_researcher"]`、`[tool.coverage.report] fail_under = 90` と除外設定、`[tool.pytest.ini_options].addopts = "--cov=trend_researcher --cov-report=term-missing"` を追加する。**カバレッジが目標に到達してから有効化する**（先行して有効化すると全テスト実行が赤になる。COV-001-1〜4 / COV-002）
 - [X] T041 `uv run pytest -q` を実行し、対象範囲の**合計**行カバレッジが 90% 以上であることを確認する。未達の場合は `contracts/coverage-policy.md` COV-004 の未実行行表に沿って該当ストーリーのテストを追加・強化する（個別モジュールの下限は要求しない。FR-019 / SC-002）
-- [ ] T042 [P] `uv run ruff check .` を実行する。本機能で変更・新規作成したファイル（`tests/` 全体、`pyproject.toml`、`src/trend_researcher/__main__.py`）が違反 0 件であり、リポジトリ全体の違反件数がベースライン（40 件）から増えていないことを確認する（憲法 品質ゲート）
-- [ ] T043 [P] `uv run mypy src` を実行する。`__main__.py` が違反 0 件であり、全体の件数がベースライン（37 件 / 12 ファイル）から増えていないことを確認する（憲法 品質ゲート）
+- [X] T042 [P] `uv run ruff check .` を実行する。本機能で変更・新規作成したファイル（`tests/` 全体、`pyproject.toml`、`src/trend_researcher/__main__.py`）が違反 0 件であり、リポジトリ全体の違反件数がベースライン（40 件）から増えていないことを確認する（憲法 品質ゲート）
+- [X] T043 [P] `uv run mypy src` を実行する。`__main__.py` が違反 0 件であり、全体の件数がベースライン（37 件 / 12 ファイル）から増えていないことを確認する（憲法 品質ゲート）
 - [ ] T044 `README.md` を契約に合わせて更新する。終了コード（0 / 1 / 2）、出力チャネルの分離（stdout = レポートのみ / stderr = 進捗・ログ・エラー）、`--output` の書き込み失敗時の挙動を `contracts/cli-contract.md` と一致させる（憲法 原則 V）
 - [ ] T045 憲法 `TODO(BASELINE-BURNDOWN)` の追跡タスクを起票する。ベースライン（`ruff` 40 件 / `mypy` 37 件）と、`UP037` の自動修正が import 追加とセットで必要な点（`nodes/analyze_content.py` / `nodes/compile_report.py`）を記載する。本機能の完了条件には含めない（research.md R-8）
 - [ ] T046 `quickstart.md` の受け入れ判定を全手順実施する。とくに（1）`uv run pytest -q` が全件 pass かつ **60 秒以内**（FR-020 / SC-001）、（2）`unshare -rn uv run pytest -q` が全件 pass（FR-001 / LAYOUT-003-1 / CLI-006-1〜3。CLI-006-3 は実測どおり `uv run pytest -q` が空の `OPENAI_API_KEY` で起動できることも確認する）、（3）単独実行・全体実行・順序変更で同一結果（FR-021 / SC-005）、（4）実行後に `git status --short` が清浄（テストが実リポジトリを汚さない）、（5）テスト件数が**純増**であり追加分を CLI 契約・失敗経路・LLM 解釈分岐の領域別に説明できる（SC-005）、（6）`git diff` で既存テストの期待値を実装の挙動へ書き換えていないこと（`tests/` の差分が「無効テストの強化・統合」と「新規テスト」に限られること。FR-022）
@@ -778,3 +778,16 @@ quickstart 手順 5.3 の 5 件を **1 件ずつ**（改変 → フルスイー�
 未実行 60 文の内訳: `__main__.py` 48（CLI 本体。契約はサブプロセス経由の `tests/integration/test_cli_contract.py` が担保しており、in-process の行カバレッジには現れない）、`providers/base.py` 11（`Protocol` の `...` プレースホルダ。T040 の `exclude_lines` 明示により分母に入ったもの）、`nodes/parse_instruction.py` 1（行 101）。
 
 個別モジュールの下限は要求しない（COV-002-4）。それでも 25 モジュール中 24 が 100% または 99% で、`__main__.py` のみ 46%（サブプロセス実行のため計測対象外の性質）。追加のテストは不要と判断した。
+
+### T042: ruff の品質ゲート（2026-09-13 実測）
+
+`uv run ruff check .`（ruff 0.16.5）:
+
+| 観測項目 | 実測 | 判定 |
+|----------|------|------|
+| リポジトリ全体 | **32 errors** | ベースライン **40 件** から 8 件**減少**（増加なし）✓ |
+| 本機能が変更・新規作成したファイル（`tests/` 全体、`pyproject.toml`、`src/trend_researcher/__main__.py`、`nodes/plan_search.py`） | **0 件**（`All checks passed!`） | ✓ |
+
+減少 8 件の内訳: `tests/unit/test_x_search.py` 4 / `tests/unit/test_models.py` 2 / `tests/integration/test_full_flow.py` 2（いずれも本機能で修正）。
+
+**ベースラインとの比較方法**: `git worktree add /tmp/tr-base cdfe7de` でベースラインを取り出し、同じ ruff 0.16.5 を実行して 40 件を確認した。`src/` の違反集合（ファイル名＋ルール、行番号を除く）は `diff` で**完全一致**（`analyze_content.py` 9 / `compile_report.py` 6 / `tools/x_search.py` 10 / `providers/base.py` 3 / `tools/transcript.py` 2 / `graph.py` 2）。本機能が触った `analyze_content.py` / `compile_report.py` に残る違反は**すべて変更前から存在する `UP037` / `F821`** で、新規発生はない。
