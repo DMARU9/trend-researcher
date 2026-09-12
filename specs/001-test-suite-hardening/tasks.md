@@ -78,20 +78,20 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 
 > **NOTE**: `main()` の戻り値だけの検証は契約の検証とみなさない（FR-002）。終了コード・stdout・stderr は必ず実行プロセスから観測する。
 
-- [ ] T008 [US1] `tests/integration/cli_harness.py` を新規作成する。境界モックを注入してから CLI の `main()` を呼ぶ起動スクリプト。ファイル名を `test_` で始めないことで pytest の収集対象から外し、シナリオは環境変数で選択する（LAYOUT-001-6 / plan.md Structure Decision）
-- [ ] T009 [US1] `tests/integration/conftest.py` に `cli_runner` フィクスチャを実装する。`sys.executable tests/integration/cli_harness.py <CLI 引数>` を `subprocess.run` で起動し、`(exit_code, stdout, stderr)` を返す。環境変数は呼び出しごとに明示的に組み立て、実認証情報を継承しない（data-model 1.2 / LAYOUT-004）
-- [ ] T010 [P] [US1] `tests/integration/test_cli_contract.py` を新規作成し、**層 A（引数エラー経路）**の契約テストを書く。モック不要で `sys.executable -m trend_researcher` を直接起動（`python` は使わない。LAYOUT-003 の実行環境依存を避ける）し、CLI-001-6（`--help` → 0）、CLI-001-10〜16（未知プラットフォーム / 位置引数欠落 / `--platform` 欠落 / `--since` 不正 / 未知 `--format` / 未知 `--sort` / `--max-results` 非整数 → いずれも 2）、CLI-001-17（空文字・空白のみの指示 → 2。**T017 で修正するまで失敗する**）、**列挙値の大文字小文字を正規化しない**こと（`--platform X` → 2）、CLI-002-3（stdout が 0 バイト）を固定する。各テストの docstring に契約 ID を書く（FR-004 / SC-003 / LAYOUT-002-1〜4）
-- [ ] T011 [US1] `tests/integration/test_cli_contract.py` に**層 B（成功経路）**の契約テストを追加する。CLI-001-1（0）、CLI-002-1 / CLI-002-2（stdout = レポートのみ・進捗行なし）、CLI-002-4（stderr に 7 ノード分の進捗）、CLI-002-5（stderr にログ・情報・警告）、CLI-003-1〜5（`--format json` が単一の JSON で `instruction.output.format == "json"`、Markdown の見出しが混入しない）、CLI-004-1〜5 / CLI-004-7（レポートの見出しと出典）を固定する。実グラフ + 境界モックで検証する（FR-003 / SC-003 / plan.md Complexity Tracking）
-- [ ] T012 [US1] `tests/integration/test_cli_contract.py` に**層 B（0 件・件数不足・出力先）**の契約テストを追加する。CLI-001-2（0 件 → 0）、CLI-001-3（件数不足 → 0）、CLI-004-6（共通テーマ 0 件 → `（特筆すべき共通点なし）`）、CLI-001-4 / CLI-002-6 / CLI-002-7（`--output` → stdout 0 バイト・ファイルに書き出し・stderr に完了メッセージ）を固定する（FR-006 / FR-007 / FR-008 / SC-003）
-- [ ] T013 [US1] `tests/integration/test_cli_contract.py` に**層 B（実行時エラー）**の契約テストを追加する。CLI-001-7（例外 → 1）、CLI-001-8（時間上限 → 1）、CLI-001-9（レポート欠落 → 1）を固定し、いずれも stdout が 0 バイトで stderr に `[エラー]` / `[警告]` が出ることを検証する。CLI-002-5（stderr にログ・情報・警告・エラーが出る）もあわせて固定する（FR-005 / SC-003）
-- [ ] T014 [US1] `tests/integration/test_cli_contract.py` に**出力先の書き込み失敗**（CLI-001-5）の契約テストを追加する。存在しない親ディレクトリと既存ディレクトリを指定し、終了コード 1・stdout 0 バイト・stderr に `[エラー]` 形式のメッセージが出て **`Traceback` を含まない**ことを固定する。**この時点でテストが失敗することを確認する**（research.md R-9 の欠陥を先に固定する）
-- [ ] T015 [P] [US1] `tests/unit/test_progress.py` を新規作成し、`ProgressEmitter` の出力形式（開始・完了）、`get_messages()` の蓄積、`TOTAL == len(NODE_ORDER)` を固定する。`TOTAL` を変更すると落ちること（data-model 1.6 の M3 の対）を確認する（LAYOUT-006-1 / LAYOUT-006-4）
-- [ ] T016 [P] [US1] `tests/integration/test_graph_wiring.py` を新規作成し、ノード順（`parse_instruction` → … → `compile_report`）、`search` の 0 件ルーティング（`skip` / `continue` の両分岐）、`len(NODE_ORDER)` とグラフに `add_node` されたノード数の一致、成功経路の進捗行数を固定する。`tests/test_graph.py` の後継である（FR-015 / LAYOUT-006-2 / LAYOUT-006-3）
+- [X] T008 [US1] `tests/integration/cli_harness.py` を新規作成する。境界モックを注入してから CLI の `main()` を呼ぶ起動スクリプト。ファイル名を `test_` で始めないことで pytest の収集対象から外し、シナリオは環境変数で選択する（LAYOUT-001-6 / plan.md Structure Decision）
+- [X] T009 [US1] `tests/integration/conftest.py` に `cli_runner` フィクスチャを実装する。`sys.executable tests/integration/cli_harness.py <CLI 引数>` を `subprocess.run` で起動し、`(exit_code, stdout, stderr)` を返す。環境変数は呼び出しごとに明示的に組み立て、実認証情報を継承しない（data-model 1.2 / LAYOUT-004）
+- [X] T010 [P] [US1] `tests/integration/test_cli_contract.py` を新規作成し、**層 A（引数エラー経路）**の契約テストを書く。モック不要で `sys.executable -m trend_researcher` を直接起動（`python` は使わない。LAYOUT-003 の実行環境依存を避ける）し、CLI-001-6（`--help` → 0）、CLI-001-10〜16（未知プラットフォーム / 位置引数欠落 / `--platform` 欠落 / `--since` 不正 / 未知 `--format` / 未知 `--sort` / `--max-results` 非整数 → いずれも 2）、CLI-001-17（空文字・空白のみの指示 → 2。**T017 で修正するまで失敗する**）、**列挙値の大文字小文字を正規化しない**こと（`--platform X` → 2）、CLI-002-3（stdout が 0 バイト）を固定する。各テストの docstring に契約 ID を書く（FR-004 / SC-003 / LAYOUT-002-1〜4）
+- [X] T011 [US1] `tests/integration/test_cli_contract.py` に**層 B（成功経路）**の契約テストを追加する。CLI-001-1（0）、CLI-002-1 / CLI-002-2（stdout = レポートのみ・進捗行なし）、CLI-002-4（stderr に 7 ノード分の進捗）、CLI-002-5（stderr にログ・情報・警告）、CLI-003-1〜5（`--format json` が単一の JSON で `instruction.output.format == "json"`、Markdown の見出しが混入しない）、CLI-004-1〜5 / CLI-004-7（レポートの見出しと出典）を固定する。実グラフ + 境界モックで検証する（FR-003 / SC-003 / plan.md Complexity Tracking）
+- [X] T012 [US1] `tests/integration/test_cli_contract.py` に**層 B（0 件・件数不足・出力先）**の契約テストを追加する。CLI-001-2（0 件 → 0）、CLI-001-3（件数不足 → 0）、CLI-004-6（共通テーマ 0 件 → `（特筆すべき共通点なし）`）、CLI-001-4 / CLI-002-6 / CLI-002-7（`--output` → stdout 0 バイト・ファイルに書き出し・stderr に完了メッセージ）を固定する（FR-006 / FR-007 / FR-008 / SC-003）
+- [X] T013 [US1] `tests/integration/test_cli_contract.py` に**層 B（実行時エラー）**の契約テストを追加する。CLI-001-7（例外 → 1）、CLI-001-8（時間上限 → 1）、CLI-001-9（レポート欠落 → 1）を固定し、いずれも stdout が 0 バイトで stderr に `[エラー]` / `[警告]` が出ることを検証する。CLI-002-5（stderr にログ・情報・警告・エラーが出る）もあわせて固定する（FR-005 / SC-003）
+- [X] T014 [US1] `tests/integration/test_cli_contract.py` に**出力先の書き込み失敗**（CLI-001-5）の契約テストを追加する。存在しない親ディレクトリと既存ディレクトリを指定し、終了コード 1・stdout 0 バイト・stderr に `[エラー]` 形式のメッセージが出て **`Traceback` を含まない**ことを固定する。**この時点でテストが失敗することを確認する**（research.md R-9 の欠陥を先に固定する）
+- [X] T015 [P] [US1] `tests/unit/test_progress.py` を新規作成し、`ProgressEmitter` の出力形式（開始・完了）、`get_messages()` の蓄積、`TOTAL == len(NODE_ORDER)` を固定する。`TOTAL` を変更すると落ちること（data-model 1.6 の M3 の対）を確認する（LAYOUT-006-1 / LAYOUT-006-4）
+- [X] T016 [P] [US1] `tests/integration/test_graph_wiring.py` を新規作成し、ノード順（`parse_instruction` → … → `compile_report`）、`search` の 0 件ルーティング（`skip` / `continue` の両分岐）、`len(NODE_ORDER)` とグラフに `add_node` されたノード数の一致、成功経路の進捗行数を固定する。`tests/test_graph.py` の後継である（FR-015 / LAYOUT-006-2 / LAYOUT-006-3）
 
 ### Implementation for User Story 1
 
-- [ ] T017 [US1] `src/trend_researcher/__main__.py` の `main()` を**2 箇所**最小修正する。（1）`--output` 書き込み（`Path(args.output).write_text(...)`）を `try/except OSError` で捕捉し、`[エラー] レポートを <PATH> に書き出せませんでした: <理由>` を stderr に出して `1` を返す（捕捉型は `OSError` に統一し、`FileNotFoundError` と `IsADirectoryError` の非対称を作らない。FR-023 / research.md R-9）。（2）引数解析の直後（外部接続より前）に、指示が空文字または空白のみなら `[エラー] 指示を指定してください。` を stderr に出して `2` を返す（FR-025 / CLI-001-17）
-- [ ] T018 [US1] `uv run pytest -q tests/integration/test_cli_contract.py` が green になることを確認し、続けて **T017 の 2 箇所をそれぞれ戻すと対応するテストが落ちる**ことを 1 件ずつ実測する（（1）は T014、（2）は T010 の CLI-001-17。変異探針の手順: 改変 → 失敗確認 → 復元 → `sha256sum` 一致 → スイート再実行 → `git status` 清浄。quickstart 手順 5.1。**2 箇所を同時に戻さない**）
+- [X] T017 [US1] `src/trend_researcher/__main__.py` の `main()` を**2 箇所**最小修正する。（1）`--output` 書き込み（`Path(args.output).write_text(...)`）を `try/except OSError` で捕捉し、`[エラー] レポートを <PATH> に書き出せませんでした: <理由>` を stderr に出して `1` を返す（捕捉型は `OSError` に統一し、`FileNotFoundError` と `IsADirectoryError` の非対称を作らない。FR-023 / research.md R-9）。（2）引数解析の直後（外部接続より前）に、指示が空文字または空白のみなら `[エラー] 指示を指定してください。` を stderr に出して `2` を返す（FR-025 / CLI-001-17）
+- [X] T018 [US1] `uv run pytest -q tests/integration/test_cli_contract.py` が green になることを確認し、続けて **T017 の 2 箇所をそれぞれ戻すと対応するテストが落ちる**ことを 1 件ずつ実測する（（1）は T014、（2）は T010 の CLI-001-17。変異探針の手順: 改変 → 失敗確認 → 復元 → `sha256sum` 一致 → スイート再実行 → `git status` 清浄。quickstart 手順 5.1。**2 箇所を同時に戻さない**）
 
 **Checkpoint**: US1 完了。CLI の外部契約が独立に検証でき、既知の実装欠陥 2 件（`--output` 書き込み失敗の Traceback / 空指示の素通し）が修正されて回帰防止が入った
 
@@ -361,4 +361,17 @@ uv run pytest -q
 uv run pytest -q --cov=trend_researcher --cov-report=term-missing
 uv run pytest -q --collect-only | grep -c "::"
 ```
+
+### T018: 変異探針 — T017 の 2 箇所を個別に戻す（2026-09-12 実測）
+
+**1 件ずつ実施**し、各件で「改変 → 失敗確認 → 復元 → `sha256sum` 一致 → フルスイート再実行 → `git status --short` 清浄」を完了させた。2 箇所を同時には戻していない。
+
+| 変異 | 落ちるテスト | 実測 |
+|------|--------------|------|
+| （1）`--output` 書き込みの `try/except OSError` を外す | T014: `test_cli_001_05_output_write_failure[missing-parent]` / `[existing-directory]` / `test_cli_001_05_write_failure_has_single_error_line` | **3 failed / 150 passed** |
+| （2）空指示ガード（`if not args.instruction.strip(): ... return 2`）を削除する | T010: `test_cli_001_17_blank_instruction[empty]` / `[spaces]` / `[tabs-and-newline]` / `[ideographic-space]` | **4 failed / 149 passed** |
+
+復元後の `sha256sum` はいずれも変異前と一致（`286b5921953b24a816c7d42a31358ee5aba67b1fa168cb274a1fac96ef026390`）。復元後のフルスイートは両件とも **153 passed**。すなわち T017 の 2 箇所はそれぞれ独立したテストに守られている。
+
+CLI-001-5 / CLI-001-17 は「実装を直す前に red を確認した」唯一の契約であり、変更前のベースライン（T004: 61 passed）でも対応するテストは存在しなかった。
 
