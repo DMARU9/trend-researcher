@@ -38,6 +38,8 @@
 | `providers/`（レジストリ・行描画） | `tests/unit/test_providers.py` |
 | `nodes/parse_instruction.py` | `tests/unit/test_parse_instruction.py` |
 | `nodes/plan_search.py` | `tests/unit/test_plan_search.py` |
+| `nodes/search.py` | `tests/unit/test_search.py` |
+| `nodes/fetch.py` | `tests/unit/test_fetch.py` |
 | `nodes/analyze_content.py` | `tests/unit/test_analyze_content.py` |
 | `nodes/extract_common.py` | `tests/unit/test_extract_common.py` |
 | `nodes/compile_report.py` | `tests/unit/test_compile_report.py` |

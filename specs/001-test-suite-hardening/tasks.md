@@ -924,7 +924,7 @@ COV-001-3（しきい値未達で非ゼロ終了）と FR-018（1 コマンド�
 
 `/speckit.converge` による収束監査（2026-09-13 実測）。`spec.md` / `plan.md` / `tasks.md` を意図の唯一の根拠として、T001〜T046 完了後のコードの実態を照合した。25 件の FR、6 件の SC、30 件の受入シナリオ、計画の主要決定（層構成・差し替え境界・CLI プロセス観測・`src/` 変更範囲・dev 依存・合計カバレッジ・重複統合・変異探針・待機固定・60 秒上限）、憲法 I〜VI を点検し、**未達 3 件**を検出した。以下は既存タスクの書き換えではなく追加である（T001〜T046 とその Implementation Notes は変更しない）。
 
-- [ ] T047 **CRITICAL** 進捗メッセージ重複の修正を差し戻すと落ちるテストを、未保護の 3 ノード（`src/trend_researcher/nodes/fetch.py` / `src/trend_researcher/nodes/compile_report.py` / `src/trend_researcher/nodes/search.py`）に追加する — **Issue #48** per Constitution I / FR-023 (partial)
+- [X] T047 **CRITICAL** 進捗メッセージ重複の修正を差し戻すと落ちるテストを、未保護の 3 ノード（`src/trend_researcher/nodes/fetch.py` / `src/trend_researcher/nodes/compile_report.py` / `src/trend_researcher/nodes/search.py`）に追加する — **Issue #48** per Constitution I / FR-023 (partial)
 
   実測（2026-09-13、7 ノードを 1 件ずつ `extend(emitter.get_messages())` へ差し戻し）: `analyze_content` 1 failed / `parse_instruction` 1 failed / `extract_common` 2 failed / `plan_search` 1 failed は**検出される**。一方 `fetch.py` **535 passed** / `compile_report.py` **535 passed** / `search.py` **535 passed** は**検出不能**（いずれも改変 → 実行 → 復元 → `sha256sum` 一致 → フルスイート 535 passed → `git status --short` 清浄を確認済み）。憲法 I は「すべての挙動変更は対応する自動テストと同時に提供する MUST」「対象の挙動を削除・改変しても緑のままのテストは無効であり、無効なテストしかない変更は未完了」と定めており、FR-023 も「修正を元に戻すと対応するテストが失敗することを確認 MUST」と要求する。3 ノード分が未充足。
 
@@ -945,3 +945,26 @@ COV-001-3（しきい値未達で非ゼロ終了）と FR-018（1 コマンド�
   実測: T027 は `parse_instruction` の `and input_max != 5:` を除去し、「同クラスの点検」で `platform` / `output_format` / `published_after` / `use_trends` / `sort_by` / `transcript_language` と `Configuration` 側の `elif configurable.max_results != 5:` を列挙しているが、`nodes/search.py:27`（`max_results = configurable.max_results if configurable.max_results != 5 else (instruction.max_results or 5)`）は列挙されていない。
 
   実測による等価性: `Configuration.max_results` は CLI からは `args.max_results or 5` で渡り、`parse_instruction` も `search` も「5 は未指定」と同じ扱いをするため、両者の解はすべての分岐で一致する（明示 5 は `state["max_results"]` 側が先に捕まえる）。すなわち**現時点で観測可能な不整合はない**。したがって本件は欠陥の修正ではなく、監査記録の穴（FR-023 の「同クラスの点検」が search 側センチネルに触れていない）と、既定値リテラル `5` の二重管理の解消である。等価であることを記録できない場合は、除去ではなく記録の追記で閉じる。
+
+### T047: 変異探針 — 未保護 3 ノードの差し戻し検出（2026-09-13 実測）
+
+`nodes/search.py` / `nodes/fetch.py` / `nodes/compile_report.py` の末尾の `progress_messages = emitter.get_messages()` を、**1 件ずつ** `progress_messages.extend(emitter.get_messages())` へ差し戻して実測した。各件で「改変 → 対象テストの失敗確認 → 復元 → `sha256sum` 一致 → フルスイート再実行 → `git status --short` 清浄」を完了させている。
+
+| 対象 | 落ちるテスト | 実測 |
+|------|--------------|------|
+| `nodes/fetch.py` | `tests/unit/test_fetch.py::test_progress_messages_report_start_then_finish` / `..._without_candidates` | **2 failed** |
+| `nodes/compile_report.py` | `tests/unit/test_compile_report.py::test_progress_messages_end_with_summary_and_rendered_markdown` | **1 failed / 37 passed** |
+| `nodes/search.py` | `tests/unit/test_search.py::test_progress_messages_report_start_then_finish` / `test_progress_messages_report_zero_candidates` | **2 failed** |
+
+復元後の `sha256sum` はいずれも変異前と一致。復元後のフルスイートは **539 passed**（T046 完了時点は 535 passed。内訳: `test_search.py` 2 件・`test_fetch.py` 2 件を新規追加、`test_compile_report.py` の既存 1 件を完全一致へ強化）。
+
+**なぜ単体テストでなければならないか**: 統合テスト（graph 経由）では原理的に検出できない。LangGraph の `add_messages` が**同一オブジェクトの id で畳み込む**ため、ノードが「開始」を二重に載せても state では 1 行に潰れる（T028「観測点」表・変異探針（3）で実測済み）。`nodes/search.py` / `nodes/fetch.py` は `tests/` から直接呼ばれておらず（`grep -rn "search_node\|fetch_node" tests/` が 0 件）、`test_compile_report.py` の既存断言は `any("[7/7] compile_report ... 開始" in m.content for m in messages)` で重複を吸収していた。3 件とも**戻り値 `messages` の完全一致**に変えたので、どちらも検出できるようになった。
+
+| 追記・変更した検証 | 固定内容 |
+|--------------------|----------|
+| `tests/unit/test_search.py`（新規） | 戻り値 = `[開始, 完了（3 件を選定）, 検索クエリ: ...]`。候補 0 件の経路も 3 件のまま（行数が増減しない） |
+| `tests/unit/test_fetch.py`（新規） | 戻り値 = `[開始, 完了（コンテキスト取得 N 件（追加文脈なし 0 件））]`。候補 0 件の経路も 2 件のまま |
+| `tests/unit/test_compile_report.py`（強化） | `messages[:2]` の完全一致 ＋ `len(messages) == 4`（中間に余計な行が入らないことまで固定） |
+| `contracts/test-layout.md`（配置マップ） | `nodes/search.py` / `nodes/fetch.py` の行を追加（LAYOUT-001-4 の 1 モジュール 1 ファイル規約に従う） |
+
+品質ゲート: `uv run pytest -q` = 539 passed / 55.64 秒（60 秒以内）・カバレッジ **95.26%**（1,265 stmts / 60 miss、90% 以上）・`ruff check .` 32 件（変更 3 ファイルは clean、ベースライン増加なし）・`mypy src` 34 errors / 11 files（増加なし）。

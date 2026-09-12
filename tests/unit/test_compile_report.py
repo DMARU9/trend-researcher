@@ -315,10 +315,16 @@ def test_progress_messages_end_with_summary_and_rendered_markdown() -> None:
     result = compile_report(state, _config())
 
     messages = result["messages"]
+    # 先頭は「開始 → 完了」の順で重複しない。`any(...)` で探す形では、開始行が
+    # 二重に載っても（`progress_messages.extend(...)` への差し戻し）気づけない（T047）。
+    assert [m.content for m in messages[:2]] == [
+        "[7/7] compile_report ... 開始",
+        "[7/7] compile_report ... 完了",
+    ]
+    # 中間に余計な行が入らないことまで固定する（開始の重複や書き込み失敗行の混入）。
+    assert len(messages) == 4
     assert messages[-2].content == "レポート完了: 2 件の候補を分析し、1 件の共通テーマを抽出しました。"
     assert messages[-1].content == _markdown(result["report"])
-    assert any("[7/7] compile_report ... 開始" in m.content for m in messages)
-    assert any("[7/7] compile_report ... 完了" in m.content for m in messages)
 
 
 # ---------------------------------------------------------------------------
