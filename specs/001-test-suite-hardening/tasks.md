@@ -162,7 +162,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 **Purpose**: 品質ゲートと受け入れ判定。カバレッジ設定の有効化はこの Phase で行う（COV-001 のタスク順序制約）。
 
 - [X] T040 `pyproject.toml` に `[tool.coverage.run] source = ["trend_researcher"]`、`[tool.coverage.report] fail_under = 90` と除外設定、`[tool.pytest.ini_options].addopts = "--cov=trend_researcher --cov-report=term-missing"` を追加する。**カバレッジが目標に到達してから有効化する**（先行して有効化すると全テスト実行が赤になる。COV-001-1〜4 / COV-002）
-- [ ] T041 `uv run pytest -q` を実行し、対象範囲の**合計**行カバレッジが 90% 以上であることを確認する。未達の場合は `contracts/coverage-policy.md` COV-004 の未実行行表に沿って該当ストーリーのテストを追加・強化する（個別モジュールの下限は要求しない。FR-019 / SC-002）
+- [X] T041 `uv run pytest -q` を実行し、対象範囲の**合計**行カバレッジが 90% 以上であることを確認する。未達の場合は `contracts/coverage-policy.md` COV-004 の未実行行表に沿って該当ストーリーのテストを追加・強化する（個別モジュールの下限は要求しない。FR-019 / SC-002）
 - [ ] T042 [P] `uv run ruff check .` を実行する。本機能で変更・新規作成したファイル（`tests/` 全体、`pyproject.toml`、`src/trend_researcher/__main__.py`）が違反 0 件であり、リポジトリ全体の違反件数がベースライン（40 件）から増えていないことを確認する（憲法 品質ゲート）
 - [ ] T043 [P] `uv run mypy src` を実行する。`__main__.py` が違反 0 件であり、全体の件数がベースライン（37 件 / 12 ファイル）から増えていないことを確認する（憲法 品質ゲート）
 - [ ] T044 `README.md` を契約に合わせて更新する。終了コード（0 / 1 / 2）、出力チャネルの分離（stdout = レポートのみ / stderr = 進捗・ログ・エラー）、`--output` の書き込み失敗時の挙動を `contracts/cli-contract.md` と一致させる（憲法 原則 V）
@@ -764,3 +764,17 @@ quickstart 手順 5.3 の 5 件を **1 件ずつ**（改変 → フルスイー�
 **しきい値の実効性（実測）**: `fail_under = 99` に一時変更すると `uv run pytest -q` は **exit 1**（`FAIL Required test coverage of 99.0% not reached. Total coverage: 95.26%`）、90 に戻すと **exit 0**（`Required test coverage of 90.0% reached`）。COV-001-3 の「しきい値を下回ると pytest が非ゼロ終了する」が成立する。
 
 **契約の設定が計測値に与える影響（実測で判明）**: `exclude_lines` を明示すると coverage の**既定の除外が置き換わる**ため、`providers/base.py` の `Protocol` プレースホルダ（`...` のみの行）11 件が分母に入る。合計は 1,246 文 / 49 未実行 / 96.1%（既定除外のまま）→ **1,265 文 / 60 未実行 / 95.26%**（契約の `exclude_lines`）。契約どおりの設定でも 90% を満たすため設定はそのまま採用し、数値の差だけを記録する（`exclude_also` に変えると既定除外を保てるが、契約の記載から外れる）。
+
+### T041: 合計カバレッジの確認（2026-09-13 実測）
+
+`uv run pytest -q`（addopts により計測が有効）の結果:
+
+| 項目 | 実測 |
+|------|------|
+| テスト | **535 passed**（約 47 秒） |
+| TOTAL | **1,265 文 / 60 未実行 / 95.26%** |
+| 判定 | **95.26% ≥ 90% → ✓**（COV-002-1。判定は合計値で行う） |
+
+未実行 60 文の内訳: `__main__.py` 48（CLI 本体。契約はサブプロセス経由の `tests/integration/test_cli_contract.py` が担保しており、in-process の行カバレッジには現れない）、`providers/base.py` 11（`Protocol` の `...` プレースホルダ。T040 の `exclude_lines` 明示により分母に入ったもの）、`nodes/parse_instruction.py` 1（行 101）。
+
+個別モジュールの下限は要求しない（COV-002-4）。それでも 25 モジュール中 24 が 100% または 99% で、`__main__.py` のみ 46%（サブプロセス実行のため計測対象外の性質）。追加のテストは不要と判断した。
