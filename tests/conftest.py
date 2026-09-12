@@ -110,10 +110,11 @@ class _FakeMessage:
 class _FakeLLM:
     """1 ノード分の応答だけを知る LLM フェイク。"""
 
-    def __init__(self, node: str, content: str) -> None:
+    def __init__(self, node: str, content: str, prompts: list[str] | None = None) -> None:
         self.node = node
         self.content = content
-        self.prompts: list[str] = []
+        # 同一ノードの複数インスタンスで共有できるよう、外部からリストを注入できる
+        self.prompts: list[str] = prompts if prompts is not None else []
 
     def _next(self, prompt: str) -> _FakeMessage:
         self.prompts.append(prompt)
@@ -137,6 +138,10 @@ class FakeModelFactory:
 
     def __init__(self) -> None:
         self.models: dict[str, _FakeLLM] = {}
+        #: ノードごとのプロンプト記録。`build_model` が複数回呼ばれるノード
+        #: （例: analyze_content は候補ごとに呼ぶ）でも全件残すため、
+        #: インスタンスごとのリストではなくノード単位で共有する。
+        self.prompt_log: dict[str, list[str]] = {}
 
     def _build_model(self, node: str, content: str | None) -> Callable[..., _FakeLLM]:
         def _build(role: str = "research") -> _FakeLLM:
@@ -145,7 +150,7 @@ class FakeModelFactory:
                     f"fake_model_factory: ノード {node} の応答が指定されていません。"
                     "プロンプト本文によるディスパッチは行いません（LAYOUT-004-4）。"
                 )
-            model = _FakeLLM(node, content)
+            model = _FakeLLM(node, content, self.prompt_log.setdefault(node, []))
             self.models[node] = model
             return model
 
@@ -159,6 +164,7 @@ class FakeModelFactory:
             raise AssertionError(f"fake_model_factory: 未知のノード名 {sorted(unknown)}")
 
         self.models = {}
+        self.prompt_log = {}
         with ExitStack() as stack:
             for node in LLM_NODES:
                 content = responses.get(node)
@@ -171,9 +177,9 @@ class FakeModelFactory:
             yield self
 
     def prompts_for(self, node: str) -> list[str]:
-        """指定ノードの `build_model` に渡されたプロンプトの一覧。"""
-        model = self.models.get(node)
-        return list(model.prompts) if model else []
+        """指定ノードの `build_model` に渡されたプロンプトの一覧（全インスタンス分）。"""
+        instance = self.models.get(node)
+        return list(instance.prompts) if instance else []
 
 
 # --- 境界モックフィクスチャ 5 種（data-model 1.2 / LAYOUT-003-3） ----------

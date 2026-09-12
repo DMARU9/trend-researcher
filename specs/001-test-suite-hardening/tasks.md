@@ -112,7 +112,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 - [X] T023 [P] [US2] `tests/unit/test_config.py` を新規作成する。環境変数の優先順位（`TR_*` > `XTR_*` / `YTR_*` > 既定）、`cache_dir` と `accounts_db` のパス解決、未設定・空文字の扱いを固定する（FR-019 の対象範囲 / COV-004 の `config.py` 未実行行）
 - [X] T024 [P] [US2] `tests/unit/test_compile_report.py` を新規作成する。Markdown / JSON の描画、共通テーマが 0 件の場合の `（特筆すべき共通点なし）`、備考の選定基準と投稿日フィルタ（CLI-004-8）、候補 0 件の空レポート、**キャッシュ書き込み失敗を備考に記録して継続する**縮退を固定する（FR-009 / COV-004 の `nodes/compile_report.py` 未実行行 34 / 44-45 / 62-65 / 105-107 / 136-141）
 - [X] T025 [US2] `tests/unit/test_providers.py` を新規作成する。provider レジストリ、未知プラットフォームの拒否、行描画（表ヘッダ・ラベル・件名）の差分を固定する（FR-009 / 憲法 原則 IV）
-- [ ] T026 [US2] `tests/integration/test_full_flow.py` を強化する。`_FakeModel` の**プロンプト部分一致ディスパッチを廃止**し、`fake_model_factory` によるノード単位の応答注入へ変更する（現状は `extract_common` のプロンプトが「関連」を含むため検索クエリ応答が返り、共通テーマが 0 件になる。R-7）。あわせて境界の失敗経路（部分応答・例外）を含む経路を追加する（FR-009 / data-model 1.3 のマトリクス）
+- [X] T026 [US2] `tests/integration/test_full_flow.py` を強化する。`_FakeModel` の**プロンプト部分一致ディスパッチを廃止**し、`fake_model_factory` によるノード単位の応答注入へ変更する（現状は `extract_common` のプロンプトが「関連」を含むため検索クエリ応答が返り、共通テーマが 0 件になる。R-7）。あわせて境界の失敗経路（部分応答・例外）を含む経路を追加する（FR-009 / data-model 1.3 のマトリクス）
 
 **Checkpoint**: US2 完了。外部境界と永続化の失敗経路が独立に検証できる
 
@@ -386,4 +386,38 @@ T026 の統合テストで「複数クエリが同じ `id` を返す」境界応
 | 影響 | `--sort likes` で同一ツイートが複数の枠を占め、要求件数に達しない（5 件要求でも実質 3 件になる等） |
 | 対処 | `_dedupe()` を切り出し、両分岐で「取得順の先勝ち・統合なし」の除去を適用 |
 | 検証 | `tests/unit/test_x_search.py::test_x_provider_likes_dedupes_pool_before_sorting`。`_sort_by_likes(_dedupe(pool))` を `_sort_by_likes(pool)` に戻すと **1 failed / 38 passed**（修正前の状態を再現） |
+
+### T026 で検出した未配線: `--cache-dir` がレポート永続化に届かない（2026-09-13 実測）
+
+T026 のファイルシステム境界テスト（data-model 1.3 の `cache_dir ok / raises`）を設計している最中に検出した。FR-023 に基づき本機能の範囲で修正した。
+
+| 項目 | 内容 |
+|------|------|
+| 仕様（FR-012 / FR-014） | `--cache-dir`（`Configuration.cache_dir`）に `report.json` を書き出す |
+| 修正前の実装 | `compile_report` が `state.get("cache_dir")` だけを見ていた。`AgentInputState` に `cache_dir` の宣言が無く、`__main__._run_async` も `configurable` にしか入れないため、**CLI 経路では常に `None`**（実測: グラフ出力の `out.get("cache_dir")` → `None`） |
+| 影響 | `--cache-dir` がレポート永続化に対して無効（フラグが黙って効かない） |
+| 対処 | `state.get("cache_dir") or configurable.cache_dir` に変更（Studio 入力や途中再開による上書きは state を優先） |
+| 検証 | `tests/integration/test_full_flow.py::test_report_is_written_to_the_configured_cache_dir`。`or configurable.cache_dir` を戻すと **2 failed / 17 passed**（`test_unwritable_cache_dir_is_recorded_and_the_run_succeeds` も併せて落ちる = 書き込み試行自体が起きていない証拠） |
+
+同種の欠陥クラス（`state` だけを見て `configurable` にフォールバックしない読み取り）を全ノードで確認した: `platform` / `max_results` / `output_format` / `published_after` / `use_trends` / `sort_by` / `transcript_language` はいずれも `configurable` 優先または `state` フォールバックを持つ。該当したのは `cache_dir` のみ。
+
+### T026: `prompts_for` が複数インスタンスのプロンプトを捨てる（2026-09-13 実測）
+
+| 項目 | 内容 |
+|------|------|
+| 現象 | `analyze_content` は候補ごとに `build_model` を呼ぶが、`FakeModelFactory` は `self.models[node] = model` で最後の 1 インスタンスだけを保持し、`prompts_for` は 1 件しか返さなかった（実測: `prompts_for("analyze_content")` → 1 件） |
+| 影響 | 「候補ごとに 1 回プロンプトが渡る」ことを固定できず、ノード単位注入（R-7）の検証が弱い |
+| 対処 | ノード単位の共有リスト（`prompt_log`）を `_FakeLLM` に注入し、`prompts_for` は全インスタンス分を返す |
+| 検証 | `test_node_responses_are_recorded_per_node`（`len(...) == 5`）。修正前は同テストが 1 件で失敗 |
+
+### T026: 変異探針（2026-09-13 実測）
+
+**1 件ずつ実施**し、各件で「改変 → 失敗確認 → 復元 → `sha256sum` 一致 → フルスイート再実行 → `git status --short`」を完了させた。
+
+| 変異 | 落ちるテスト | 実測 |
+|------|--------------|------|
+| （1）`_route_after_search` を常に `"continue"` に固定（空検索の skip 分岐を除去） | `test_empty_search_skips_the_rest_of_the_pipeline[x-x_flow-ツイート]` / `[youtube-youtube_flow-動画]` | **2 failed / 17 passed** |
+| （2）`cache_dir = state.get("cache_dir") or configurable.cache_dir` から後半を除去 | `test_report_is_written_to_the_configured_cache_dir` / `test_unwritable_cache_dir_is_recorded_and_the_run_succeeds` | **2 failed / 17 passed** |
+
+復元後の `sha256sum` はいずれも変異前と一致（`graph.py`: `35552d6f9f4ab8e189cfab8f24c555bc90f0a2b2863f635d95a2c26919646252` / `compile_report.py`: `6ba5f03dec3f15d6bf1ecfaca3a85fe5d28ee5eca5b2d5f3a13bc40c893d26dd`）。復元後のフルスイートは **354 passed**（T025 完了時点は 339 passed）。
 

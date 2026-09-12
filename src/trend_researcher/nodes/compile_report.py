@@ -57,7 +57,9 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
 
     emitter.emit(7, NODE_COMPILE_REPORT, "完了")
 
-    cache_dir = state.get("cache_dir")
+    # 永続化先は Configuration（CLI --cache-dir / TR_CACHE_DIR）から渡る。
+    # state は Studio 入力や将来の途中再開による上書き用。
+    cache_dir = state.get("cache_dir") or configurable.cache_dir
     if cache_dir:
         try:
             write_json(Path(cache_dir), "report", report.model_dump(mode="json"))
