@@ -54,9 +54,12 @@ class XProvider:
             since = published_after.date().isoformat()
             queries = [f"{q} since:{since}" for q in queries]
 
+        # 取得した候補を溜めるプール。likes / relevance で取り方が違うため
+        # サイズは分岐内で決め、リスト自体は共通で 1 つだけ宣言する
+        pool: list[Candidate] = []
+
         if sort_by == "likes":
             pool_size = max(config.search_pool_size, max_results)
-            pool: list[Candidate] = []
             for q in queries:
                 pool.extend(search_tweets(q, max_results=pool_size, accounts_db=str(config.accounts_db)))
             # 重複を除去してからいいね降順に並べる（除去しないと同一ツイートが複数枠を占める。FR-024）
@@ -67,7 +70,6 @@ class XProvider:
             # 確保できるようプールを多めに取る。ただし search_pool_size（likes 用の 50）は
             # 使わず小さなバッファに留め、1アカウント当たりの検索リクエストを抑える。
             pool_size = max(max_results * 3, max_results + 20)
-            pool: list[Candidate] = []
             for q in queries:
                 pool.extend(
                     search_tweets(

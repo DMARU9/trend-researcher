@@ -93,12 +93,19 @@ def _read_subtitle_file(sub: dict) -> str:
 
 
 def _load_json(content: str) -> dict:
+    """json3 字幕ファイルの内容を辞書にする（読めない場合は空辞書）。
+
+    `json.loads` は型を問わず Any を返すため、オブジェクト以外（配列・数値・文字列）
+    をそのまま返すと `_parse_json3` が `dict.get` を呼べず AttributeError になる。
+    ここで空辞書へ畳み、呼び出し側は空字幕として縮退させる。
+    """
     import json
 
     try:
-        return json.loads(content)
+        parsed = json.loads(content)
     except json.JSONDecodeError:
         return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _parse_vtt(content: str) -> str:

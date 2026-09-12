@@ -136,6 +136,17 @@ def test_load_json_returns_empty_dict_for_broken_json():
     assert _load_json("これは JSON ではない") == {}
 
 
+def test_load_json_returns_empty_dict_for_non_object_json():
+    """JSON として読めてもオブジェクトでなければ空辞書（#47）。
+
+    `_parse_json3` は `data.get("events", [])` を呼ぶため、配列や文字列をそのまま
+    返すと AttributeError で落ちる。読めない場合と同じ「空字幕」へ畳む。
+    """
+    assert _load_json("[1, 2, 3]") == {}
+    assert _load_json('"字幕"') == {}
+    assert _load_json("null") == {}
+
+
 def test_fetch_transcript_reads_json3_from_data_events():
     """`requested_subtitles` のエントリに `data` が入っている場合（json3 直埋め）。"""
     info = {
