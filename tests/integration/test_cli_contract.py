@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -424,5 +425,66 @@ def test_cli_002_07_output_matches_stdout_rendering(cli_runner, tmp_path):
     assert file_result.exit_code == 0
     assert target.read_text(encoding="utf-8") == stdout_result.stdout.removesuffix("\n")
     assert stdout_result.stdout.endswith("\n")
+
+
+# --- CLI-001-7 / CLI-001-8 / CLI-001-9: 実行時エラー ----------------------
+
+
+def test_cli_001_07_runtime_exception_exits_one(cli_runner):
+    """CLI-001-7: 実行時に例外が発生したら終了コード 1（Traceback は出さない）。"""
+    result = cli_runner(*X_ARGS, scenario="raise_search")
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "[エラー] リサーチ実行中に問題が発生しました: X API が失敗しました" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_cli_001_08_timeout_exits_one(cli_runner):
+    """CLI-001-8: 実行が時間上限に達したら終了コード 1（警告を stderr へ）。"""
+    result = cli_runner(*X_ARGS, scenario="timeout")
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert re.search(
+        r"\[警告\] リサーチが時間上限（\d+分）に達しました。途中結果を返します。", result.stderr
+    )
+
+
+def test_cli_001_09_missing_report_exits_one(cli_runner):
+    """CLI-001-9: レポートが生成されなかったら終了コード 1。"""
+    result = cli_runner(*X_ARGS, scenario="no_report")
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "[エラー] レポートが生成されませんでした。" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("scenario", "marker"),
+    [
+        pytest.param("raise_search", "[エラー]", id="error"),
+        pytest.param("timeout", "[警告]", id="warning"),
+        pytest.param("x_fewer", "[情報]", id="info"),
+        pytest.param("x_success", "[1/7]", id="progress"),
+    ],
+)
+def test_cli_002_05_002_03_stderr_only_for_diagnostics(cli_runner, scenario, marker):
+    """CLI-002-5 / CLI-002-3: ログ・情報・警告・エラー・進捗は stderr のみに出る。"""
+    result = cli_runner(*X_ARGS, scenario=scenario)
+
+    assert marker in result.stderr
+    assert marker not in result.stdout
+
+
+def test_cli_001_07_partial_progress_still_keeps_stdout_clean(cli_runner):
+    """CLI-002-1 / CLI-002-3: 途中で失敗しても stdout には何も書かない。"""
+    result = cli_runner(*X_ARGS, scenario="raise_search")
+
+    # 失敗前に 2 ノード分の進捗は出ている（握り潰していない）
+    assert "[2/7] plan_search ... 完了" in result.stderr
+    assert "[3/7] search ... 開始" in result.stderr
+    assert result.stdout_bytes == b""
+
 
 
