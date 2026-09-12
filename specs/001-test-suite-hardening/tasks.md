@@ -345,3 +345,20 @@ git status --short                 # 残骸がないこと
 | 発見日 | 対象 | 仕様・計画の記述 | 実際 | 対処 |
 |--------|------|------------------|------|------|
 | — | — | — | — | — |
+
+### T004: 変更前のベースライン（2026-09-12 実測）
+
+| 観測項目 | 実測値 | 計画値（research.md R-2 / R-4、COV-003） | 一致 |
+|----------|--------|------------------------------------------|------|
+| `uv run pytest -q` | **61 passed**（0.48 秒） | 61 passed / 1.5 秒 | ✓ |
+| `--cov=trend_researcher --cov-report=term-missing` の TOTAL | **1206 文 / 未実行 214 / 82%** | 1,206 文 / 214 未実行 / 82% | ✓ |
+| `--collect-only` の件数（`grep -c "::"`） | **61** | 61 | ✓ |
+
+実測に用いたコマンド:
+
+```bash
+uv run pytest -q
+uv run pytest -q --cov=trend_researcher --cov-report=term-missing
+uv run pytest -q --collect-only | grep -c "::"
+```
+
