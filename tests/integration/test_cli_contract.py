@@ -339,3 +339,90 @@ def test_cli_001_01_x_likes_sort_records_criterion(cli_runner):
     assert result.exit_code == 0
     assert "選定基準: 検索結果からいいね数の多い順に上位 N 件を採用" in result.stdout
 
+
+# --- CLI-001-2 / CLI-001-3: 0 件・件数不足でも成功 ------------------------
+
+
+@pytest.mark.parametrize(
+    ("args", "scenario", "subject"),
+    [
+        pytest.param(X_ARGS, "x_zero", "ツイート", id="x"),
+        pytest.param(YT_ARGS, "youtube_zero", "動画", id="youtube"),
+    ],
+)
+def test_cli_001_02_zero_candidates_exit_zero(cli_runner, args, scenario, subject):
+    """CLI-001-2: 検索結果が 0 件でも終了コード 0（該当なしを stderr へ通知）。"""
+    result = cli_runner(*args, scenario=scenario)
+
+    assert result.exit_code == 0
+    assert (
+        f"該当なし: 指定された指示に一致する{subject}が見つかりませんでした。" in result.stderr
+    )
+    assert "該当なし" not in result.stdout
+    # 0 件でもレポートは描画される（空のレポート）
+    assert result.stdout.startswith("# リサーチレポート: ")
+
+
+def test_cli_001_03_fewer_results_exit_zero(cli_runner):
+    """CLI-001-3: 要求件数より取得件数が少なくても終了コード 0。"""
+    result = cli_runner(*X_ARGS, scenario="x_fewer")
+
+    assert result.exit_code == 0
+    assert "[情報] 要求件数 3 件に対し、実際に見つかったのは 1 件です。" in result.stderr
+    assert result.stdout.startswith("# リサーチレポート: ")
+
+
+def test_cli_004_06_no_common_themes(cli_runner):
+    """CLI-004-6: 共通テーマが 0 件なら `（特筆すべき共通点なし）` を出力する。"""
+    result = cli_runner(*X_ARGS, scenario="no_themes")
+
+    assert result.exit_code == 0
+    assert "（特筆すべき共通点なし）" in result.stdout
+    # 共通ネタ表のヘッダは出さない（0 件を表で表現しない）
+    assert "| テーマ | 説明 |" not in result.stdout
+
+
+# --- CLI-001-4 / CLI-002-6 / CLI-002-7: 出力先へ書き出す -----------------
+
+
+def test_cli_001_04_02_06_02_07_output_writes_file(cli_runner, tmp_path):
+    """CLI-001-4 / CLI-002-6 / CLI-002-7: `--output` はファイルへ書き、stdout は空。"""
+    target = tmp_path / "report.md"
+
+    result = cli_runner(*X_ARGS, "--output", str(target))
+
+    assert result.exit_code == 0
+    assert result.stdout == ""  # CLI-002-6: 0 バイト
+    assert result.stdout_bytes == b""
+    assert f"[完了] レポートを {target} に書き出しました。" in result.stderr
+    assert target.exists()
+    assert target.read_text(encoding="utf-8").startswith("# リサーチレポート: ")
+
+
+def test_cli_001_04_output_json_file(cli_runner, tmp_path):
+    """CLI-001-4 / CLI-002-7: `--format json` でも出力ファイルに JSON を書き出す。"""
+    target = tmp_path / "report.json"
+
+    result = cli_runner(*X_ARGS, "--format", "json", "--output", str(target))
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload["instruction"]["output"]["format"] == "json"
+
+
+def test_cli_002_07_output_matches_stdout_rendering(cli_runner, tmp_path):
+    """CLI-002-7: 同じ入力なら `--output` の内容は stdout の描画と一致する。
+
+    stdout は `print()` 経由のため末尾に改行が 1 つ付く。ファイルは `write_text()`
+    なので付かない。差はこの 1 文字のみであることを固定する。
+    """
+    stdout_result = cli_runner(*X_ARGS)
+    target = tmp_path / "report.md"
+    file_result = cli_runner(*X_ARGS, "--output", str(target))
+
+    assert file_result.exit_code == 0
+    assert target.read_text(encoding="utf-8") == stdout_result.stdout.removesuffix("\n")
+    assert stdout_result.stdout.endswith("\n")
+
+

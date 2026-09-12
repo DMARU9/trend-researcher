@@ -170,7 +170,7 @@ def _patched_boundaries(scenario: str) -> Iterator[None]:
         "no_themes": make_candidates("x", 3),
         "write_error": make_candidates("x", 3),
     }.get(scenario, make_candidates("x", 3))
-    yt_candidates = make_candidates("youtube", 3)
+    yt_candidates = make_candidates("youtube", 0 if scenario == "youtube_zero" else 3)
 
     with ExitStack() as stack:
         if scenario == "raise_search":
@@ -257,7 +257,7 @@ def main() -> None:
     known = (
         set(LLM_OVERRIDES)
         | _NO_BOUNDARY_SCENARIOS
-        | {"x_success", "x_zero", "x_fewer", "youtube_success", "raise_search", "timeout", "write_error"}
+        | {"x_success", "x_zero", "x_fewer", "youtube_success", "youtube_zero", "raise_search", "timeout", "write_error"}
     )
     if scenario not in known:
         print(
