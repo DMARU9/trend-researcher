@@ -919,3 +919,29 @@ T040 で `fail_under` を有効化した結果、**実行範囲を絞ると全�
 | `uv run pytest -q -o addopts="" tests/unit/test_compile_report.py` | 38 passed | — | `0` |
 
 COV-001-3（しきい値未達で非ゼロ終了）と FR-018（1 コマンドで計測）を同時に満たす以上、部分実行がこの影響を受けるのは避けられない。開発時の摩擦を減らすため、**部分実行では `--no-cov` を付ける**運用を README の品質ゲート節に追記した。quickstart 手順 6 の「すべて全件 pass」はテスト結果としては成立する（プロセス終了コードだけが 1 になる）。
+
+## Phase 8: Convergence
+
+`/speckit.converge` による収束監査（2026-09-13 実測）。`spec.md` / `plan.md` / `tasks.md` を意図の唯一の根拠として、T001〜T046 完了後のコードの実態を照合した。25 件の FR、6 件の SC、30 件の受入シナリオ、計画の主要決定（層構成・差し替え境界・CLI プロセス観測・`src/` 変更範囲・dev 依存・合計カバレッジ・重複統合・変異探針・待機固定・60 秒上限）、憲法 I〜VI を点検し、**未達 3 件**を検出した。以下は既存タスクの書き換えではなく追加である（T001〜T046 とその Implementation Notes は変更しない）。
+
+- [ ] T047 **CRITICAL** 進捗メッセージ重複の修正を差し戻すと落ちるテストを、未保護の 3 ノード（`src/trend_researcher/nodes/fetch.py` / `src/trend_researcher/nodes/compile_report.py` / `src/trend_researcher/nodes/search.py`）に追加する — **Issue #48** per Constitution I / FR-023 (partial)
+
+  実測（2026-09-13、7 ノードを 1 件ずつ `extend(emitter.get_messages())` へ差し戻し）: `analyze_content` 1 failed / `parse_instruction` 1 failed / `extract_common` 2 failed / `plan_search` 1 failed は**検出される**。一方 `fetch.py` **535 passed** / `compile_report.py` **535 passed** / `search.py` **535 passed** は**検出不能**（いずれも改変 → 実行 → 復元 → `sha256sum` 一致 → フルスイート 535 passed → `git status --short` 清浄を確認済み）。憲法 I は「すべての挙動変更は対応する自動テストと同時に提供する MUST」「対象の挙動を削除・改変しても緑のままのテストは無効であり、無効なテストしかない変更は未完了」と定めており、FR-023 も「修正を元に戻すと対応するテストが失敗することを確認 MUST」と要求する。3 ノード分が未充足。
+
+  原因（実測）: `tests/` に `search_node` / `fetch_node` を直接呼ぶテストが 1 件もない（`grep -rn "search_node\|fetch_node" tests/` が 0 件）。`test_compile_report.py::test_progress_messages_end_with_summary_and_rendered_markdown` は `any("[7/7] compile_report ... 開始" in m.content ...)` で重複を畳むため差分を吸収する。統合テスト `test_x_flow_progress_messages_follow_node_order` は LangGraph `add_messages` が同一オブジェクトの id で畳み込むため原理的に検出できない（T028「観測点」表・変異探針（3）で記録済み。T028 は `test_extract_common.py` と `test_parse_instruction.py` のみ「戻り値の完全一致」へ強化した）。
+
+  作業: 3 ノードの戻り値 `messages` を `[開始, 完了]` の完全一致で固定するテストを `tests/unit/` に追加し（憲法 I の配置規約。`compile_report` は既存テストの `any(...)` を完全一致へ強化）、各件で差し戻し検証を記録する。統合テストでは代替できないため、必ずノード単体の戻り値を見る。
+
+- [ ] T048 `plan.md`（124 / 147 / 152 行）と `tasks.md`（「タスクの粒度と注意点」）が宣言する `src/` の変更範囲を、実装の実態に合わせて是正記録する — **Issue #49** per plan: Scope/Structure Decision (contradicts)
+
+  実測: `git diff --stat cdfe7de -- src/` は **10 ファイル / +174 −47**（`__main__.py` に加えて 7 ノード・`providers/x.py`・`tools/parse.py`）。計画の宣言は「`src/` の変更は **1 ファイル 2 ブロックのみ**（いずれも `__main__.py` の `main()` 内）」「**それ以外の `src/` は変更しない**」、`tasks.md` も「`src/` の変更は `__main__.py` の `main()` 内の 2 箇所（T017）のみである」と述べており、実装と食い違う。
+
+  実装が正しい理由（是正の根拠）: FR-023 は「テスト追加の過程で検出された実装側の不具合は本機能の範囲で修正 MUST。独立した修正タスクへの切り出しで代替してはならない（MUST NOT）」と定める。残り 8 ファイルの変更は T026〜T031 がテスト作成中に検出した欠陥（進捗の重複 7 ノード・節分割の深さ・活用アイデア表の空セル・要約フォールバック・年号/期間表現の混入・JSON 非オブジェクト応答・likes 重複除去）への修正で、いずれも差し戻し検証が記録されている。計画の列挙は「計画時点で既知だった 2 件」であり、その前提が T026 以降に崩れたのが実態。
+
+  作業: `plan.md` の「分析による是正」節（および `tasks.md` の該当注意点）に、追加 8 ファイルと FR-023 の根拠を記録し、宣言と実装を一致させる。`plan.md` の宣言は後続の読み手にとって「変更してはいけない範囲」に見えるため、放置すると次の作業で誤った制約として働く。
+
+- [ ] T049 `nodes/search.py:27` の `configurable.max_results != 5` センチネルを T027 の同クラス点検の記録に加える（等価である理由を残す）か、解決済みの `instruction.max_results` に畳んで冗長なセンチネルを除去する — **Issue #50** per FR-011 (partial)
+
+  実測: T027 は `parse_instruction` の `and input_max != 5:` を除去し、「同クラスの点検」で `platform` / `output_format` / `published_after` / `use_trends` / `sort_by` / `transcript_language` と `Configuration` 側の `elif configurable.max_results != 5:` を列挙しているが、`nodes/search.py:27`（`max_results = configurable.max_results if configurable.max_results != 5 else (instruction.max_results or 5)`）は列挙されていない。
+
+  実測による等価性: `Configuration.max_results` は CLI からは `args.max_results or 5` で渡り、`parse_instruction` も `search` も「5 は未指定」と同じ扱いをするため、両者の解はすべての分岐で一致する（明示 5 は `state["max_results"]` 側が先に捕まえる）。すなわち**現時点で観測可能な不整合はない**。したがって本件は欠陥の修正ではなく、監査記録の穴（FR-023 の「同クラスの点検」が search 側センチネルに触れていない）と、既定値リテラル `5` の二重管理の解消である。等価であることを記録できない場合は、除去ではなく記録の追記で閉じる。
