@@ -115,7 +115,7 @@ def _parse_vtt(content: str) -> str:
             continue
         if s == "WEBVTT":
             continue
-        if s.startswith("Kind:") or s.startswith("Language:"):
+        if s.startswith(("Kind:", "Language:")):
             continue
         if "-->" in s:
             continue

@@ -8,9 +8,9 @@ twscrape は非同期 API のため、本モジュールは asyncio でラップ
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from twscrape import API, Tweet, User, gather
+from twscrape import API, Tweet, gather
 
 from trend_researcher.models import Candidate, Context
 
@@ -20,8 +20,8 @@ def _to_datetime(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _tweet_to_candidate(tweet: Tweet, rank: int) -> Candidate:
