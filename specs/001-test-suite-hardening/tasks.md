@@ -149,7 +149,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 - [X] T034 [US4] **変異探針 M2** を実施する。`src/trend_researcher/graph.py` の `_route_after_search` を常に `continue` に改変し、スイートが落ちることを確認して復元する。落ちなければ T016 を強化する（FR-015 / data-model 1.6）
 - [X] T035 [US4] **変異探針 M3** を実施する。`src/trend_researcher/progress.py` の `ProgressEmitter.TOTAL` を 8 に改変し、スイートが落ちることを確認して復元する。落ちなければ T015 を強化する（FR-015 / data-model 1.6）
 - [X] T036 [US4] 縮退処理に対する追加の探針を実施する（quickstart 手順 5.3）。リトライループの打ち切り、`tools/transcript.py` の形式判定を `_parse_vtt` のみに、`nodes/compile_report.py` のキャッシュ書き込みの `try` 除去、`cache.read_json` の例外化、`providers/x.py` の重複除去（`seen` 判定）の除去。5 件すべてが検出されることを確認する（SC-004）
-- [ ] T037 [US4] 重複テストを統合し、旧ファイルを削除する。`tests/test_graph.py` の配線検証は `tests/integration/test_graph_wiring.py` へ、`tests/test_configuration.py` の設定検証は `tests/unit/test_configuration.py`（新規作成。旧ファイルの内容を吸収して強化）へ移したことを確認してから両ファイルを削除する。互換シムは残さない（FR-017 / 憲法 原則 VI / data-model 1.7）
+- [X] T037 [US4] 重複テストを統合し、旧ファイルを削除する。`tests/test_graph.py` の配線検証は `tests/integration/test_graph_wiring.py` へ、`tests/test_configuration.py` の設定検証は `tests/unit/test_configuration.py`（新規作成。旧ファイルの内容を吸収して強化）へ移したことを確認してから両ファイルを削除する。互換シムは残さない（FR-017 / 憲法 原則 VI / data-model 1.7）
 - [ ] T038 [US4] 無効テストの判定記録を実績で更新する。`specs/001-test-suite-hardening/data-model.md` 1.7 の `resolution` 列（`strengthened` / `merged` / `removed` / `kept_with_reason`）と `evidence` 列を、実際の処置と変異探針の結果で埋める（FR-016 / SC-006）
 - [ ] T039 [US4] テストの収集範囲と配置を監査する。`uv run pytest -q --collect-only` で件数を確認し、`tests/integration/cli_harness.py` が収集されていないこと、ルート直下にテストファイルが残っていないこと、`tests/unit/` と `tests/integration/` の 2 層に収まっていることを確認する（FR-016 / LAYOUT-001-1〜3 / LAYOUT-001-6 / LAYOUT-001-7）
 
@@ -713,3 +713,27 @@ quickstart 手順 5.3 の 5 件を **1 件ずつ**（改変 → フルスイー�
 | `providers/x.py` | `c02fbb1580bbe1abc779af9eb47b98f34600ab2d0d329b8e90968092f4724d34` |
 
 復元後のフルスイートは **539 passed**、`git status --short` は清浄。5 件とも「落ちなければ T0xx を強化する」の条件に該当しなかったため、**追加のテスト強化は不要**。重複除去の探針が CLI 契約（`test_cli_001_03_fewer_results_exit_zero`）まで落ちたのは、候補の重複が候補数 → 終了コード判定に波及するため。
+
+### T037: 重複テストの統合と旧ファイル削除（2026-09-13 実測）
+
+ルート直下の 2 ファイルを削除し、配置を `tests/unit/` と `tests/integration/` の 2 層に統一した。**互換シムは残していない**（FR-017 / 憲法 原則 VI）。
+
+| 削除したファイル（件数） | 後継 | 内容 |
+|--------------------------|------|------|
+| `tests/test_graph.py`（9 件） | `tests/integration/test_graph_wiring.py` | `TestGraphBuild`（2 件・`graph is not None` のみ）はノード登録・エッジ順・条件分岐・0 件短絡・進捗行数を見るテストへ。`TestAgentState`（2 件・同一ファイル内で同一断言の重複）は削除。`TestConfiguration`（5 件）は新規の unit テストへ吸収 |
+| `tests/test_configuration.py`（10 件） | `tests/unit/test_configuration.py`（新規 15 件） | 既定値 8 フィールド・`from_runnable_config` の解決・None フィルタ・未知キー許容・JSON スキーマ・`model_dump` 往復 |
+
+`TestAgentState` の「`AgentState` が `messages` を宣言する」という契約は、宣言を消すと LangGraph の状態更新が失敗するため E2E 層が検出する（下の実測 1 件目）。単独の宣言テストを残す必要はない。
+
+**後継が旧ファイルの契約を検出することの実測**（旧ファイル削除後に実施。1 件ずつ復元・sha256 一致・フルスイート再実行）:
+
+| 変異（旧ファイルが扱っていた契約） | 検出 | 実測 |
+|------------------------------------|------|------|
+| `state.py` の `AgentState` から `report: ResearchReport` を削除 | E2E + CLI 契約 + 配線（44 件） | **44 failed / 491 passed** |
+| `configuration.py` の `max_results` 既定を 6 に | `tests/unit/test_configuration.py` 7 件 + `tests/unit/test_parse_instruction.py` 8 件 | **15 failed / 520 passed** |
+| `from_runnable_config` のフィルタを `if v is not None` → `if v` | `test_falsy_values_are_treated_as_specified[zero]` / `[empty-string-list]` | **2 failed / 533 passed** |
+| `configuration.py` の `output_format` 既定を `"markdown"` に | `tests/unit/test_configuration.py` 4 件 + `test_parse_instruction` 1 件 | **5 failed / 530 passed** |
+
+`if v` への変異で `use_trends=False` が落ちないのは、既定値も `False` で偶然一致するため（`0` と空文字の 2 件だけが検出点）。テストの docstring にこの理由を書いてある。
+
+**件数**: 539 → 535（削除 19 件 − 追加 15 件）。`git status --short` は削除 2 件と新規 1 件のみで、復元後のフルスイートは 535 passed。
