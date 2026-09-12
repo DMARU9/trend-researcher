@@ -61,10 +61,8 @@ def _route_after_search(state: dict) -> str:
 trend_researcher = build_graph()
 
 
-def render_report(report: "ResearchReport") -> str:
+def render_report(report: ResearchReport) -> str:
     """レポートを指示された形式（既定 markdown）で描画。"""
-    from trend_researcher.models import ResearchReport as _RR
-
     fmt = report.instruction.output.format
     if fmt == "json":
         return render_json(report)

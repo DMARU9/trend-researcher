@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
+from trend_researcher.config import Config
 from trend_researcher.models import Candidate, Context
 
 
@@ -17,16 +19,16 @@ class Provider(Protocol):
         self,
         queries: list[str],
         max_results: int,
-        published_after: "datetime | None",  # noqa: F821
+        published_after: datetime | None,
         sort_by: str,
-        config: "Config",  # noqa: F821
+        config: Config,
     ) -> list[Candidate]:
         """クエリから候補（Candidate）を検索し、上位 max_results 件を返す。"""
         ...
 
     # --- 要約用ソース取得（X: スレッド/リプライ, YouTube: 字幕）---
     def fetch_contexts(
-        self, candidates: list[Candidate], config: "Config"  # noqa: F821
+        self, candidates: list[Candidate], config: Config
     ) -> tuple[list[Context], list[str]]:
         """候補から要約用ソースを取得する。戻り値は (contexts, notes)。"""
         ...

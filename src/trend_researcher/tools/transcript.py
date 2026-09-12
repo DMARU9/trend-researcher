@@ -22,7 +22,7 @@ class Transcript:
     source: TranscriptSource = TranscriptSource.AUTOMATIC_CAPTION
 
 
-def fetch_transcript(video_id: str, language: str = "ja") -> "Transcript":
+def fetch_transcript(video_id: str, language: str = "ja") -> Transcript:
     """指定動画の字幕を取得する。
 
     yt-dlp の自動翻訳機能により、原則として必ず取得できる。

@@ -15,7 +15,7 @@ from twscrape import API, Tweet, User, gather
 from trend_researcher.models import Candidate, Context
 
 
-def _to_datetime(value: "datetime | None") -> datetime | None:
+def _to_datetime(value: datetime | None) -> datetime | None:
     """twscrape の datetime を UTC に正規化（naive なら UTC 付与）。"""
     if value is None:
         return None

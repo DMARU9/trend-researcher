@@ -8,9 +8,10 @@ from langchain_core.runnables import RunnableConfig
 
 from trend_researcher.cache import write_json
 from trend_researcher.configuration import Configuration
-from trend_researcher.models import ResearchReport
+from trend_researcher.models import AnalysisFinding, Candidate, ResearchReport
 from trend_researcher.progress import NODE_COMPILE_REPORT, make_emitter
 from trend_researcher.providers import get_provider
+from trend_researcher.providers.base import Provider
 from trend_researcher.state import AgentState
 
 
@@ -80,7 +81,7 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
     return {"report": report, "messages": progress_messages}
 
 
-def _render_candidates_table(report: ResearchReport, provider: "Provider") -> list[str]:  # noqa: F821
+def _render_candidates_table(report: ResearchReport, provider: Provider) -> list[str]:
     title_line = "## 選定ツイートリスト（上位 N 件）" if provider.name == "x" else "## 選定動画リスト（関連度順上位 N 件）"
     lines = [title_line, ""]
     head, sep = provider.candidate_table_header()
@@ -92,7 +93,9 @@ def _render_candidates_table(report: ResearchReport, provider: "Provider") -> li
     return lines
 
 
-def _render_analysis_block(c: "Candidate", a: "AnalysisFinding | None", provider: "Provider") -> list[str]:  # noqa: F821
+def _render_analysis_block(
+    c: Candidate, a: AnalysisFinding | None, provider: Provider
+) -> list[str]:
     lines: list[str] = [provider.render_block_title(c)]
     meta_line = " ｜ ".join(provider.render_block_meta(c))
     if meta_line:
@@ -132,7 +135,7 @@ def _render_analysis_block(c: "Candidate", a: "AnalysisFinding | None", provider
     return lines
 
 
-def _render_common_themes(report: ResearchReport, provider: "Provider") -> list[str]:  # noqa: F821
+def _render_common_themes(report: ResearchReport, provider: Provider) -> list[str]:
     label = provider.common_theme_supporting_label
     lines = ["## 共通ネタ（表）", ""]
     if report.common_themes:
@@ -148,7 +151,7 @@ def _render_common_themes(report: ResearchReport, provider: "Provider") -> list[
     return lines
 
 
-def render_markdown(report: ResearchReport, provider: "Provider") -> str:  # noqa: F821
+def render_markdown(report: ResearchReport, provider: Provider) -> str:
     """ResearchReport を Markdown 文字列に整形（FR-009 既定）。"""
     from trend_researcher.providers import get_provider
 

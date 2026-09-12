@@ -8,9 +8,10 @@ import re
 from langchain_core.runnables import RunnableConfig
 
 from trend_researcher.configuration import Configuration
-from trend_researcher.models import AnalysisFinding, BlogAngle
+from trend_researcher.models import AnalysisFinding, BlogAngle, Candidate, Context
 from trend_researcher.progress import NODE_ANALYZE_CONTENT, make_emitter
 from trend_researcher.providers import get_provider
+from trend_researcher.providers.base import Provider
 from trend_researcher.state import AgentState
 from trend_researcher.tools.llm import build_model
 from trend_researcher.tools.parse import extract_list_items, extract_section
@@ -37,7 +38,7 @@ def _parse_angles_table(markdown_table: str) -> list[BlogAngle]:
     return angles
 
 
-def _build_source_text(candidate: "Candidate", context: "Context | None") -> str:  # noqa: F821
+def _build_source_text(candidate: Candidate, context: Context | None) -> str:
     """ツイート本文＋スレッド＋リプライ、または字幕をソーステキストに整形。"""
     parts: list[str] = []
     body = candidate.text
@@ -55,7 +56,9 @@ def _build_source_text(candidate: "Candidate", context: "Context | None") -> str
     return "\n\n".join(parts)
 
 
-async def _analyze_one(candidate: "Candidate", source_text: str, provider: "Provider") -> AnalysisFinding:  # noqa: F821
+async def _analyze_one(
+    candidate: Candidate, source_text: str, provider: Provider
+) -> AnalysisFinding:
     model = build_model("research")
     prompt = provider.analyze_content_prompt.format(
         title=candidate.author_handle or candidate.title or candidate.url,
@@ -94,10 +97,12 @@ async def _analyze_one(candidate: "Candidate", source_text: str, provider: "Prov
     )
 
 
-async def _analyze_all(candidates: list["Candidate"], contexts_by_id: dict[str, "Context"], provider: "Provider") -> list[AnalysisFinding]:  # noqa: F821
+async def _analyze_all(
+    candidates: list[Candidate], contexts_by_id: dict[str, Context], provider: Provider
+) -> list[AnalysisFinding]:
     sem = asyncio.Semaphore(2)
 
-    async def _bounded(cand: "Candidate") -> AnalysisFinding:
+    async def _bounded(cand: Candidate) -> AnalysisFinding:
         source_text = _build_source_text(cand, contexts_by_id.get(cand.id))
         async with sem:
             return await _analyze_one(cand, source_text, provider)
