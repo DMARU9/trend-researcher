@@ -791,3 +791,18 @@ quickstart 手順 5.3 の 5 件を **1 件ずつ**（改変 → フルスイー�
 減少 8 件の内訳: `tests/unit/test_x_search.py` 4 / `tests/unit/test_models.py` 2 / `tests/integration/test_full_flow.py` 2（いずれも本機能で修正）。
 
 **ベースラインとの比較方法**: `git worktree add /tmp/tr-base cdfe7de` でベースラインを取り出し、同じ ruff 0.16.5 を実行して 40 件を確認した。`src/` の違反集合（ファイル名＋ルール、行番号を除く）は `diff` で**完全一致**（`analyze_content.py` 9 / `compile_report.py` 6 / `tools/x_search.py` 10 / `providers/base.py` 3 / `tools/transcript.py` 2 / `graph.py` 2）。本機能が触った `analyze_content.py` / `compile_report.py` に残る違反は**すべて変更前から存在する `UP037` / `F821`** で、新規発生はない。
+
+### T043: mypy の品質ゲート（2026-09-13 実測）
+
+`uv run mypy src`（mypy 2.3.1）:
+
+| 観測項目 | 実測 | 判定 |
+|----------|------|------|
+| 全体 | **34 errors / 11 files** | ベースライン（T004 記録 37 件 / 12 ファイル、T027 実測 36 件 / 12 ファイル）から**減少** ✓ |
+| `__main__.py` | **0 件** | ✓ |
+
+ルール別内訳: `name-defined` 17 / `arg-type` 13 / `misc` 2 / `no-redef` 1 / `no-any-return` 1。すべて変更前から存在するクラスで、本機能で新規に生じたものはない。
+
+**同条件での比較（`--no-site-packages` + 専用キャッシュ + ベースライン worktree）**: 22 件 / 6 ファイル（`analyze_content.py` 8 / `compile_report.py` 7 / `providers/base.py` 3 / `tools/parse.py` 2 / `tools/transcript.py` 1 / `providers/x.py` 1）→ **20 件 / 5 ファイル**（`tools/parse.py` の 2 件は T030 の `extract_json_block` 修正で解消）。どのファイルも件数は増えていない。
+
+**注意（計測の落とし穴）**: mypy の件数は site-packages（インストール済み依存の型情報）を見るかどうかで変わる（同一ツリーで 34 件 ↔ 20 件）。増減の判定は**同一条件どうし**で行う必要がある。また `--config-file` を変えた測定は `.mypy_cache` を共有すると前回のパスを再掲するため、条件を変えるときは `--cache-dir` を分けるか `rm -rf .mypy_cache` する。
