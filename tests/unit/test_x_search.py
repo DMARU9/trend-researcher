@@ -5,6 +5,7 @@
 - twscrape のデータを `Candidate` / `Context` へ写す変換（`_to_datetime` の UTC 正規化）
 - リトライ枯渇時は最後の例外を送出し、待機は指数バックオフ（1, 2, 4 秒）になる
 - スレッド・リプライ取得は例外・`None`・部分応答でも落ちずに縮退する
+  （縮退してよい型は twscrape 実測の例外に限定し、握り潰さず WARNING で残す・#47）
 - FR-024: 同一 `id` の重複除去は先勝ち・取得順維持・**除去後に**截断
 - 選定基準（relevance = いいね昇順＋本文欠落除外 / likes = いいね降順）
 - 描画（表ヘッダ・行・ブロック見出し・メタ）
@@ -15,12 +16,14 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 from unittest import mock
 
 import pytest
-from twscrape import Tweet, User
+from twscrape import HttpError, NoAccountError, Tweet, User
+from twscrape.queue_client import HandledError
 
 from trend_researcher.config import Config
 from trend_researcher.models import Candidate, Context
@@ -471,6 +474,85 @@ def test_fetch_thread_degrades_when_replies_raise():
         ctx = fetch_thread("100")
     assert ctx.text == "元ツイート"
     assert ctx.replies == []
+
+
+def test_fetch_thread_logs_and_degrades_on_http_error(caplog):
+    """twscrape の通信系（`HttpError`）は縮退し、握り潰さず WARNING に残す（#47）。
+
+    捕まえる型から `HttpError` を外すと例外が伝播して失敗し、ログ出力を `pass`
+    へ戻すと caplog の検証で失敗する（S110 / BLE001 の是正を固定する）。
+    """
+    api = _ThreadAPI(errors={100: HttpError("502 Bad Gateway")})
+    with (
+        caplog.at_level(logging.WARNING, logger="trend_researcher.tools.x_search"),
+        _install_thread_api(api),
+        mock.patch("trend_researcher.tools.x_search.gather", _gather),
+    ):
+        ctx = fetch_thread("100")
+
+    assert ctx.id == "100"
+    assert ctx.text == ""
+    assert ctx.counts is None
+    assert "ツイート本文の取得に失敗" in caplog.text
+    assert "tweet_id=100" in caplog.text
+
+
+def test_fetch_thread_logs_and_degrades_on_parent_lookup_error(caplog):
+    """親ツイートの取得失敗（`HandledError`）も縮退し、WARNING に残す（#47）。
+
+    元ツイート本文は保持したまま `thread_text` だけを諦める。
+    """
+    api = _ThreadAPI(
+        details={100: _fake_tweet(100, raw_content="元ツイート", in_reply_to=99)},
+        errors={99: HandledError("親が削除済み")},
+    )
+    with (
+        caplog.at_level(logging.WARNING, logger="trend_researcher.tools.x_search"),
+        _install_thread_api(api),
+        mock.patch("trend_researcher.tools.x_search.gather", _gather),
+    ):
+        ctx = fetch_thread("100")
+
+    assert ctx.text == "元ツイート"
+    assert ctx.thread_text == ""
+    assert api.detail_ids == [100, 99]
+    assert "親ツイートの取得に失敗" in caplog.text
+    assert "tweet_id=99" in caplog.text
+
+
+def test_fetch_thread_degrades_on_no_account_error_for_replies(caplog):
+    """アカウント枯渇（`NoAccountError`）でもリプライだけ諦めて本文は保持する（#47）。"""
+    api = _ThreadAPI(
+        details={100: _fake_tweet(100, raw_content="元ツイート")},
+        replies_error=NoAccountError("No account available for queue TweetDetails"),
+    )
+    with (
+        caplog.at_level(logging.WARNING, logger="trend_researcher.tools.x_search"),
+        _install_thread_api(api),
+        mock.patch("trend_researcher.tools.x_search.gather", _gather),
+    ):
+        ctx = fetch_thread("100")
+
+    assert ctx.text == "元ツイート"
+    assert ctx.replies == []
+    assert "リプライの取得に失敗" in caplog.text
+
+
+def test_fetch_thread_propagates_error_types_outside_the_degradation_list():
+    """列挙した型の外は縮退させない（実装バグを握り潰さない・#47）。
+
+    素の `except Exception` へ戻すと本テストは失敗する（`KeyError` が吸われる）。
+    """
+    api = _ThreadAPI(
+        details={100: _fake_tweet(100, raw_content="元ツイート")},
+        replies_error=KeyError("実装バグ相当"),
+    )
+    with (
+        _install_thread_api(api),
+        mock.patch("trend_researcher.tools.x_search.gather", _gather),
+        pytest.raises(KeyError),
+    ):
+        fetch_thread("100")
 
 
 def test_fetch_threads_returns_empty_for_no_candidates():

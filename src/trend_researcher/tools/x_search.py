@@ -8,11 +8,42 @@ twscrape は非同期 API のため、本モジュールは asyncio でラップ
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 
-from twscrape import API, Tweet, gather
+from twscrape import API, HttpError, NoAccountError, Tweet, gather
+from twscrape.queue_client import AbortReqError, HandledError
+from twscrape.xclid import XClIdError
 
 from trend_researcher.models import Candidate, Context
+
+logger = logging.getLogger(__name__)
+
+#: スレッド・リプライ取得（best-effort）で縮退してよい例外。
+#:
+#: 取得できない項目は空のまま `Context` を返し、呼び出し側は候補の本文だけで解析を
+#: 続ける（`providers/x.py::fetch_contexts` は空の `text` を候補の要約へフォール
+#: バックする）。捕まえる型は twscrape 実測の例外に限定する（素の
+#: `except Exception` は実装バグまで飲み込む。S110 / BLE001 の是正・#47）:
+#:
+#: - `HttpError` … `NetworkError` / `ConnectError` / `HttpStatusError`（通信・HTTP）
+#: - `NoAccountError` … accounts DB に有効なアカウントが無い
+#: - `AbortReqError` … `GqlFeaturesOutdatedError` 等の中断（queue_client）
+#: - `HandledError` … twscrape が内部で処理済みと判定したエラー（queue_client）
+#: - `XClIdError` … `XClIdAccountError` / `XClIdParseError`（CSRF トークン解決）
+#: - `ValueError` … `int(tweet_id)` の変換失敗、Cookie/JSON 不正（accounts_pool・utils）
+#: - `RuntimeError` … curl バックエンドの内部エラー（http.py）
+#: - `SystemError` … accounts DB の整合性エラー（db.py）
+_CONTEXT_FETCH_ERRORS: tuple[type[Exception], ...] = (
+    HttpError,
+    NoAccountError,
+    AbortReqError,
+    HandledError,
+    XClIdError,
+    ValueError,
+    RuntimeError,
+    SystemError,
+)
 
 
 def _to_datetime(value: datetime | None) -> datetime | None:
@@ -108,17 +139,25 @@ async def _fetch_context_async(tweet_id: str, accounts_db: str, max_replies: int
                     parent = await api.tweet_details(int(main.inReplyToTweetId))
                     if parent is not None:
                         ctx.thread_text = (parent.rawContent or "").strip()
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except _CONTEXT_FETCH_ERRORS as exc:
+                    logger.warning(
+                        "親ツイートの取得に失敗しました（tweet_id=%s・スレッド本文なしで継続）: %s",
+                        main.inReplyToTweetId,
+                        exc,
+                    )
+    except _CONTEXT_FETCH_ERRORS as exc:
+        logger.warning(
+            "ツイート本文の取得に失敗しました（tweet_id=%s・空の本文で継続）: %s", tweet_id, exc
+        )
 
     # 代表リプライ（上位 max_replies 件）
     try:
         replies = await gather(api.tweet_replies(int(tweet_id), limit=max_replies))
         ctx.replies = [(r.rawContent or "").strip() for r in replies if r.rawContent]
-    except Exception:
-        pass
+    except _CONTEXT_FETCH_ERRORS as exc:
+        logger.warning(
+            "リプライの取得に失敗しました（tweet_id=%s・リプライなしで継続）: %s", tweet_id, exc
+        )
 
     return ctx
 
