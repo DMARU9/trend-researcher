@@ -128,7 +128,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 
 - [X] T027 [P] [US3] `tests/unit/test_parse_instruction.py` を強化する。優先順位の 3 分岐（明示設定 > 本文の自然言語 > LLM の解釈）、漢数字と期間表現（「5件」「半年以内」）、明示的な日付（「2025-01-01 以降」）、解釈できない日付文字列（例外にしない）、構造化ブロックを返さない応答（トピック＝指示本文全体＋既定値）を固定する。`frozen_now` で時刻を固定する（FR-011 / COV-004 の `nodes/parse_instruction.py` 未実行行 54 / 61-64 / 72 / 75 / 102 / 112-117）
 - [X] T028 [P] [US3] `tests/unit/test_extract_common.py` を新規作成する。見出しと本文のみの出力からのテーマ名・説明の抽出と全コンテンツへの紐づけ、空出力（テーマ一覧が空）、崩れた出力（見出しのみ・本文欠落）、表形式と箇条書きの両方の解釈を固定する（FR-012 / COV-004 の `nodes/extract_common.py` 未実行行 57-59 / 76-86）
-- [ ] T029 [P] [US3] `tests/unit/test_analyze_content.py` を新規作成する。ソースの整形、活用アイデア表の解析、列不足・見出しのみ・区切り行のみの行破棄（例外にしない）、構造化ブロックがない場合のフォールバック要約を固定する（FR-012 / COV-004 の `nodes/analyze_content.py` 未実行行 30 / 44 / 48 / 72-73）
+- [X] T029 [P] [US3] `tests/unit/test_analyze_content.py` を新規作成する。ソースの整形、活用アイデア表の解析、列不足・見出しのみ・区切り行のみの行破棄（例外にしない）、構造化ブロックがない場合のフォールバック要約を固定する（FR-012 / COV-004 の `nodes/analyze_content.py` 未実行行 30 / 44 / 48 / 72-73）
 - [ ] T030 [P] [US3] `tests/unit/test_parse.py` を強化する。崩れた表（列不足・区切り行のみ・見出しのみ）と JSON ブロックを含まない応答を追加し、見出し・区切り行のスキップを検証する既存の重複ケースを統合する（FR-012 / FR-017）
 - [ ] T031 [P] [US3] `tests/unit/test_plan_search.py` を強化する。検索クエリからの年号・期間表現の除去、空になった行の破棄、クエリ数の上限を固定する（FR-012 / COV-004 の `nodes/plan_search.py` 未実行行 42 / 64）
 
@@ -514,4 +514,48 @@ T026 のファイルシステム境界テスト（data-model 1.3 の `cache_dir 
 
 - 表形式のテーマ出力（`| テーマ | 説明 |` のみ）は **0 件**のまま固定した。プロンプト（`X_EXTRACT_COMMON_PROMPT` / `YOUTUBE_EXTRACT_COMMON_PROMPT`）が要求するのは `### テーマ名` + `- 説明:` の形式であり、表をテーマ表として解釈する経路は実装に存在しない。挙動を変えるのは仕様追加になるため、`test_no_theme_output_yields_an_empty_list` の 1 ケースとして「例外にせず 0 件」だけを固定した。
 - `text = result.content if hasattr(result, "content") else str(result)` の `else` 側（`content` を持たない戻り値）は、プロダクションの LLM クライアントが常に `AIMessage` を返すため到達しない防御分岐であり、テストを付けていない。
+
+### T029 で検出した活用アイデア表の欠陥: セルが空の行を採用する（2026-09-13 実測）
+
+`_parse_angles_table` は「3 列未満の行を捨てる」だけだったため、**列数は足りているがセルが空の行**を採用していた。
+
+| 入力行 | 修正前 | 修正後 |
+|--------|--------|--------|
+| `\| （必要なだけ繰り返す） \| \| \|` | `BlogAngle("（必要なだけ繰り返す）", "", "")` | 採用しない |
+| `\| A \| \| C \|` | `BlogAngle("A", "", "C")` | 採用しない |
+| `\|  \| B \| C \|` | `BlogAngle("", "B", "C")` | 採用しない |
+
+1 行目は `X_ANALYZE_CONTENT_PROMPT` / `YOUTUBE_ANALYZE_CONTENT_PROMPT` が表の作り方を示すために置いている**例示行そのもの**で、モデルが雛形をそのまま返すと指示文が切り口として採用され、`key_points`（＝報告書に載る切り口一覧）に「（必要なだけ繰り返す）」が混入していた。プロンプトが要求する各行は「記事で扱える角度 × なぜ読者に価値があるか × キーフレーズ」の 3 つが揃っていることなので、3 列すべてが非空の行だけを採用する実装に合わせた（プロンプトと実装の不一致。FR-023）。
+
+### T029 で検出したフォールバックの欠陥: 生の Markdown 表が `summary` になる（2026-09-13 実測）
+
+応答が「`## ブログの活用アイデア` + 空行 + 表」の形（モデルがよく返す形）のとき、段落フォールバックが**表の先頭行**を要約に採用し、切り口ベースの合成が使われなくなっていた。
+
+| 応答 | 修正前 `summary` | 修正後 `summary` |
+|------|------------------|------------------|
+| `## ブログの活用アイデア` + 空行 + 表（切り口 1 行） | `"\| 切り口 \| 読者への価値 \| 拾えるキーフレーズ \|\n\|---\|---\|---\|\n\| 入門解説 \| ..."` | `"このコンテンツでは、入門解説などについて語られています。"` |
+
+`extract_section(text, "概要")` が空のときの一次フォールバックは「`#` で始まらない最初の段落」だったため、見出しが空行で区切られていると次の段落が表そのものになる。原因は見出し行だけを除外していたことで、表の行（`\|` 始まり）も除外するようにした。`angles` は同じ応答から取れている（`["入門解説"]`）ので、切り口ベースの合成が本来の受け皿になる。T028 で見つけた節分割の欠陥と同種の「宣言（プロンプトの形式）と実装（パース）の不一致」（FR-012 / FR-023）。
+
+### T029: 変異探針（2026-09-13 実測）
+
+**1 件ずつ実施**し、各件で「改変 → 失敗確認 → 復元 → `sha256sum` 一致 → フルスイート再実行 → `git status --short`」を完了させた。
+
+| 変異 | 落ちるテスト | 実測 |
+|------|--------------|------|
+| （1）空セル行ガード（`or not all(cells[:3])`）の除去 | `test_parse_angles_table_skips_rows_with_empty_cells` の 3 ケース | **3 failed / 41 passed** |
+| （2）表行を要約に使わない条件（`startswith(("#", "\|"))` → `("#")`）の除去 | `test_summary_from_single_angle_has_no_second_sentence` | **1 failed / 43 passed** |
+| （3）区切り行スキップ（`re.match(r"^\|[\s:\|-\|]\+\|$", line)`）の除去 | 表を扱う 7 テスト（`reads_three_columns` / `skips_header_and_separator_rows` の 2 ケース / `keeps_valid_rows_between_broken_rows` / `structured_response_is_expanded_into_finding` / `summary_falls_back_to_angles` / `summary_from_single_angle_has_no_second_sentence`） | **7 failed / 37 passed** |
+| （4）見出し行スキップ（`cells[0] in ("切り口", "角度")`）の除去 | 表を扱う 8 テスト | **8 failed / 36 passed** |
+| （5）`source_text[:20000]` の切り詰め除去 | `test_source_text_is_truncated_at_twenty_thousand_chars` | **1 failed / 43 passed** |
+| （6）`asyncio.Semaphore(2)` → `Semaphore(1)` | `test_parallelism_is_capped_at_two` | **1 failed / 43 passed** |
+| （7）`contexts_by_id` の id 引き当ての除去 | `test_prompt_includes_context_text_matched_by_id` | **1 failed / 43 passed** |
+
+復元後の `sha256sum` はいずれも変異前と一致（`nodes/analyze_content.py`: `46602ff7ac764d3b4d18197f611223d79bf6aa4c17fecda9aae9f513ff9062a6`）。復元後のフルスイートは **487 passed**（T028 完了時点は 443 passed。`test_analyze_content.py` 44 件を新規追加）。`nodes/analyze_content.py` のカバレッジは 78 stmts / 0 miss / **100%**（タスク本文の「未実行行 30 / 44 / 48 / 72-73」は T027・T028 の変更前の行番号。T028 完了時点で未実行は 1 行（列不足の `continue`）まで減っており、本タスクで 0 行になった）。
+
+### T029 のスコープ外とした点
+
+- `parallelism` の計測だけ `fake_model_factory` ではなく計測用フェイク（`_TrackingLLM`）を使う。差し替える境界は同じ `build_model`（R-7）だが、`FakeModelFactory` のフェイクは即座に応答を返すため同時実行数を観測できない（`asyncio.Semaphore(2)` の上限は「同時に何件走ったか」でしか固定できない）。
+- `text = result.content if hasattr(result, "content") else str(result)` の `else` 側は T028 と同じ理由（到達不能）でテストしていない。
+- 3 列すべてが非空の行だけを採用する変更により、`| A | B | C | D |` のような 4 列以上の行は先頭 3 列だけを採用する挙動のまま（プロンプトは 3 列を要求しているため、4 列目以降は解釈しない）。
 

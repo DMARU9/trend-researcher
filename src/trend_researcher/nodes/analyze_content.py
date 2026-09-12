@@ -26,7 +26,10 @@ def _parse_angles_table(markdown_table: str) -> list[BlogAngle]:
         if re.match(r"^\|[\s:|-]+\|$", line):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) < 3:
+        if len(cells) < 3 or not all(cells[:3]):
+            # 3 列そろっていない行は採用しない。空セルを許すと、プロンプトの例示行
+            # （`| （必要なだけ繰り返す） | | |`）や空文字の切り口がそのまま
+            # `key_points` / 報告書の表に混じるため。
             continue
         if cells[0] in ("切り口", "角度"):
             continue
@@ -68,7 +71,10 @@ async def _analyze_one(candidate: "Candidate", source_text: str, provider: "Prov
     if not summary.strip():
         for para in text.split("\n\n"):
             para = para.strip()
-            if para and not para.startswith("#"):
+            # 見出し行と表の行は要約に使わない。見出しと表の間に空行がある応答
+            # （`## ブログの活用アイデア` + 空行 + 表）で生の Markdown 表が
+            # `summary` になり、下の切り口ベースの合成が使われなくなるため。
+            if para and not para.startswith(("#", "|")):
                 summary = para
                 break
     if not summary.strip() and angles:
