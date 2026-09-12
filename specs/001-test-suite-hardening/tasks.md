@@ -145,7 +145,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 **依存**: US1（`test_graph_wiring.py` / `test_progress.py`）と US2（`test_compile_report.py`）の完了後に実施する。探針は**作業ツリーを改変するため、複数の探針を同時に実行してはならない**（結果が汚染され、判定を誤る）。
 
 - [X] T032 [US4] `tests/unit/test_models.py` の恒真アサートを置換する。`test_report_sources_invariant` は断言が構築式と同一であり、`compile_report` の出典構築を `[]` にしても緑のままだった（M1 未検出）。`compile_report` の描画経路を通して `sources` を検証する形へ置き換える（data-model 1.7 / LAYOUT-005-3）
-- [ ] T033 [US4] **変異探針 M1** を実施する。`src/trend_researcher/nodes/compile_report.py` の出典構築を `[]` に改変し、`uv run pytest -q` が落ちることを確認して復元する。落ちなければ T032 / T024 を強化する（data-model 1.6）
+- [X] T033 [US4] **変異探針 M1** を実施する。`src/trend_researcher/nodes/compile_report.py` の出典構築を `[]` に改変し、`uv run pytest -q` が落ちることを確認して復元する。落ちなければ T032 / T024 を強化する（data-model 1.6）
 - [ ] T034 [US4] **変異探針 M2** を実施する。`src/trend_researcher/graph.py` の `_route_after_search` を常に `continue` に改変し、スイートが落ちることを確認して復元する。落ちなければ T016 を強化する（FR-015 / data-model 1.6）
 - [ ] T035 [US4] **変異探針 M3** を実施する。`src/trend_researcher/progress.py` の `ProgressEmitter.TOTAL` を 8 に改変し、スイートが落ちることを確認して復元する。落ちなければ T015 を強化する（FR-015 / data-model 1.6）
 - [ ] T036 [US4] 縮退処理に対する追加の探針を実施する（quickstart 手順 5.3）。リトライループの打ち切り、`tools/transcript.py` の形式判定を `_parse_vtt` のみに、`nodes/compile_report.py` のキャッシュ書き込みの `try` 除去、`cache.read_json` の例外化、`providers/x.py` の重複除去（`seen` 判定）の除去。5 件すべてが検出されることを確認する（SC-004）
@@ -655,3 +655,15 @@ T026 のファイルシステム境界テスト（data-model 1.3 の `cache_dir 
 
 - `tokens` 系ではないが同種の未検証の既定値として、`Candidate.platform = "x"` と `OutputSpec.table_for = ["common_points"]` も実測では未検出だった（それぞれ既定を `"youtube"` / `[]` にしても 538 passed）。ただし両フィールドは `src/` から**一度も読まれていない**（`grep -rn "table_for" src/` が 0 件、`Candidate.platform` も読み出しなし）。挙動に効かない既定値を断言しても「どの振る舞いの変異を検出するか」を説明できないため、テストは追加しない（LAYOUT-005-1 / LAYOUT-005-2）。フィールド自体の削除は検証対象（`models.py` は read-only）の変更になるため本機能の範囲外。
 - `tests/unit/test_models.py` は未使用 import（`BlogAngle` / `Context`）で `F401` が 2 件出ていた（HEAD でも同数）。本タスクで当該ファイルを変更するため、削除して green にした（R-8 の boy-scout。リポジトリ全体の違反件数は 40 → 38 になる）。
+
+### T033: 変異探針 M1（出典構築を空にする）の結果（2026-09-13 実測）
+
+- 変異: `src/trend_researcher/nodes/compile_report.py` の `sources = [c.url for c in candidates if c.url]` → `sources = []`
+- 結果: **5 failed / 534 passed**。検出したテスト:
+  - `tests/unit/test_compile_report.py::test_compile_report_returns_report_with_state_contents`
+  - `tests/unit/test_compile_report.py::test_compile_report_excludes_candidates_without_url_from_sources`
+  - `tests/integration/test_full_flow.py::test_x_flow_produces_full_report`
+  - `tests/integration/test_cli_contract.py::test_cli_004_05_sources_are_listed[x]` / `[youtube]`
+- 恒真アサート（`test_report_sources_invariant`）を削除した後（T032）でも検出されることを確認した。**T032 / T024 の追加強化は不要**。
+- 復元: `sha256sum` 一致（`de3eaca795c20c672e7a930430b812587ceba0fdc7725233a7a98a301d63b95b`）→ 復元後フルスイート **539 passed** → `git status --short` 清浄。
+- 補足: data-model 1.7 の `evidence` 列に書かれた「M1 未検出」は**旧テスト（恒真アサートのみ）の状態**を指す。現在は CLI 契約層（`test_cli_004_05_sources_are_listed`）まで含めて 3 層で検出できる。
