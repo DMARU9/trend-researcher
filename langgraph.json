@@ -1,0 +1,12 @@
+{
+    "dockerfile_lines": [],
+    "graphs": {
+        "trend_researcher": "./src/trend_researcher/graph.py:trend_researcher"
+    },
+    "python_version": "3.11",
+    "env": "./.env",
+    "dependencies": [
+        "."
+    ],
+    "config_schema": "./src/trend_researcher/configuration.py:Configuration"
+}
