@@ -167,7 +167,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 - [X] T043 [P] `uv run mypy src` を実行する。`__main__.py` が違反 0 件であり、全体の件数がベースライン（37 件 / 12 ファイル）から増えていないことを確認する（憲法 品質ゲート）
 - [X] T044 `README.md` を契約に合わせて更新する。終了コード（0 / 1 / 2）、出力チャネルの分離（stdout = レポートのみ / stderr = 進捗・ログ・エラー）、`--output` の書き込み失敗時の挙動を `contracts/cli-contract.md` と一致させる（憲法 原則 V）
 - [X] T045 憲法 `TODO(BASELINE-BURNDOWN)` の追跡タスクを起票する。ベースライン（`ruff` 40 件 / `mypy` 37 件）と、`UP037` の自動修正が import 追加とセットで必要な点（`nodes/analyze_content.py` / `nodes/compile_report.py`）を記載する。本機能の完了条件には含めない（research.md R-8）
-- [ ] T046 `quickstart.md` の受け入れ判定を全手順実施する。とくに（1）`uv run pytest -q` が全件 pass かつ **60 秒以内**（FR-020 / SC-001）、（2）`unshare -rn uv run pytest -q` が全件 pass（FR-001 / LAYOUT-003-1 / CLI-006-1〜3。CLI-006-3 は実測どおり `uv run pytest -q` が空の `OPENAI_API_KEY` で起動できることも確認する）、（3）単独実行・全体実行・順序変更で同一結果（FR-021 / SC-005）、（4）実行後に `git status --short` が清浄（テストが実リポジトリを汚さない）、（5）テスト件数が**純増**であり追加分を CLI 契約・失敗経路・LLM 解釈分岐の領域別に説明できる（SC-005）、（6）`git diff` で既存テストの期待値を実装の挙動へ書き換えていないこと（`tests/` の差分が「無効テストの強化・統合」と「新規テスト」に限られること。FR-022）
+- [X] T046 `quickstart.md` の受け入れ判定を全手順実施する。とくに（1）`uv run pytest -q` が全件 pass かつ **60 秒以内**（FR-020 / SC-001）、（2）`unshare -rn uv run pytest -q` が全件 pass（FR-001 / LAYOUT-003-1 / CLI-006-1〜3。CLI-006-3 は実測どおり `uv run pytest -q` が空の `OPENAI_API_KEY` で起動できることも確認する）、（3）単独実行・全体実行・順序変更で同一結果（FR-021 / SC-005）、（4）実行後に `git status --short` が清浄（テストが実リポジトリを汚さない）、（5）テスト件数が**純増**であり追加分を CLI 契約・失敗経路・LLM 解釈分岐の領域別に説明できる（SC-005）、（6）`git diff` で既存テストの期待値を実装の挙動へ書き換えていないこと（`tests/` の差分が「無効テストの強化・統合」と「新規テスト」に限られること。FR-022）
 
 **Checkpoint**: すべての品質ゲートと受け入れ判定が green
 
@@ -847,3 +847,75 @@ quickstart 手順 5.3 の 5 件を **1 件ずつ**（改変 → フルスイー�
 **起票時の注意（スキルの検証で判明）**: `github-issue` スキルのバリデータは本文中の英大文字 `TODO` をプレースホルダー残存として**エラー**にするため、本文では憲法のマーカーを `BASELINE-BURNDOWN` として参照し、`grep -n "BASELINE-BURNDOWN" .specify/memory/constitution.md` で辿れるようにした（タイトルにはマーカーをそのまま残した）。検証は 0 エラー 1 警告（タイトル 56/60 文字の長さ警告のみ）。
 
 **憲法は変更していない**: 憲法の Governance は改正を `/speckit.constitution` 経由（Sync Impact Report + バージョン更新）に限定しているため、Follow-up への Issue 番号の追記も本機能では行わない。追跡は #47 が担う。
+
+### T046: quickstart の受け入れ判定（2026-09-13 実測）
+
+6 項目すべてを実施した。
+
+**(1) 全件 pass かつ 60 秒以内（FR-020 / SC-001）**
+
+`/usr/bin/time -f "REAL=%e" uv run pytest -q` → **535 passed / 48.06 秒（REAL 49.30 秒）**。60 秒以内 ✓（変更前は 61 passed / 0.5 秒）
+
+**(2) オフライン・認証情報なしで完走（FR-001 / LAYOUT-003-1 / CLI-006-1〜3）**
+
+| コマンド | 結果 |
+|----------|------|
+| `env -u OPENAI_API_KEY -u OPENAI_BASE_URL uv run pytest -q` | 535 passed（48.04 秒） |
+| `OPENAI_API_KEY= uv run pytest -q`（CLI-006-3） | 535 passed（46.74 秒） |
+| `unshare -rn uv run pytest -q`（ネットワーク遮断） | 535 passed（46.87 秒）、**exit 0** |
+
+**(3) 決定性（FR-021 / SC-005）**
+
+| 実行 | 結果 |
+|------|------|
+| 単独ファイル（`tests/unit/test_compile_report.py`） | 38 passed |
+| `-p no:cacheprovider tests/unit`（順序変更） | 445 passed |
+| `tests/integration` のみ | 90 passed（46.41 秒） |
+| 全体（同日に 6 回） | 535 passed（48.06 / 48.04 / 46.74 / 46.87 / 48.03 秒） |
+
+テスト結果はすべて同一（同一コマンドの反復で 535 passed が安定）。ただし**部分実行は終了コードが 1 になる**（下記の観測）。
+
+**(4) 実行後に `git status --short` が清浄**
+
+全実行の後に差分なし（一時ファイル・キャッシュを実リポジトリに残さない）✓
+
+**(5) テスト件数が純増（SC-005）**
+
+**61 → 535（+474 純増）**。追加 493 行相当 / 削除・統合 19 件（`tests/test_graph.py` 9 + `tests/test_configuration.py` 10）。
+
+| 領域 | ファイル（収集件数） | 小計 |
+|------|---------------------|------|
+| CLI 契約（統合・プロセスレベル） | `test_cli_contract.py` 54 / `test_graph_wiring.py` 15 | 69 |
+| 失敗経路・縮退 | `test_x_search.py` 39 / `test_providers.py` 36 / `test_youtube_search.py` 24 / `test_transcript.py` 19 / `test_cache.py` 16 | 134 |
+| LLM 解釈・パース分岐 | `test_parse_instruction.py` 66 / `test_analyze_content.py` 44 / `test_plan_search.py` 34 / `test_extract_common.py` 30 / `test_parse.py` 25 / `test_models.py` 5 | 204 |
+| 設定・レポート・基盤 | `test_compile_report.py` 38 / `test_config.py` 30 / `test_full_flow.py` 21 / `test_configuration.py` 15 / `test_fixtures.py` 13 / `test_progress.py` 10 | 127 |
+| 変更なし | `test_llm.py` 1 | 1 |
+
+**(6) 既存テストの期待値を実装へ書き換えていない（FR-022）**
+
+`git diff cdfe7de -- tests/` を監査した。変更された既存 8 ファイルで**削除された `assert` 行は計 41 行**（`test_parse.py` 9 / `test_models.py` 1 / `test_plan_search.py` 8 / `test_parse_instruction.py` 8 / `test_transcript.py` 1 / `test_youtube_search.py` 8 / `test_full_flow.py` 6 / `test_x_search.py` 0）。全行を確認した結果、いずれも**移動・統合・強化**で、期待値を実装の出力へ合わせたものはない。
+
+| ファイル | 削除された assert の性格 |
+|----------|--------------------------|
+| `test_parse.py` | `_parse_angles_table` のテストを、表を組み立てる `tests/unit/test_analyze_content.py` へ移動（重複解消。FR-017） |
+| `test_models.py` | 恒真アサート `set(report.sources) == {c.url for c in cands}` を削除（`sources` 契約は `test_compile_report.py` が持つ） |
+| `test_plan_search.py` | 手書きフェイクから共有フィクスチャへ移行。**旧テストの期待値は新テストにそのまま残っている**（`assert out["search_queries"] == ["オタク 困りごと", "推し活 大変", "同人 在庫"]`） |
+| `test_parse_instruction.py` | ローカルの `_with_fixed_now` を共有 `frozen_now` に置換し、`(fixed - result).days == 182` から**具体日時**（`datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC)`）へ強化 |
+| `test_youtube_search.py` | 上限テストを本体に統合し、`relevance_rank` の並び・`like_count`・`author_name`・`channel_id`・`limited == top[:3]` を追加（強化） |
+| `test_transcript.py` | StrEnum の等価性だけを見ていたテストを削除（無効判定は `data-model.md` 1.7 に記録） |
+| `test_full_flow.py` | 削除 6 行は他テストへ移動（いいね順は `sorted(..., reverse=True)` として現存。JSON 出力は同じ 2 行を保持したまま `common_themes` の確認を追加） |
+
+**観測（契約どおりの挙動。欠陥ではない）: 部分実行の終了コード**
+
+T040 で `fail_under` を有効化した結果、**実行範囲を絞ると全件 pass でも exit 1** になる。しきい値は「その実行で収集した範囲の合計」に掛かるため。
+
+| コマンド | テスト | カバレッジ | 終了コード |
+|----------|--------|-----------|-----------|
+| `uv run pytest -q` | 535 passed | 95.26% | `0` |
+| `uv run pytest -q tests/unit` | 445 passed | 88.77% | **`1`** |
+| `uv run pytest -q tests/integration` | 90 passed | 77.15% | **`1`** |
+| `uv run pytest -q tests/unit/test_compile_report.py` | 38 passed | 47.27% | **`1`** |
+| `uv run pytest -q tests/unit/test_compile_report.py --no-cov` | 38 passed | — | `0` |
+| `uv run pytest -q -o addopts="" tests/unit/test_compile_report.py` | 38 passed | — | `0` |
+
+COV-001-3（しきい値未達で非ゼロ終了）と FR-018（1 コマンドで計測）を同時に満たす以上、部分実行がこの影響を受けるのは避けられない。開発時の摩擦を減らすため、**部分実行では `--no-cov` を付ける**運用を README の品質ゲート節に追記した。quickstart 手順 6 の「すべて全件 pass」はテスト結果としては成立する（プロセス終了コードだけが 1 になる）。

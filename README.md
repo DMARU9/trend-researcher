@@ -30,6 +30,12 @@ uv run mypy src       # 型チェック
 （`pyproject.toml` の `[tool.coverage.report] fail_under = 90`）。未実行行は
 `--cov-report=term-missing` で表示されるため、そのまま追記できます。
 
+> 一部のテストだけを実行するときは `--no-cov` を付けてください。
+> ```bash
+> uv run pytest -q tests/unit/test_parse.py --no-cov   # しきい値の判定をしない
+> ```
+> しきい値は「実行した範囲の合計」に掛かるため、部分実行では全件 pass でも未達（終了コード 1）になります。
+
 `ruff` と `mypy` には変更前から存在する違反（`ruff` 40 件 / `mypy` 37 件、2026-09-12 時点）があり、
 **新規に増やさないこと**が提出条件です。既存分の解消は別タスクで扱います。
 
