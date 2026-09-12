@@ -150,7 +150,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 - [X] T035 [US4] **変異探針 M3** を実施する。`src/trend_researcher/progress.py` の `ProgressEmitter.TOTAL` を 8 に改変し、スイートが落ちることを確認して復元する。落ちなければ T015 を強化する（FR-015 / data-model 1.6）
 - [X] T036 [US4] 縮退処理に対する追加の探針を実施する（quickstart 手順 5.3）。リトライループの打ち切り、`tools/transcript.py` の形式判定を `_parse_vtt` のみに、`nodes/compile_report.py` のキャッシュ書き込みの `try` 除去、`cache.read_json` の例外化、`providers/x.py` の重複除去（`seen` 判定）の除去。5 件すべてが検出されることを確認する（SC-004）
 - [X] T037 [US4] 重複テストを統合し、旧ファイルを削除する。`tests/test_graph.py` の配線検証は `tests/integration/test_graph_wiring.py` へ、`tests/test_configuration.py` の設定検証は `tests/unit/test_configuration.py`（新規作成。旧ファイルの内容を吸収して強化）へ移したことを確認してから両ファイルを削除する。互換シムは残さない（FR-017 / 憲法 原則 VI / data-model 1.7）
-- [ ] T038 [US4] 無効テストの判定記録を実績で更新する。`specs/001-test-suite-hardening/data-model.md` 1.7 の `resolution` 列（`strengthened` / `merged` / `removed` / `kept_with_reason`）と `evidence` 列を、実際の処置と変異探針の結果で埋める（FR-016 / SC-006）
+- [X] T038 [US4] 無効テストの判定記録を実績で更新する。`specs/001-test-suite-hardening/data-model.md` 1.7 の `resolution` 列（`strengthened` / `merged` / `removed` / `kept_with_reason`）と `evidence` 列を、実際の処置と変異探針の結果で埋める（FR-016 / SC-006）
 - [X] T039 [US4] テストの収集範囲と配置を監査する。`uv run pytest -q --collect-only` で件数を確認し、`tests/integration/cli_harness.py` が収集されていないこと、ルート直下にテストファイルが残っていないこと、`tests/unit/` と `tests/integration/` の 2 層に収まっていることを確認する（FR-016 / LAYOUT-001-1〜3 / LAYOUT-001-6 / LAYOUT-001-7）
 
 **Checkpoint**: US4 完了。スイートの有効性が実測で担保され、無効テストの判断が記録された
