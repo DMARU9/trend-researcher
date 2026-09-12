@@ -24,7 +24,13 @@ def search_node(state: AgentState, config: RunnableConfig) -> dict:
     instruction = state["instruction"]
     queries = state.get("search_queries") or []
     cfg = Config.load(platform=platform)
-    max_results = configurable.max_results if configurable.max_results != 5 else (instruction.max_results or 5)
+    # 件数は parse_instruction が FR-011 の優先順位（state > Configuration > 自然言語 > LLM）
+    # で解決済みの値を使う。ここで Configuration を再参照して `!= 5` のセンチネルで
+    # 分岐すると、state と Configuration が食い違う入力で優先順位が逆転し、
+    # 報告される件数（instruction.max_results）と実際に取得する件数がずれる
+    # （T049 の実測: state=30 / configurable=20 で provider には 20 が渡っていた）。
+    # `or 5` は 0 など falsy な件数を既定へ戻す既存の扱い（`__main__._print_summary` と同一）。
+    max_results = instruction.max_results or 5
 
     candidates = provider.search(
         queries=queries,

@@ -80,3 +80,44 @@ def test_progress_messages_report_zero_candidates(fake_x_search: Any) -> None:
         "[3/7] search ... 完了（0 件を選定）",
         "検索クエリ: ",
     ]
+
+
+def test_count_comes_from_instruction_even_when_configuration_differs(
+    fake_x_search: Any,
+) -> None:
+    """provider へ渡す件数は `instruction.max_results`（FR-011 の解決結果）に従う。
+
+    `parse_instruction` は件数を state > Configuration > 自然言語 > LLM の順に
+    解決して `instruction.max_results` に書き込む（FR-011）。search 側にも
+    `configurable.max_results != 5` のセンチネルがあると、state と Configuration が
+    食い違う入力で優先順位が逆転し、`instruction.max_results`（報告される件数）と
+    実際に取得する件数がずれる。
+
+    ここでは state / instruction が 100 件、Configuration が 1 件という乖離を作る。
+    conftest の既定応答は「クエリごとに 3 件 → id 重複除去で 3 件」なので、
+    正しくは `ordered[:100]` で 3 件、センチネルがあると `ordered[:1]` で 1 件に
+    なる（T049 の変異探針で実測: 3 件 → 1 件）。
+    """
+    out = search_node(
+        _state(instruction=_instruction(max_results=100), max_results=100),
+        _config(max_results=1),
+    )
+
+    assert len(out["candidates"]) == 3
+    # 取得プールが 100 件（= instruction.max_results）基準で組まれていること。
+    # 関連度順のプールは `max(max_results * 3, max_results + 20)`。
+    assert fake_x_search.calls[0][1]["max_results"] == 300
+
+
+def test_falsy_count_is_treated_as_the_default_five(fake_x_search: Any) -> None:
+    """`instruction.max_results` が 0 のときは既定の 5 件として取得する（FR-011 の既定）。
+
+    `--max-results 0` は 0 が falsy のため `__main__._run_async` の
+    `args.max_results or 5` で 5 に戻り、state にだけ 0 が載る
+    （`_print_summary` の `instruction.max_results or config.max_results` も同じ扱い）。
+    search が 0 をそのまま使うと候補 0 件の縮退経路（FR-007）に入ってしまうため、
+    この行でも同じ既定へ戻す。`or 5` を外すと候補が 3 件ではなく 0 件になる。
+    """
+    out = search_node(_state(instruction=_instruction(max_results=0), max_results=0), _config())
+
+    assert len(out["candidates"]) == 3

@@ -453,6 +453,8 @@ T026 のファイルシステム境界テスト（data-model 1.3 の `cache_dir 
 
 同クラスの点検: `platform` / `output_format` / `published_after` / `use_trends` / `sort_by` / `transcript_language` は `state` → `configurable` → 既定の順にフォールバックしておりセンチネルを持たない。**Configuration 側の `elif configurable.max_results != 5:` は残している**（`Configuration.max_results` は `default=5` の `int` で「未設定」を表現できないため。CLI 経由の明示 5 は上記 (a) で state 側が先に捕まえるので、CLI から到達できる不整合は解消済み）。Configuration スキーマを `int | None` へ変える案は公開設定の意味を変えるため本機能の範囲外と判断した。
 
+**点検漏れの追加（T049 で実測・修正）**: 上記の列挙は `nodes/search.py` 側のセンチネル（`configurable.max_results if configurable.max_results != 5 else ...`）に触れていなかった。これは `parse_instruction` が FR-011 の優先順位で解決済みの値を **Configuration で上書きし直す**ため、state と Configuration が食い違う入力で優先順位が逆転する（実測: `state=30` / `configurable=20` で provider へ 20 が渡り、`instruction.max_results` = 30 とずれた）。CLI 経路では両方が `args.max_results` 由来で一致するため到達しないが、ライブラリ API からは到達する。T049 で `max_results = instruction.max_results or 5` に畳んで解消した。
+
 ### T027: 変異探針（2026-09-13 実測）
 
 **1 件ずつ実施**し、各件で「改変 → 失敗確認 → 復元 → `sha256sum` 一致 → フルスイート再実行 → `git status --short`」を完了させた。
@@ -941,11 +943,13 @@ COV-001-3（しきい値未達で非ゼロ終了）と FR-018（1 コマンド�
 
   作業: `plan.md` の「分析による是正」節（および `tasks.md` の該当注意点）に、追加 8 ファイルと FR-023 の根拠を記録し、宣言と実装を一致させる。`plan.md` の宣言は後続の読み手にとって「変更してはいけない範囲」に見えるため、放置すると次の作業で誤った制約として働く。
 
-- [ ] T049 `nodes/search.py:27` の `configurable.max_results != 5` センチネルを T027 の同クラス点検の記録に加える（等価である理由を残す）か、解決済みの `instruction.max_results` に畳んで冗長なセンチネルを除去する — **Issue #50** per FR-011 (partial)
+- [X] T049 `nodes/search.py:27` の `configurable.max_results != 5` センチネルを T027 の同クラス点検の記録に加える（等価である理由を残す）か、解決済みの `instruction.max_results` に畳んで冗長なセンチネルを除去する — **Issue #50** per FR-011 (partial)
 
   実測: T027 は `parse_instruction` の `and input_max != 5:` を除去し、「同クラスの点検」で `platform` / `output_format` / `published_after` / `use_trends` / `sort_by` / `transcript_language` と `Configuration` 側の `elif configurable.max_results != 5:` を列挙しているが、`nodes/search.py:27`（`max_results = configurable.max_results if configurable.max_results != 5 else (instruction.max_results or 5)`）は列挙されていない。
 
   実測による等価性: `Configuration.max_results` は CLI からは `args.max_results or 5` で渡り、`parse_instruction` も `search` も「5 は未指定」と同じ扱いをするため、両者の解はすべての分岐で一致する（明示 5 は `state["max_results"]` 側が先に捕まえる）。すなわち**現時点で観測可能な不整合はない**。したがって本件は欠陥の修正ではなく、監査記録の穴（FR-023 の「同クラスの点検」が search 側センチネルに触れていない）と、既定値リテラル `5` の二重管理の解消である。等価であることを記録できない場合は、除去ではなく記録の追記で閉じる。
+
+  **2026-09-13 実測で上記の「観測可能な不整合はない」を訂正**: 上の議論は **CLI 経路に限った話**であり、一般には成立しない。state と Configuration が食い違う入力（`state["max_results"] = 30` / `configurable.max_results = 20`）で search が provider へ渡す件数が 20 になり、`instruction.max_results`（= 30。`parse_instruction` が FR-011 の優先順位で解決した値）とずれることを実測した。CLI からは到達しない（両方とも `args.max_results` 由来で一致する）が、ライブラリ API・Studio の `configurable` では到達する。よって記録の追記ではなく**修正**を選び、解決済みの `instruction.max_results` に畳んだ（下記「T049」節）。
 
 ### T047: 変異探針 — 未保護 3 ノードの差し戻し検出（2026-09-13 実測）
 
@@ -969,3 +973,39 @@ COV-001-3（しきい値未達で非ゼロ終了）と FR-018（1 コマンド�
 | `contracts/test-layout.md`（配置マップ） | `nodes/search.py` / `nodes/fetch.py` の行を追加（LAYOUT-001-4 の 1 モジュール 1 ファイル規約に従う） |
 
 品質ゲート: `uv run pytest -q` = 539 passed / 55.64 秒（60 秒以内）・カバレッジ **95.26%**（1,265 stmts / 60 miss、90% 以上）・`ruff check .` 32 件（変更 3 ファイルは clean、ベースライン増加なし）・`mypy src` 34 errors / 11 files（増加なし）。
+
+### T049: `search` の件数センチネルを FR-011 の解決結果へ畳む（2026-09-13 実測）
+
+**収束監査の前提（等価）は誤りだった。** 監査は「`Configuration.max_results` も CLI からは `args.max_results or 5` で渡るため両者の解は一致する」と結論していたが、それは **CLI 経路に限った話**である。state と Configuration が食い違う入力で乖離することを探針で実測した。
+
+探針 `/tmp/probe_t049.py`（`search_node` を直接呼び、`providers.x.search_tweets` の境界で受け取った `max_results` を記録）の結果:
+
+| state | configurable | `instruction.max_results` | provider へ渡った値（プール） | 判定 |
+|-------|--------------|----------------------------|--------------------------------|------|
+| 20（CLI 明示） | 20 | 20 | 60 = max(20×3, 40) | OK（一致） |
+| 5（CLI 明示） | 5 | 5 | 25 = max(15, 25) | OK（一致） |
+| 未指定 | 5 | 7（自然言語由来） | 27 = max(21, 27) | OK（一致） |
+| **30** | **20** | **30** | **60 = max(20×3, 40)** | **NG（FR-011 の逆転）** |
+| 30 | 5（既定） | 30 | 90 = max(90, 50) | OK（センチネルが instruction 側へ回すため） |
+
+`parse_instruction` は件数を **state > Configuration > 自然言語 > LLM** の順で解決し `instruction.max_results` に書き込む（FR-011）。`search` 側のセンチネルは Configuration を再参照するため、state と Configuration が食い違う入力で **FR-011 の優先順位が逆転**し、「報告される件数」と「実際に取得する件数」がずれる。CLI では両方が `args.max_results` 由来なので到達しないが、ライブラリ API（`trend_researcher.invoke(initial_state, {"configurable": {...}})`）・LangGraph Studio の `configurable` では到達する。
+
+**対処**: `max_results = instruction.max_results or 5` へ畳んだ（`src/trend_researcher/nodes/search.py`）。既定値リテラル `5` との比較が消え、FR-011 の解を再解釈しない。`or 5` は 0 などの falsy な件数を既定へ戻す既存の扱いで、`__main__._run_async`（`args.max_results or 5`）・`_print_summary`（`instruction.max_results or config.max_results`）と同じ規約。
+
+変異探針（**1 件ずつ**実施し、各件で「改変 → 失敗確認 → 復元 → `sha256sum` 一致 → フルスイート再実行 → `git status --short` 清浄」を完了）:
+
+| 変異 | 落ちるテスト | 実測 |
+|------|--------------|------|
+| （1）センチネルを元に戻す（`configurable.max_results if configurable.max_results != 5 else (instruction.max_results or 5)`） | `test_count_comes_from_instruction_even_when_configuration_differs` | **1 failed / 2 passed**（`候補 1 件` → 期待 3 件） |
+| （2）`or 5` を除去する（`max_results = instruction.max_results`） | `test_falsy_count_is_treated_as_the_default_five` | **1 failed / 3 passed**（`候補 0 件` → 期待 3 件） |
+
+復元後の `sha256sum` はいずれも変異前と一致（`nodes/search.py`: `7b69e345402ef78b89ea596f2950294a77e93c854e8d9c1745d17f227b47e84e`）。復元後のフルスイートは **541 passed**（T047 完了時点は 539 passed。内訳: `tests/unit/test_search.py` に 2 件を追加）。
+
+| 追記・変更した検証 | 固定内容 |
+|--------------------|----------|
+| `test_count_comes_from_instruction_even_when_configuration_differs`（新規） | state / `instruction.max_results` = 100 件、Configuration = 1 件の乖離で、候補が 3 件（= `ordered[:100]`）になること。取得プールも 300（= `max(100×3, 120)`）であること |
+| `test_falsy_count_is_treated_as_the_default_five`（新規） | `instruction.max_results` = 0 のとき既定 5 件として扱われ、候補 0 件の縮退経路（FR-007）に入らないこと |
+
+品質ゲート: `uv run pytest -q` = 541 passed・カバレッジ **95.26%**（1,265 stmts / 60 miss、90% 以上、変更なし）・`ruff check .` 32 件（変更 2 ファイルは clean、ベースライン増加なし）・`mypy src` 34 errors / 11 files（増加なし）。
+
+**実行時間の注記（FR-020 / SC-001）**: T049 の変更前後で `uv run pytest -q --no-cov` を計測し、いずれも **66.8 秒**だった（変更は実行時間に影響していない）。同日の T047 時点は 55.64 秒であり、差は環境負荷（他プロセス併走）による変動である。60 秒以内の達成は T047 時点の実測（55.64 秒）を根拠とし、本節の計測はその再現条件が変わったことを記録する。
