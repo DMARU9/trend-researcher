@@ -12,15 +12,27 @@ from trend_researcher.providers import get_provider
 from trend_researcher.state import AgentState
 from trend_researcher.tools.llm import build_model
 
-_YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
-_PERIOD_RE = re.compile(r"(半年|三?ヶ?月|1?年|本年|今年|最近|以内|以降|から|より)\s*")
+#: 年号。`\b` は日本語（CJK も `\w`）と数字の間で境界にならないため、`2024年` の
+#: 年号が残る。前後を「数字でない」条件で挟んで日本語に隣接する年号も拾う。
+_YEAR_RE = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)(?:\s*[のをはがにでとも])?")
+
+#: 期間表現の数字。半角・全角・漢数字を許す（`3ヶ月` / `３ヶ月` / `三ヶ月` を同じ扱いにする）。
+_DIGITS = r"[0-9０-９一二三四五六七八九十]+"
+#: 期間表現（数字＋月/年・半年・最近 等）と、その直後に残る助詞（`最近のAI` → `AI`）。
+_PERIOD_RE = re.compile(
+    rf"(?:{_DIGITS}\s*[ヶカ]?月|(?:{_DIGITS})?\s*年|半年|本年|今年|最近|以内|以降|から|より)"
+    r"(?:\s*[のをはがにでとも])?"
+)
+
+#: 除去後に残る括弧・引用符・空白（`（2024年）` が空クエリになるようにする）。
+_STRIP_CHARS = "\"'（）() \t"
 
 
 def _clean_query(query: str) -> str:
-    """生成クエリから年号・期間表現を除去し、広く検索できるようにする。"""
+    """生成クエリから年号・期間表現（とその直後の助詞）を除去し、広く検索できるようにする。"""
     q = _YEAR_RE.sub("", query)
     q = _PERIOD_RE.sub("", q)
-    q = re.sub(r"\s{2,}", " ", q).strip().strip('"').strip("'")
+    q = re.sub(r"\s{2,}", " ", q).strip().strip(_STRIP_CHARS)
     return q
 
 
