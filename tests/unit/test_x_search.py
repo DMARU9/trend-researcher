@@ -586,6 +586,36 @@ def test_x_provider_relevance_truncates_after_dedupe():
     assert [c.id for c in cands] == ["a1", "a2", "a3", "a4"]
 
 
+def test_x_provider_likes_dedupes_pool_before_sorting():
+    """likes モードも複数クエリの重複を取得順の先勝ちで除去する（FR-024）。
+
+    除去をソート後に行うと、先勝ちの保証が崩れて後発の値が残る（マージ禁止）。
+    """
+    pool_q1 = [
+        Candidate(platform="x", id="a1", text="q1 の本文", like_count=10, relevance_rank=1),
+        Candidate(platform="x", id="a2", text="q2", like_count=8, relevance_rank=2),
+    ]
+    pool_q2 = [
+        Candidate(platform="x", id="b1", text="b1", like_count=30, relevance_rank=1),
+        Candidate(platform="x", id="a1", text="q2 の本文", like_count=999, relevance_rank=2),
+    ]
+
+    def _fake_search(query, max_results=5, accounts_db="accounts.db", max_retries=3):  # type: ignore[no-untyped-def]
+        return pool_q1 if query == "q1" else pool_q2
+
+    with mock.patch("trend_researcher.providers.x.search_tweets", _fake_search):
+        cands = XProvider().search(
+            ["q1", "q2"], max_results=10, published_after=None, sort_by="likes", config=Config()
+        )
+    ids = [c.id for c in cands]
+    # 重複が除去され、いいね降順（b1=30, a1=10, a2=8）
+    assert ids == ["b1", "a1", "a2"]
+    assert len(ids) == len(set(ids))
+    # 先勝ち: a1 は q1 側の値のまま（後発の 999 で上書き・マージしない）
+    assert cands[1].like_count == 10
+    assert cands[1].text == "q1 の本文"
+
+
 def test_resort_relevance_keeps_rank_order_on_tie():
     """いいね数が同じ場合は取得時の relevance_rank 順を維持する。"""
     cands = [

@@ -375,3 +375,15 @@ uv run pytest -q --collect-only | grep -c "::"
 
 CLI-001-5 / CLI-001-17 は「実装を直す前に red を確認した」唯一の契約であり、変更前のベースライン（T004: 61 passed）でも対応するテストは存在しなかった。
 
+### FR-024 修正: likes モードの重複除去漏れ（2026-09-13 実測）
+
+T026 の統合テストで「複数クエリが同じ `id` を返す」境界応答（data-model 1.3 の `x_search` partial）を設計している最中に検出した。FR-023 に基づき本機能の範囲で修正した。
+
+| 項目 | 内容 |
+|------|------|
+| 仕様（FR-024） | 「同一の識別子を持つ候補が複数の検索クエリの結果として重複して返る場合、X の検索は重複を除去し、取得順（関連度順）を維持 MUST」 |
+| 修正前の実装 | 重複除去は relevance 分岐にのみ実装され、likes 分岐は `_sort_by_likes(pool)` で整列してから截断していた |
+| 影響 | `--sort likes` で同一ツイートが複数の枠を占め、要求件数に達しない（5 件要求でも実質 3 件になる等） |
+| 対処 | `_dedupe()` を切り出し、両分岐で「取得順の先勝ち・統合なし」の除去を適用 |
+| 検証 | `tests/unit/test_x_search.py::test_x_provider_likes_dedupes_pool_before_sorting`。`_sort_by_likes(_dedupe(pool))` を `_sort_by_likes(pool)` に戻すと **1 failed / 38 passed**（修正前の状態を再現） |
+

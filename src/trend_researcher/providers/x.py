@@ -23,6 +23,21 @@ def _sort_by_likes(candidates: list[Candidate]) -> list[Candidate]:
     return ordered
 
 
+def _dedupe(candidates: list[Candidate]) -> list[Candidate]:
+    """同一 id の候補を取得順の先勝ちで除去する（FR-024）。
+
+    ソート種別に関わらず適用する。likes モードでも複数クエリの結果には同じ
+    投稿が現れるため、除去しないと同一ツイートが複数枠を占める。
+    """
+    seen: set[str] = set()
+    unique: list[Candidate] = []
+    for c in candidates:
+        if c.id not in seen:
+            seen.add(c.id)
+            unique.append(c)
+    return unique
+
+
 class XProvider:
     name = "x"
 
@@ -44,7 +59,8 @@ class XProvider:
             pool: list[Candidate] = []
             for q in queries:
                 pool.extend(search_tweets(q, max_results=pool_size, accounts_db=str(config.accounts_db)))
-            ordered = _sort_by_likes(pool)
+            # 重複を除去してからいいね降順に並べる（除去しないと同一ツイートが複数枠を占める。FR-024）
+            ordered = _sort_by_likes(_dedupe(pool))
             candidates = ordered[:max_results]
         else:
             # 関連度順（Top タブ）で取得し、本文欠落分を除外しても max_results 件
@@ -62,12 +78,7 @@ class XProvider:
                     )
                 )
             # 重複（id）を除去し、取得順（関連度順）を維持
-            seen: set[str] = set()
-            ordered = []
-            for c in pool:
-                if c.id not in seen:
-                    seen.add(c.id)
-                    ordered.append(c)
+            ordered = _dedupe(pool)
             # いいね昇順の並び替えは fetch 後（tweet_details で正確な like_count が
             # 確定した後）に resort() で行うため、ここでは取得順のまま截断する
             candidates = ordered[:max_results]
