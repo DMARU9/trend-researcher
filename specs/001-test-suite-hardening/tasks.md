@@ -161,7 +161,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 
 **Purpose**: 品質ゲートと受け入れ判定。カバレッジ設定の有効化はこの Phase で行う（COV-001 のタスク順序制約）。
 
-- [ ] T040 `pyproject.toml` に `[tool.coverage.run] source = ["trend_researcher"]`、`[tool.coverage.report] fail_under = 90` と除外設定、`[tool.pytest.ini_options].addopts = "--cov=trend_researcher --cov-report=term-missing"` を追加する。**カバレッジが目標に到達してから有効化する**（先行して有効化すると全テスト実行が赤になる。COV-001-1〜4 / COV-002）
+- [X] T040 `pyproject.toml` に `[tool.coverage.run] source = ["trend_researcher"]`、`[tool.coverage.report] fail_under = 90` と除外設定、`[tool.pytest.ini_options].addopts = "--cov=trend_researcher --cov-report=term-missing"` を追加する。**カバレッジが目標に到達してから有効化する**（先行して有効化すると全テスト実行が赤になる。COV-001-1〜4 / COV-002）
 - [ ] T041 `uv run pytest -q` を実行し、対象範囲の**合計**行カバレッジが 90% 以上であることを確認する。未達の場合は `contracts/coverage-policy.md` COV-004 の未実行行表に沿って該当ストーリーのテストを追加・強化する（個別モジュールの下限は要求しない。FR-019 / SC-002）
 - [ ] T042 [P] `uv run ruff check .` を実行する。本機能で変更・新規作成したファイル（`tests/` 全体、`pyproject.toml`、`src/trend_researcher/__main__.py`）が違反 0 件であり、リポジトリ全体の違反件数がベースライン（40 件）から増えていないことを確認する（憲法 品質ゲート）
 - [ ] T043 [P] `uv run mypy src` を実行する。`__main__.py` が違反 0 件であり、全体の件数がベースライン（37 件 / 12 ファイル）から増えていないことを確認する（憲法 品質ゲート）
@@ -751,3 +751,16 @@ quickstart 手順 5.3 の 5 件を **1 件ずつ**（改変 → フルスイー�
 | 互換シムなし | LAYOUT-001-8 | `tests/` 直下は `conftest.py` のみ。旧ファイルへの再エクスポートはない（T037） | ✓ |
 
 `tests/unit/test_fixtures.py` だけが配置マップ（LAYOUT-001 の表）に現れないのは、同表が**モジュール**単位の対応を示すもので、同テストの対象が `tests/conftest.py` の共有フィクスチャ層（`fake_model_factory` / `frozen_now` / `Boundary` が期待どおり失敗・記録するか）だからである。1 モジュール 1 ファイルの原則（LAYOUT-001-4）に反する重複ではなく、契約の表に欄がないだけなので**判定は ✓**。同表の更新は本機能のスコープ外（契約文書の記述変更）。
+
+### T040: カバレッジ計測としきい値の有効化（2026-09-13 実測）
+
+`pyproject.toml` に契約（coverage-policy COV-001）どおりの設定を追加した。有効化は T041 の測定で 90% 到達を確認した**後**に行った（タスク順序の制約）。
+
+- `[tool.pytest.ini_options] addopts = "--cov=trend_researcher --cov-report=term-missing"`（COV-001-1 / -2）
+- `[tool.coverage.run] source = ["trend_researcher"]`
+- `[tool.coverage.report] fail_under = 90` と `exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]`
+- 実行時依存は増やしていない（`pytest-cov` は既存の dev extras。COV-001-4）
+
+**しきい値の実効性（実測）**: `fail_under = 99` に一時変更すると `uv run pytest -q` は **exit 1**（`FAIL Required test coverage of 99.0% not reached. Total coverage: 95.26%`）、90 に戻すと **exit 0**（`Required test coverage of 90.0% reached`）。COV-001-3 の「しきい値を下回ると pytest が非ゼロ終了する」が成立する。
+
+**契約の設定が計測値に与える影響（実測で判明）**: `exclude_lines` を明示すると coverage の**既定の除外が置き換わる**ため、`providers/base.py` の `Protocol` プレースホルダ（`...` のみの行）11 件が分母に入る。合計は 1,246 文 / 49 未実行 / 96.1%（既定除外のまま）→ **1,265 文 / 60 未実行 / 95.26%**（契約の `exclude_lines`）。契約どおりの設定でも 90% を満たすため設定はそのまま採用し、数値の差だけを記録する（`exclude_also` に変えると既定除外を保てるが、契約の記載から外れる）。

@@ -37,6 +37,18 @@ packages = ["src/trend_researcher"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov=trend_researcher --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["trend_researcher"]
+
+[tool.coverage.report]
+fail_under = 90
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
 
 [tool.ruff]
 line-length = 100
