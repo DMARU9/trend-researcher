@@ -16,13 +16,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from unittest import mock
 
 import pytest
 
 from trend_researcher.models import Candidate, Context
+from trend_researcher.nodes import parse_instruction as parse_instruction_module
 from trend_researcher.tools.transcript import Transcript
 
 # --- 境界モックの共通実装 -------------------------------------------------
@@ -223,4 +225,87 @@ def fake_yt_transcript() -> Iterator[Boundary]:
 def fake_model_factory() -> FakeModelFactory:
     """ノード単位で LLM 応答を注入するファクトリ（R-7 / LAYOUT-004-4）。"""
     return FakeModelFactory()
+
+
+# --- 非決定性の固定（data-model 1.2 / FR-010 / LAYOUT-004） ----------------
+
+#: 既定の固定時刻。テストは `frozen_now.set(...)` で任意の時点を再現できる。
+DEFAULT_FROZEN_NOW = datetime(2026, 8, 27, 12, 0, 0, tzinfo=UTC)
+
+
+class FrozenClock:
+    """`parse_instruction` モジュールの `datetime` を `now` だけ固定する。
+
+    `MagicMock(wraps=datetime)` を使うため、`fromisoformat` / `strptime` などは
+    実物へ委譲される（`wraps` なしで差し替えると `fromisoformat` が壊れる。
+    R-3 の注意）。
+    """
+
+    def __init__(self, mock_datetime: mock.MagicMock, now: datetime) -> None:
+        self._mock = mock_datetime
+        self._now = now
+
+    @property
+    def now(self) -> datetime:
+        return self._now
+
+    def set(self, value: datetime) -> FrozenClock:
+        """固定時刻を差し替える（既に適用済みの patch に対して有効）。"""
+        self._now = value
+        self._mock.now.return_value = value
+        return self
+
+    def advance(self, **kwargs: float) -> FrozenClock:
+        """固定時刻を相対移動する（`timedelta` のキーワードを受け付ける）。"""
+        return self.set(self._now + timedelta(**kwargs))
+
+
+@pytest.fixture
+def frozen_now() -> Iterator[FrozenClock]:
+    """`parse_instruction` の現在時刻を固定する（LAYOUT-004-1）。"""
+    frozen = mock.MagicMock(wraps=datetime)
+    frozen.now.return_value = DEFAULT_FROZEN_NOW
+    with mock.patch.object(parse_instruction_module, "datetime", frozen):
+        yield FrozenClock(frozen, DEFAULT_FROZEN_NOW)
+
+
+class SleepSpy:
+    """`asyncio.sleep` のスパイ。待機値を実時間で消費せず観測する。"""
+
+    def __init__(self) -> None:
+        self.sleeps: list[float] = []
+
+    async def __call__(self, seconds: float, *args: Any, **kwargs: Any) -> None:
+        self.sleeps.append(seconds)
+
+    @property
+    def total(self) -> float:
+        """観測した待機値の合計（実時間で消費したら失われていた時間）。"""
+        return sum(self.sleeps)
+
+
+@pytest.fixture
+def no_retry_sleep() -> Iterator[SleepSpy]:
+    """X 検索のリトライ待機をスパイに差し替える（FR-010 / LAYOUT-004-2）。
+
+    対象は `trend_researcher.tools.x_search` が参照する `asyncio.sleep` のみ。
+    観測値は `spy.sleeps` / `spy.total` で断言できる。
+    """
+    spy = SleepSpy()
+    with mock.patch("trend_researcher.tools.x_search.asyncio.sleep", new=spy):
+        yield spy
+
+
+@pytest.fixture
+def tmp_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """一時ディレクトリを返し、`Config.load()` の既定 cache 先をそこへ向ける。
+
+    実リポジトリの `cache/` を汚さない（LAYOUT-003-4）。`TR_CACHE_DIR` を
+    上書きするため、`cache_dir` を明示しない `Config.load()` でも隔離される。
+    """
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("TR_CACHE_DIR", str(cache_dir))
+    return cache_dir
+
 
