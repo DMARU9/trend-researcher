@@ -151,7 +151,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 - [X] T036 [US4] 縮退処理に対する追加の探針を実施する（quickstart 手順 5.3）。リトライループの打ち切り、`tools/transcript.py` の形式判定を `_parse_vtt` のみに、`nodes/compile_report.py` のキャッシュ書き込みの `try` 除去、`cache.read_json` の例外化、`providers/x.py` の重複除去（`seen` 判定）の除去。5 件すべてが検出されることを確認する（SC-004）
 - [X] T037 [US4] 重複テストを統合し、旧ファイルを削除する。`tests/test_graph.py` の配線検証は `tests/integration/test_graph_wiring.py` へ、`tests/test_configuration.py` の設定検証は `tests/unit/test_configuration.py`（新規作成。旧ファイルの内容を吸収して強化）へ移したことを確認してから両ファイルを削除する。互換シムは残さない（FR-017 / 憲法 原則 VI / data-model 1.7）
 - [ ] T038 [US4] 無効テストの判定記録を実績で更新する。`specs/001-test-suite-hardening/data-model.md` 1.7 の `resolution` 列（`strengthened` / `merged` / `removed` / `kept_with_reason`）と `evidence` 列を、実際の処置と変異探針の結果で埋める（FR-016 / SC-006）
-- [ ] T039 [US4] テストの収集範囲と配置を監査する。`uv run pytest -q --collect-only` で件数を確認し、`tests/integration/cli_harness.py` が収集されていないこと、ルート直下にテストファイルが残っていないこと、`tests/unit/` と `tests/integration/` の 2 層に収まっていることを確認する（FR-016 / LAYOUT-001-1〜3 / LAYOUT-001-6 / LAYOUT-001-7）
+- [X] T039 [US4] テストの収集範囲と配置を監査する。`uv run pytest -q --collect-only` で件数を確認し、`tests/integration/cli_harness.py` が収集されていないこと、ルート直下にテストファイルが残っていないこと、`tests/unit/` と `tests/integration/` の 2 層に収まっていることを確認する（FR-016 / LAYOUT-001-1〜3 / LAYOUT-001-6 / LAYOUT-001-7）
 
 **Checkpoint**: US4 完了。スイートの有効性が実測で担保され、無効テストの判断が記録された
 
@@ -737,3 +737,17 @@ quickstart 手順 5.3 の 5 件を **1 件ずつ**（改変 → フルスイー�
 `if v` への変異で `use_trends=False` が落ちないのは、既定値も `False` で偶然一致するため（`0` と空文字の 2 件だけが検出点）。テストの docstring にこの理由を書いてある。
 
 **件数**: 539 → 535（削除 19 件 − 追加 15 件）。`git status --short` は削除 2 件と新規 1 件のみで、復元後のフルスイートは 535 passed。
+
+### T039: 収集範囲と配置の監査（2026-09-13 実測）
+
+| 監査項目 | 規約 | 実測 | 判定 |
+|----------|------|------|------|
+| 収集件数 | — | `uv run pytest -q --collect-only` = **535 件**（`tests/unit/` 445 + `tests/integration/` 90） | ✓ |
+| 補助スクリプトが収集されない | LAYOUT-001-6 | `cli_harness` を名前に含む収集項目は **0 件**（`--collect-only` の出力を grep）。ファイル自体は `tests/integration/cli_harness.py` に存在 | ✓ |
+| ルート直下にテストを置かない | LAYOUT-001-3 | `find tests -maxdepth 1 -name "test_*.py"` = なし。リポジトリ直下も `find . -maxdepth 1 -name "test_*.py"` = なし | ✓ |
+| 2 層に収まる | LAYOUT-001-1 / -2 | テストファイルは `tests/unit/`（17）と `tests/integration/`（3）のみ。`tests/` 直下は `conftest.py`、`tests/integration/` にも `conftest.py`（LAYOUT-001-5） | ✓ |
+| 収集範囲の明示 | LAYOUT-001-7 | `pyproject.toml` に `[tool.pytest.ini_options] testpaths = ["tests"]` | ✓ |
+| 配置マップとの一致 | LAYOUT-001-4 | 契約の表 19 件はすべて実在（欠落 0）。実在するが表にないのは `tests/unit/test_fixtures.py` のみ | ✓（下記参照） |
+| 互換シムなし | LAYOUT-001-8 | `tests/` 直下は `conftest.py` のみ。旧ファイルへの再エクスポートはない（T037） | ✓ |
+
+`tests/unit/test_fixtures.py` だけが配置マップ（LAYOUT-001 の表）に現れないのは、同表が**モジュール**単位の対応を示すもので、同テストの対象が `tests/conftest.py` の共有フィクスチャ層（`fake_model_factory` / `frozen_now` / `Boundary` が期待どおり失敗・記録するか）だからである。1 モジュール 1 ファイルの原則（LAYOUT-001-4）に反する重複ではなく、契約の表に欄がないだけなので**判定は ✓**。同表の更新は本機能のスコープ外（契約文書の記述変更）。
