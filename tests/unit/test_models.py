@@ -1,11 +1,15 @@
-"""models.py の単体テスト（統合モデル）。"""
+"""models.py の単体テスト（統合モデル）。
+
+ここはモデルの**宣言**（既定値）を固定する層。出典（`sources`）が候補の URL から
+構築されることは `nodes/compile_report.py` の責務であり、`tests/unit/test_compile_report.py`
+がノード経由で検証する（LAYOUT-005-5: 同一の振る舞いを複数箇所で検証しない）。
+旧 `test_report_sources_invariant` は断言が構築式（`[c.url for c in cands]`）と同一の
+恒真アサートで、`compile_report` の出典構築を空にしても緑のままだった（LAYOUT-005-3）。
+"""
 
 from trend_researcher.models import (
-    AnalysisFinding,
-    BlogAngle,
     Candidate,
     CommonTheme,
-    Context,
     OutputFormat,
     ResearchInstruction,
     ResearchReport,
@@ -33,16 +37,25 @@ def test_common_theme_fields():
     assert t.supporting_ids == ["1", "2"]
 
 
-def test_report_sources_invariant():
-    cands = [
-        Candidate(platform="youtube", id="a", url="https://www.youtube.com/watch?v=a"),
-        Candidate(platform="youtube", id="b", url="https://www.youtube.com/watch?v=b"),
-    ]
-    report = ResearchReport(
-        instruction=ResearchInstruction(raw_text="x", platform="youtube"),
-        candidates=cands,
-        analyses=[AnalysisFinding(id="a")],
-        common_themes=[CommonTheme(theme="t", supporting_ids=["a", "b"])],
-        sources=[c.url for c in cands],
-    )
-    assert set(report.sources) == {c.url for c in cands}
+def test_report_defaults_are_empty_collections():
+    """指示以外を渡さないレポートは出典・候補・要約・テーマ・備考がすべて空。
+
+    既定にダミー要素を混ぜると、候補が 0 件のときに存在しない出典が
+    レポートへ載る（`render_markdown` の「## 出典」が嘘になる）。
+    """
+    report = ResearchReport(instruction=ResearchInstruction(raw_text="x"))
+
+    assert report.sources == []
+    assert report.candidates == []
+    assert report.analyses == []
+    assert report.common_themes == []
+    assert report.notes == []
+
+
+def test_common_theme_description_defaults_to_empty_string():
+    """説明のないテーマは空文字で描画される（`None` を混ぜない）。
+
+    `compile_report._render_common_themes` は `t.description` をそのまま表へ
+    埋めるため、既定が空文字でないと説明のないテーマの行の説明列が埋まる。
+    """
+    assert CommonTheme(theme="t").description == ""

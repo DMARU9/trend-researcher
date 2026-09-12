@@ -144,7 +144,7 @@ description: "Task list for テスト拡充によるパイプライン信頼性�
 
 **依存**: US1（`test_graph_wiring.py` / `test_progress.py`）と US2（`test_compile_report.py`）の完了後に実施する。探針は**作業ツリーを改変するため、複数の探針を同時に実行してはならない**（結果が汚染され、判定を誤る）。
 
-- [ ] T032 [US4] `tests/unit/test_models.py` の恒真アサートを置換する。`test_report_sources_invariant` は断言が構築式と同一であり、`compile_report` の出典構築を `[]` にしても緑のままだった（M1 未検出）。`compile_report` の描画経路を通して `sources` を検証する形へ置き換える（data-model 1.7 / LAYOUT-005-3）
+- [X] T032 [US4] `tests/unit/test_models.py` の恒真アサートを置換する。`test_report_sources_invariant` は断言が構築式と同一であり、`compile_report` の出典構築を `[]` にしても緑のままだった（M1 未検出）。`compile_report` の描画経路を通して `sources` を検証する形へ置き換える（data-model 1.7 / LAYOUT-005-3）
 - [ ] T033 [US4] **変異探針 M1** を実施する。`src/trend_researcher/nodes/compile_report.py` の出典構築を `[]` に改変し、`uv run pytest -q` が落ちることを確認して復元する。落ちなければ T032 / T024 を強化する（data-model 1.6）
 - [ ] T034 [US4] **変異探針 M2** を実施する。`src/trend_researcher/graph.py` の `_route_after_search` を常に `continue` に改変し、スイートが落ちることを確認して復元する。落ちなければ T016 を強化する（FR-015 / data-model 1.6）
 - [ ] T035 [US4] **変異探針 M3** を実施する。`src/trend_researcher/progress.py` の `ProgressEmitter.TOTAL` を 8 に改変し、スイートが落ちることを確認して復元する。落ちなければ T015 を強化する（FR-015 / data-model 1.6）
@@ -632,3 +632,26 @@ T026 のファイルシステム境界テスト（data-model 1.3 の `cache_dir 
 | （9）進捗の `extend` への差し戻し | `test_progress_messages_report_start_then_finish` | **1 failed / 33 passed** |
 
 復元後の `sha256sum` はいずれも変異前と一致（`nodes/plan_search.py`: `eef3a5f5bfb5093c2bc1ccb04a73689e403c1fb71cb1d5067a3b82dd430aaeff`）。復元後のフルスイートは **538 passed**（T030 完了時点は 506 passed。`test_plan_search.py` を 2 → 34 件へ強化し、`__import__("unittest").mock.patch` と手書きフェイクを `fake_model_factory` へ移行）。`nodes/plan_search.py` のカバレッジは 46 stmts / 0 miss / **100%**（タスク本文の未実行行 42 / 64 は `published_after` ありの注記分岐と 8 件上限の切り詰めで、どちらも解消した）。
+
+### T032 で判明した「恒真アサート」の実体（2026-09-13 実測）
+
+`tests/unit/test_models.py::test_report_sources_invariant` は `sources=[c.url for c in cands]` で組み立てたレポートに対し `set(report.sources) == {c.url for c in cands}` を断言していた。左辺は構築式のコピーであり、`models.py` の `sources` フィールドの型をどう変えても（実際には何も検証していないため）落ちない。
+
+さらに、この契約の本体（出典が候補の URL から構築されること・URL なしの候補が除外されること）は `tests/unit/test_compile_report.py` が**ノード経由で**すでに検証している（`test_compile_report_returns_report_with_state_contents` / `test_compile_report_excludes_candidates_without_url_from_sources`）。したがって data-model 1.7 の `resolution` は当初案の `strengthened`（`compile_report` 経由に置換）ではなく **`merged`**（重複のため統合）が実態に即する（T038 で記録を更新）。`tests/unit/test_models.py` にはモデルの宣言（既定値）だけを残し、出典構築はノード側の 1 箇所で検証する（LAYOUT-005-5）。
+
+### T032 で置換として追加した検証（実測で未検出だったもの）
+
+「置換」は恒真アサートの削除だけでは終わらない。`models.py` の既定値のうち、**変更してもスイートが緑のままだった**ものを実測で特定し、モデル層の検証として追加した（この 3 件は追加前はすべて 538 passed で未検出だった）。
+
+| 変異（追加前はすべて未検出） | 追加後の検出テスト | 実測 |
+|------------------------------|--------------------|------|
+| `ResearchReport.sources` の既定を `["dummy"]` | `test_report_defaults_are_empty_collections` | **1 failed / 538 passed** |
+| `ResearchReport.candidates` の既定を 1 件のダミー候補 | 同テスト | **1 failed / 538 passed** |
+| `CommonTheme.description` の既定を `"dummy"` | `test_common_theme_description_defaults_to_empty_string` | **1 failed / 538 passed** |
+
+`sources` と `candidates` は「候補 0 件のときに存在しない出典・候補がレポートに載る」経路を作るため、既定値が振る舞いに効く（`render_markdown` の「## 出典」が嘘になる）。`description` は `compile_report._render_common_themes` が表へそのまま埋めるため効く。
+
+### T032 のスコープ外とした点
+
+- `tokens` 系ではないが同種の未検証の既定値として、`Candidate.platform = "x"` と `OutputSpec.table_for = ["common_points"]` も実測では未検出だった（それぞれ既定を `"youtube"` / `[]` にしても 538 passed）。ただし両フィールドは `src/` から**一度も読まれていない**（`grep -rn "table_for" src/` が 0 件、`Candidate.platform` も読み出しなし）。挙動に効かない既定値を断言しても「どの振る舞いの変異を検出するか」を説明できないため、テストは追加しない（LAYOUT-005-1 / LAYOUT-005-2）。フィールド自体の削除は検証対象（`models.py` は read-only）の変更になるため本機能の範囲外。
+- `tests/unit/test_models.py` は未使用 import（`BlogAngle` / `Context`）で `F401` が 2 件出ていた（HEAD でも同数）。本タスクで当該ファイルを変更するため、削除して green にした（R-8 の boy-scout。リポジトリ全体の違反件数は 40 → 38 になる）。
