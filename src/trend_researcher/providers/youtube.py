@@ -19,6 +19,18 @@ from trend_researcher.tools.youtube_search import search_videos
 class YouTubeProvider:
     name = "youtube"
 
+    # --- コアへ渡す差の表現（コアは値を解釈しない） ---
+    env_prefix = "YTR"
+    #: 単一クエリ設計のため上限なし（`None` は無制限）
+    #: 注: Protocol の可変属性は mypy では不変（invariant）のため `int | None` を明示する。
+    max_search_queries: int | None = None
+    content_noun = "動画"
+    candidates_section_title = "## 選定動画リスト（関連度順上位 N 件）"
+
+    def selection_note(self, sort_by: str) -> str:
+        """選定基準の注記（関連度順のみ。`sort_by` は解釈しない）。"""
+        return "選定基準: 検索結果の関連度順に上位 N 件を採用"
+
     def search(
         self,
         queries: list[str],

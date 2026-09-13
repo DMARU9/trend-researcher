@@ -151,7 +151,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       `candidates_section_title = "## 選定ツイートリスト（上位 N 件）"`、
       `selection_note(sort_by)`（`sort_by == "likes"` なら「いいね数の多い順」、それ以外は
       「いいね数の少ない順」を使った `nodes/compile_report.py:37` と同じ文）
-- [ ] T013 [P] [US1] `src/trend_researcher/providers/youtube.py` にフックを実装する。
+- [X] T013 [P] [US1] `src/trend_researcher/providers/youtube.py` にフックを実装する。
       `env_prefix = "YTR"`、`max_search_queries = None`、`content_noun = "動画"`、
       `candidates_section_title = "## 選定動画リスト（関連度順上位 N 件）"`、
       `selection_note(sort_by)` は `sort_by` を使わず「検索結果の関連度順に上位 N 件を採用」
