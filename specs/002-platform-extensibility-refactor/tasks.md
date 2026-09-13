@@ -156,7 +156,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       `candidates_section_title = "## 選定動画リスト（関連度順上位 N 件）"`、
       `selection_note(sort_by)` は `sort_by` を使わず「検索結果の関連度順に上位 N 件を採用」
       （現行 `compile_report.py:41` と同じ文）
-- [ ] T014 [US1] `src/trend_researcher/providers/__init__.py` に `register_provider(cls)` を追加し、
+- [X] T014 [US1] `src/trend_researcher/providers/__init__.py` に `register_provider(cls)` を追加し、
       `get_provider()` のエラー文言を登録キーから生成する（プラットフォーム名のリテラルを含めない）。
       **空文字・空白のみの名前は登録辞書の先頭のプラットフォームとして解決する**
       （`Configuration.platform` の既定を空文字にするため。research.md R-8 / EXT-007）。
