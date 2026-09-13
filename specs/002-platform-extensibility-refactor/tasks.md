@@ -373,7 +373,7 @@ US1 の機能（走査・拡張）と golden は赤くなっていない。
       参照を `Configuration` へ追随させる（**進行・件数・出力の断言は変更しない**）。
       `tests/unit/test_configuration.py` の `DEFAULTS` から `use_trends` を除き、`load()` の解決規則の
       節を追加する
-- [ ] T051 [US3] `uv run pytest -q` で全件緑を確認し、`quickstart.md` の手順 6（設定型が 1 つ /
+- [X] T051 [US3] `uv run pytest -q` で全件緑を確認し、`quickstart.md` の手順 6（設定型が 1 つ /
       ノードの環境変数 0 / 優先順位）を実行する。あわせて変異探針として `nodes/search.py` に
       一時的に `os.getenv("TR_MAX_RESULTS")` を書いて T038 が**赤**になることを確認し、復元後に
       緑へ戻ることを「実装メモ」節に記録する
@@ -555,7 +555,7 @@ US1 / US2 のテストは緑のまま。
 | 走査テストの検出（変更前） | 規則 (d) `help=` / `description=` の名前列挙 | **1 件**（`__main__.py:32` の `--platform` ヘルプ）で赤。規則 (e) は 0 件（回帰ガード、緑） |
 | 走査テストの検出（変更後） | 規則 (d) / 規則 (e) | **ともに 0 件**（T023 実測。(d) は T022 のヘルプ汎用化で解消、(e) は回帰ガードのまま） |
 | T024 変異探針（走査） | `graph.py` に `_PLATFORM_HINT = "x"` を追加 → 赤 / 復元 → 緑 | 赤: `test_platform_literals_are_confined_to_registry` のみ失敗（`1 failed, 2 passed`）。復元後 `3 passed`、sha256 一致、`git status` 空（T024 実測） |
-| T051 変異探針（ノードの env） | `nodes/search.py` に `os.getenv` を追加 → 赤 / 復元 → 緑 | （未記入） |
+| T051 変異探針（ノードの env） | `nodes/search.py` に `os.getenv` を追加 → 赤 / 復元 → 緑 | 赤: `import os` ＋ `_probe = os.getenv("TR_MAX_RESULTS")` を一時追加すると `test_nodes_do_not_read_environment` のみ失敗（`nodes/search.py:33` を検出、`1 failed, 3 deselected`）。復元後 `1 passed`、sha256 一致、`git status` に search.py の差なし（T051 実測） |
 | T027 導出の非空虚性 | `NODE_ORDER` を差し替え → 出力が追随 | （未記入） |
 | T053 引数の使用 | 実装前は「引数が無視される」ことで赤 | （未記入） |
 | 規則 (d) の非空虚性 | `__main__.py` のヘルプに `"x"` を一時追加 → 赤 / 復元 → 緑（sha256 一致） | 赤: `test_help_text_does_not_enumerate_platforms` のみ失敗。復元後 `3 passed`、sha256 一致（T024 実測） |
@@ -670,6 +670,29 @@ US1 / US2 のテストは緑のまま。
 
 - **T049 の赤は存在しない**（旧実装と `resolve_env` は同値。`os.getenv` の falsy 判定と「空文字は未設定扱い」が同じ規則）。したがって「実装前 red」ではなく**変異探針**でテストの非空虚性を示した（憲法 原則 I の「テストが空でないこと」の担保）。記録として残す: 上記の変異で赤になるため、追加した 7 件は解決順を実際に固定している。
 - 変異探針の戻し忘れ防止のため、復元後に sha256 の一致と**フルスイート 1 回**（`uv run pytest -q` → **596 passed / 96.55% / 48.83 秒**。T048 / T049 のテスト追加を含む）を確認した。
+
+#### T042: 旧設定型の削除（実測。コミットは T065 と同一変更一式）
+
+| 確認項目 | コマンド / テスト | 実測 |
+|---|---|---|
+| 削除の赤 | `tests/unit/test_config.py::test_old_config_class_is_removed` | `hasattr(config_module, "Config")` で **赤**（`1 failed, 31 passed`）→ `Config` / `get_config` を削除して **32 passed** |
+| 残したヘルパ | `src/trend_researcher/config.py` | `_REPO_ROOT` / `_resolve_path` / `_load_env_once` の 3 つのみ（`Configuration.load()` が使う）。モジュール docstring を「設定解決の共通ヘルパ」へ変更し、`lru_cache` / `os` / `BaseModel` / `Field` の import を削除 |
+| 残存参照 | 追随したファイル | `tests/unit/test_fixtures.py`（`Config.load` → `Configuration.load`。`cache_dir` は `str` 比較）、`tests/conftest.py`（`tmp_cache_dir` の docstring）、`src/trend_researcher/tools/x_search.py`（docstring の `Config.accounts_db` → `XSettings.accounts_db`） |
+| 走査4の判定 | `grep -rn "class Config\b\|def get_config\|Config\.load" src/` | 素のコマンドでは `src/trend_researcher/__pycache__/config.cpython-312.pyc` が `binary file matches`（生成物）を返すため、`--include=*.py` を付けて **OK: 0 件**。検出規則の `Config.load`（`test_platform_scan.py`）は**再導入の回帰ガード**として残す |
+| フルスイート | `uv run pytest -q` | **597 passed**、カバレッジ **96.63%**、**48.26 秒** |
+
+#### T051: US3 完了検証（実測。T042 の削除は適用済み・コミットは T065 待ち）
+
+| 手順 | コマンド | 実測 |
+|---|---|---|
+| 6-1 設定型が 1 つ | `grep -rn --include=*.py "class Config\b\|def get_config\|Config\.load" src/` | **OK: 0 件**（`--include=*.py` なしでは `__pycache__` の古い bytecode が `binary file matches` を返すため明示する） |
+| 6-2 ノードの環境変数 0 | `uv run pytest tests/unit/test_platform_scan.py -q -k "nodes_do_not_read"` | **1 passed**（検出 **2 件 → 0 件**） |
+| 6-3 設定の解決と優先順位 | `uv run pytest tests/unit/test_config.py tests/unit/test_configuration.py -q` | **54 passed** |
+| 固有設定の所在 | `grep -rn "XTR_\|YTR_" src/ --include=*.py \| grep -v providers/ \| grep -v tools/` | **OK: 固有設定は provider / tools のみ** |
+| 変異探针 | — | §1 の `T051 変異探针（ノードの env）` 行に記録 |
+| 品質ゲート | `uv run pytest -q` / `uv run ruff check .` / `uv run mypy --no-incremental src` | **597 passed / 96.63% / 48.26 秒**、**0 件**、26 ファイルで **0 件** |
+
+- T051 の検証は **T042 の削除を適用した作業ツリー**で行った（C2 によりコミットは T065 と同一変更一式）。T069 の最終ゲートで 6-1 を**再実行**して確定させる。
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |
