@@ -59,7 +59,7 @@ def _build_source_text(candidate: Candidate, context: Context | None) -> str:
 async def _analyze_one(
     candidate: Candidate, source_text: str, provider: Provider
 ) -> AnalysisFinding:
-    model = build_model("research")
+    model = build_model("research", provider.env_prefix)
     prompt = provider.analyze_content_prompt.format(
         title=candidate.author_handle or candidate.title or candidate.url,
         transcript=source_text[:20000] or "（本文なし・メタデータのみ）",

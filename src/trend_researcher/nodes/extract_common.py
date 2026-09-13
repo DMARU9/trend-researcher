@@ -36,7 +36,7 @@ def extract_common(state: AgentState, config: RunnableConfig) -> dict:
     progress_messages = emitter.get_messages()
 
     analyses = state.get("analyses", [])
-    model = build_model("research")
+    model = build_model("research", provider.env_prefix)
     prompt = provider.extract_common_prompt.format(analyses=_format_analyses(analyses))
     result = model.invoke(prompt)
     text = result.content if hasattr(result, "content") else str(result)

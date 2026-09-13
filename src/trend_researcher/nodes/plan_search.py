@@ -59,7 +59,7 @@ def plan_search(state: AgentState, config: RunnableConfig) -> dict:
     else:
         date_hint = ""
 
-    model = build_model("research")
+    model = build_model("research", provider.env_prefix)
     prompt = provider.plan_search_prompt.format(topic=search_topic, date_hint=date_hint)
     result = model.invoke(prompt)
     raw = result.content if hasattr(result, "content") else str(result)

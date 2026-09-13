@@ -176,7 +176,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       併せて呼び出し側（`src/trend_researcher/__main__.py`、`src/trend_researcher/nodes/search.py`、
       `src/trend_researcher/nodes/fetch.py`）を `get_provider(platform).env_prefix` を渡す形へ変更する。
       **注意**: `Config` クラス自体の削除は US3（T046）であり、ここでは引数の形だけを変える
-- [ ] T019 [US1] `src/trend_researcher/tools/llm.py` の `build_model(role="research", env_prefix: str | None = None)`
+- [X] T019 [US1] `src/trend_researcher/tools/llm.py` の `build_model(role="research", env_prefix: str | None = None)`
       へ変更し、`TR_MODEL` → `{env_prefix}_MODEL` → 既定（`openai:mimo-v2.5`）の順にする
       （`XTR_MODEL` / `YTR_MODEL` の直列を排除）。呼び出し側
       （`nodes/parse_instruction.py` / `nodes/plan_search.py` / `nodes/analyze_content.py` /

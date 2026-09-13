@@ -18,14 +18,22 @@ _ROLE_MAX_TOKENS: dict[str, int] = {
 }
 
 
-def build_model(role: Role = "research"):
+def build_model(role: Role = "research", env_prefix: str | None = None):
     """指示された役割で LLM を構築する。
 
     OpenDeepResearch 同様 `openai:mimo-v2.5` を OpenAI 互換エンドポイントで利用。
     `configurable_fields` で実行時上書き（model/max_tokens/api_key）を許容。
+
+    Args:
+        role: 役割（`_ROLE_MAX_TOKENS` のキー）。
+        env_prefix: プラットフォーム固有の環境変数接頭辞（例: `XTR` / `YTR`）。
+            provider が渡す。解決順は `TR_MODEL` → `{env_prefix}_MODEL` → 既定。
     """
     load_dotenv()
-    model = os.getenv("TR_MODEL", os.getenv("XTR_MODEL", os.getenv("YTR_MODEL", "openai:mimo-v2.5")))
+    model = os.getenv("TR_MODEL")
+    if not model and env_prefix is not None:
+        model = os.getenv(f"{env_prefix}_MODEL")
+    model = model or "openai:mimo-v2.5"
     api_key = os.getenv("OPENAI_API_KEY", "")
     base_url = os.getenv("OPENAI_BASE_URL", "https://opencode.ai/zen/go/v1")
     max_tokens = _ROLE_MAX_TOKENS.get(role, 10000)

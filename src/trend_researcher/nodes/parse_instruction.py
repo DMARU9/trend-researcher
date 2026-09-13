@@ -144,7 +144,7 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     # `content` は本文ブロックのリストにもなりうる（LangChain の標準形式）。
     # 以降は文字列前提の解析（正規表現・`ResearchInstruction.raw_text`）なので文字列化する。
     raw = content if isinstance(content, str) else str(content)
-    model = build_model("research")
+    model = build_model("research", provider.env_prefix)
     prompt = provider.parse_instruction_prompt.format(instruction=raw)
     result = model.invoke(prompt)
     text = result.content if hasattr(result, "content") else str(result)
