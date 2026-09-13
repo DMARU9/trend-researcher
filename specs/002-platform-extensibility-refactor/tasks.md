@@ -393,7 +393,7 @@ US1 / US2 のテストは緑のまま。
 
 ### Tests for User Story 4（憲法 原則 I により必須）⚠️
 
-- [ ] T052 [P] [US4] `tests/unit/test_rendering.py` の import を
+- [X] T052 [P] [US4] `tests/unit/test_rendering.py` の import を
       `trend_researcher.nodes.compile_report` から `trend_researcher.rendering` へ切り替える。
       この時点で**赤**（モジュールが無い）になることを確認する。golden の比較内容は変更しない
 - [ ] T053 [P] [US4] `tests/unit/test_rendering.py` に

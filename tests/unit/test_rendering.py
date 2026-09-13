@@ -31,9 +31,9 @@ from trend_researcher.models import (
     ResearchInstruction,
     ResearchReport,
 )
-from trend_researcher.nodes.compile_report import render_json, render_markdown
 from trend_researcher.providers import get_provider
 from trend_researcher.providers.base import Provider
+from trend_researcher.rendering import render_json, render_markdown
 
 #: 代表入力 3 件のキー。golden ファイル名の接頭辞でもある。
 GOLDEN_CASE_NAMES = ("x_full", "youtube_full", "sparse")
