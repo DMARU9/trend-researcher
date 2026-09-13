@@ -165,7 +165,6 @@ uv run python -m trend_researcher \
 | `--output PATH` | 標準出力 | レポート書き込み先ファイル |
 | `--since YYYY-MM-DD` | なし | 投稿日下限 |
 | `--sort {relevance,likes}` | `relevance` | 選定基準（X 用） |
-| `--trends` | なし | トレンドワード探索モード（X 用・予約） |
 | `--cache-dir PATH` | `cache/` | 中間成果物の永続化先 |
 
 列挙値（`--platform` / `--format` / `--sort`）は**大文字小文字を区別**します。

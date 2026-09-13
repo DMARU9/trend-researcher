@@ -22,7 +22,6 @@ class OutputSpec(BaseModel):
     """出力指定。"""
 
     format: OutputFormat = OutputFormat.MARKDOWN
-    table_for: list[str] = Field(default_factory=lambda: ["common_points"])
 
 
 class ResearchInstruction(BaseModel):
@@ -38,8 +37,7 @@ class ResearchInstruction(BaseModel):
     max_results: int = 5
     output: OutputSpec = Field(default_factory=OutputSpec)
     published_after: datetime | None = None
-    # X 特有（--trends / --sort）
-    use_trends: bool = False
+    # 選定基準（--sort）
     sort_by: str = "relevance"  # "relevance" | "likes"
     # YouTube 特有（--lang）
     transcript_language: str = "ja"

@@ -16,7 +16,6 @@ class Configuration(BaseModel):
     max_results: int = Field(default=5, description="解析対象件数")
     sort_by: str = Field(default="relevance", description="選定基準（relevance/likes）")
     transcript_language: str = Field(default="ja", description="字幕優先言語")
-    use_trends: bool = Field(default=False, description="トレンドワード探索モード")
     cache_dir: str | None = Field(default=None, description="中間成果物の永続化先")
     published_after: str | None = Field(
         default=None,

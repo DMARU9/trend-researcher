@@ -188,7 +188,6 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
         max_results=max_results,
         output=OutputSpec(format=output_format),
         published_after=published_after,
-        use_trends=bool(configurable.use_trends) if configurable.use_trends else bool(state.get("use_trends", False)),
         sort_by=str(configurable.sort_by) if configurable.sort_by != "relevance" else str(state.get("sort_by", "relevance")),
         transcript_language=str(configurable.transcript_language) if configurable.transcript_language != "ja" else str(state.get("transcript_language", "ja") or "ja"),
     )

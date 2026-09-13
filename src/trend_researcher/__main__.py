@@ -47,11 +47,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--cache-dir", default=None, help="中間成果物の永続化先（既定: cache/）")
     parser.add_argument(
-        "--trends",
-        action="store_true",
-        help="トレンドワード探索モード（X 用。予約。現在は通常検索と同じ）",
-    )
-    parser.add_argument(
         "--sort",
         choices=["relevance", "likes"],
         default="relevance",
@@ -77,7 +72,6 @@ async def _run_async(args: argparse.Namespace, config: Config) -> dict:
         max_results=args.max_results or 5,
         sort_by=args.sort,
         transcript_language=lang,
-        use_trends=args.trends,
         cache_dir=str(config.cache_dir),
         published_after=since.isoformat() if since else None,
     )

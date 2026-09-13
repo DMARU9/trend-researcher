@@ -59,7 +59,6 @@ class AgentState(MessagesState):
     common_themes: list[CommonTheme]
     report: ResearchReport
     notes: list[str]
-    use_trends: bool
     sort_by: str
     transcript_language: str
     cache_dir: str | None
