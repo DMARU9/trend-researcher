@@ -287,7 +287,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       （`nodes/parse_instruction.py` / `nodes/plan_search.py` / `nodes/search.py` /
       `nodes/fetch.py` / `nodes/analyze_content.py` / `nodes/extract_common.py` /
       `nodes/compile_report.py`）
-- [ ] T037 [US2] `uv run pytest -q` を実行し、削除に伴う赤を解消する。
+- [X] T037 [US2] `uv run pytest -q` を実行し、削除に伴う赤を解消する。
       `tests/unit/test_cache.py` / `tests/unit/test_x_search.py` / `tests/unit/test_models.py` の
       削除対象を固定していた節を削除し、`tests/integration/test_full_flow.py` の進捗 7 行の断言を
       **維持したまま**通す。削除したテストごとに「何を固定していたか」を
@@ -643,16 +643,25 @@ Markdown 側は `generated_at` を出力しないため影響しない。
 
 ### 4. 更新・削除したテスト（SC-008）
 
-| テスト | 固定していた内容 | 処置 | REM |
+T037 で `contracts/removal-rationale.md` の REM-001〜REM-009 と実測を突き合わせた結果（削除した
+テストと、その後に追加した不在断言の件数）:
+
+| テスト | 固定していた内容 | 処置（実測） | REM |
 |---|---|---|---|
-| `tests/unit/test_cache.py` | JSON の往復 | `read_json` の節を削除 | REM-001 |
-| `tests/unit/test_x_search.py` | 1 件取得時の本文連結 | `fetch_thread` の節を削除し、1 件ケースを `fetch_threads` へ移す | REM-005 |
-| `tests/unit/test_config.py` | `TR_*` > `XTR_*`/`YTR_*` > 既定 | 対象を `Configuration.load` へ移行（期待値は維持） | REM-006 / REM-007 |
-| `tests/unit/test_configuration.py` | `DEFAULTS` 8 キー | `use_trends` を削除 | REM-003 |
-| `tests/unit/test_progress.py` | 進捗行の書式と `TOTAL` | 新シグネチャへ追随（書式の断言は維持） | REM-008 |
-| `tests/unit/test_compile_report.py` | レポート本文 | 描画の断言を `test_rendering.py` へ移動 | REM-009 |
-| `tests/integration/test_cli_contract.py` | `--trends` の受理 | 当該節を削除（他は維持） | REM-003 |
-| `tests/integration/test_full_flow.py` | 進行・7 行・件数 | `Config` 依存のみ追随 | REM-006 / REM-007 |
+| `tests/unit/test_cache.py` | JSON の往復 | `read_json` の節 **5 件を削除**し、契約の列挙から読み戻しを除いた。不在断言 1 件を追加（計 12 passed） | REM-001 |
+| `tests/unit/test_x_search.py` | 1 件取得時の本文連結 | `fetch_thread` の節 **11 件を削除**し、**同じ 11 件を `fetch_threads` の 1 件経路（`_threads()` ヘルパ）へ移設**（リプライ上限 5 → 既定 3）。不在断言 1 件を追加（計 44 passed） | REM-005 |
+| `tests/unit/test_config.py` | `TR_*` > `XTR_*`/`YTR_*` > 既定 | 対象を `Config.load(env_prefix=...)` へ移行（期待値は維持） | REM-006 / REM-007 |
+| `tests/unit/test_configuration.py` | `DEFAULTS` 8 キー | `use_trends` を `DEFAULTS` と 3 テストから削除し、falsy パラメータを `published_after` へ差し替え。不在断言 1 件を追加 | REM-003 |
+| `tests/unit/test_progress.py` | 進捗行の書式と `TOTAL` | 新シグネチャへ書き換え（書式の断言は維持、2 件追加で 13 件） | REM-008 |
+| `tests/unit/test_parse_instruction.py` | `use_trends` と `transcript_language` の優先順位 | `transcript_language` のみを残して整理し、不在断言（`AgentInputState` / `AgentState`）を追加 | REM-003 |
+| `tests/unit/test_models.py` | 既定値の宣言 | 該当なし（`table_for` を固定していた節は存在しなかった）。不在断言 2 件を追加 | REM-004 |
+| `tests/unit/test_compile_report.py` | レポート本文 | T021 の移設後も**無修正で 45 passed**（出力不変の証跡）。US4 で `test_rendering.py` へ移動 | REM-009 |
+| `tests/integration/test_cli_contract.py` | `--trends` の受理 | **該当節は存在しなかった**（`grep -rn -- "--trends" tests/` が 0 件）。T032 の記載とのずれとしてここに記録し、ファイルは無修正 | REM-003 |
+| `tests/integration/test_full_flow.py` | 進行・7 行・件数 | `Config` 依存のみ追随（`env_prefix=` へ）。進捗 7 行の断言は**維持したまま緑** | REM-006 / REM-007 |
+
+**削除対象 5 件の残存参照（T037 実測）**: `src/` は全件 **0**。`tests/` に残るのは不在断言と
+説明コメントのみ（`read_json` 3 / `COMPILE_REPORT_PROMPT` 0 / `use_trends` 14 / `table_for` 6 /
+`fetch_thread` 3 / `--trends` 1）。
 
 ### 5. 最終ゲート（T069）
 
