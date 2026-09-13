@@ -477,7 +477,7 @@ US1 / US2 のテストは緑のまま。
 - [X] T066 後方互換シムの不在を確認する（FR-020 / 憲法 原則 VI）。`grep -rn "deprecated\|後方互換\|alias\|別名" src/` と
       `grep -rn "Config\b" src/ tests/` を実行し、旧名の別名・非推奨ラッパー・二重実装が 0 件で
       あることを確認する（`Configuration` は残ってよいが `Config` は 0 件）
-- [ ] T067 削除の証跡を確定する（SC-005 / SC-008）。`contracts/removal-rationale.md` の
+- [X] T067 削除の証跡を確定する（SC-005 / SC-008）。`contracts/removal-rationale.md` の
       REM-001〜REM-009 と実際の変更を突き合わせ、各項目の (a) 実行時の参照件数、(b) 削除理由、
       (c) 同一変更で更新した参照、(d) 更新／削除したテストが固定していた内容、を実測値で確定する。
       未記載の参照や未更新のテストがあればこのタスクで直す
@@ -780,6 +780,26 @@ US1 / US2 のテストは緑のまま。
 - 走査の落とし穴: 素の `grep -rn "Config\b"` は `RunnableConfig`（語末が `Config`）と `Configuration` を拾うため単独識別子の判定に使えない。PERL 風正規表現 `(?<![A-Za-z_])Config(?![A-Za-z_])` で前後を識別子文字から除外して初めて「実在する旧名」を数えられる。
 - 単独識別子 `Config` のヒット 10 件の内訳（すべて実装ではない）: `configuration.py:16`（削除済み `Config._env()` を語る docstring）／`test_configuration.py:288,291,295,296`（旧 re-export の削除と `__all__` の不在を固定）／`test_platform_scan.py:16,332,359`（規則 (c) の**検出対象文字列** `"Config.load"` とその説明）／`test_config.py:332,337`（`Configuration` 単一性を固定）／`test_llm.py:28`（既定モデル名の出所を語るコメント）。
 - 削除を固定しているテスト: `tests/unit/test_config.py::test_old_config_class_is_removed`（`Config` / `get_config` / `lru_cache` の不在）、`tests/unit/test_configuration.py::test_package_does_not_reexport_the_old_config_class`（`__all__` と `hasattr` の不在）、`tests/unit/test_platform_scan.py` の規則 (c)（ノードは `Config.load` を読まない）。3 ファイルの実行は **54 passed**。
+
+#### T067: 削除の証跡の確定（SC-005 / SC-008。実測）
+
+| REM | (a) 実行時の参照件数（削除後の実測） | 実測コマンド |
+|---|---|---|
+| REM-001 `cache.read_json` | `src/` **0 件**、`tests/` は不在の断言 1 件のみ | `grep -rn "read_json" src/ tests/ --include=*.py` |
+| REM-002 `prompts.COMPILE_REPORT_PROMPT` | `src/` **0 件**、`tests/` **0 件** | `grep -rn "COMPILE_REPORT_PROMPT" src/ tests/ --include=*.py` |
+| REM-003 `--trends` 一式 | `src/` の `use_trends` **0 件**、`tests/` は不在の断言 4 件 | `grep -rn "use_trends" src/ tests/ --include=*.py` |
+| REM-004 `OutputSpec.table_for` | `src/` **0 件**、`tests/` は不在の断言 1 件（＋ golden の除外キー） | `grep -rn "table_for" src/ tests/ --include=*.py` |
+| REM-005 `tools/x_search.fetch_thread` | `src/` **0 件**、`tests/` は不在の断言 1 件のみ | `grep -rn "fetch_thread\b" src/ tests/ --include=*.py` |
+| REM-006 `Config` | `src/` **0 件**、実行時 `hasattr` → False | T066 参照 |
+| REM-007 `get_config()` | `src/` **0 件**（`config` モジュールの残存メンバ → `[]`） | T066 参照 |
+| REM-008 手書き番号と `TOTAL` | `src/` の `TOTAL` **0 件**、emit 14 箇所すべて数値引数なし | T065 参照 |
+| REM-009 描画関数群 | 定義は `rendering.py` の 6 件のみ、`graph.py` の `render` 参照 **0 件** | `grep -rn "^def _render_\|^def render_" src/ --include=*.py` |
+
+- 契約文書の突き合わせで判明した**記載のずれ**（REM-003 の (c)）: `README.md` と `tests/integration/test_cli_contract.py` は**元から `--trends` の記載／節が存在しなかった**（`grep -c -- '--trends' README.md` → **0**、`grep -rn -- "--trends" tests/` → **0 件**）。ファイルは無修正とし、`contracts/removal-rationale.md` の REM-003 (c) を実測に合わせて訂正した。
+- `specs/001-test-suite-hardening/contracts/cli-contract.md` は REM-003 (c) のとおり**更新済み**（同ディレクトリの `--trends` は **0 件**）。
+- 契約文書に「## 実測による確定（T067 / SC-005 / SC-008）」節を追加し、9 項目すべての (a) 参照件数 / (c) 参照の更新状態 / (d) テストが固定していた内容と固定先を実測値で確定した。「位置」欄は**削除前の座標**であることを明記した。
+- 結論: 未更新の参照・未更新のテストは 0 件。ずれは REM-003 の (c) に記載した 2 ファイルが元から対象外だった 1 点のみで、文書側を訂正した。
+- REM-005 の 1 件取得ケースの移設先: `tests/unit/test_x_search.py:409` の `_threads()`（「1 件だけの `fetch_threads` 呼び出し（旧 `fetch_thread` と同一の経路）」）を `test_fetch_threads_*` 13 件が通す。
 
 ### 2. 基準値のずれ（spec は変更しない）
 

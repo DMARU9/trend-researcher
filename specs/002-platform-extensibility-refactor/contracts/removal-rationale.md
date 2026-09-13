@@ -39,7 +39,7 @@ FR-008 / FR-010 / FR-019 / SC-005 / SC-008 の証跡。各項目に **(a) 実行
 | 位置 | `__main__.py:50`（フラグ定義）、`__main__.py:80`（受け渡し）、`Configuration.use_trends`、`ResearchInstruction.use_trends`（`models.py:38`）、`AgentState.use_trends`（`state.py:62`）、`parse_instruction.py:191` |
 | (a) 参照 | 実行時 0。値は `report` まで運ばれるが、分岐に寄与しない。ただし `ResearchInstruction` として **JSON レポートに現れる**（下欄参照） |
 | (b) 理由 | 「予約。現在は通常検索と同じ」という**効果のない予約機構**（FR-009）。互換のための予約は将来の判断を曖昧にする |
-| (c) 更新 | `README.md:168`、argparse のヘルプ、`tests/unit/test_configuration.py`（`DEFAULTS`）、`tests/unit/test_parse_instruction.py`（該当節）、`tests/integration/test_cli_contract.py`（`--trends` の受理）、`specs/001-test-suite-hardening/contracts/cli-contract.md:128` |
+| (c) 更新 | argparse のヘルプ定義、`tests/unit/test_configuration.py`（`DEFAULTS`）、`tests/unit/test_parse_instruction.py`（該当節）、`specs/001-test-suite-hardening/contracts/cli-contract.md:128` |
 | (d) 固定していたもの | 「`--trends` を受理し、既定で True になる」という**オプションの受理**。これは利用者可視の契約だが、**挙動を持たない**ため FR-009 が削除を MUST としており、更新対象は内部構造の固定として扱う。終了コード・stdout/stderr の分離・レポート形式の断言は維持する |
 | (e) JSON への影響 | `render_json` は `report.model_dump_json(...)` を返すため、`ResearchInstruction.use_trends` が**JSON 出力から消える**。これは削除に必然的に伴う**意図的な差分**であり、RND-003 のとおり比較時に当該キーを除外する（`spec.md` の SC-006 の文言は変更しない） |
 | 更新しない参照 | `specs/001-test-suite-hardening/` の `plan.md` / `tasks.md` / `research.md` / `data-model.md` / `quickstart.md`（完了済み機能の履歴） |
@@ -117,6 +117,30 @@ FR-008 / FR-010 / FR-019 / SC-005 / SC-008 の証跡。各項目に **(a) 実行
 | (b) 理由 | 描画がノードの実行から分離されていない（FR-016）。骨格（`graph.py`）が描画を参照しているため、描画だけを直しても回帰範囲が読めない |
 | (c) 更新 | `rendering.py` へ移設。`graph.py` から参照を削除。`tests/unit/test_compile_report.py` の描画節を `tests/unit/test_rendering.py` へ移す |
 | (d) 固定していたもの | 「レポートの Markdown / JSON の内容」という**観測可能な契約**。**削除ではなく移動**であり、期待値は書き換えない（golden で byte 一致を固定。RND-003） |
+
+---
+
+## 実測による確定（T067 / SC-005 / SC-008）
+
+**Date**: 2026-09-13。本文の「位置」欄は**削除前の座標**である（削除済みのため現在は存在しない）。
+以下は削除を適用した作業ツリー（`specs/002-platform-extensibility-refactor` の T065 コミット以降）での実測。
+
+| REM | (a) 実行時の参照件数（削除後の実測） | (c) 参照の更新状態 | (d) 更新／削除したテストが固定していた内容と、その固定先 |
+|---|---|---|---|
+| REM-001 `cache.read_json` | `src/` **0 件**、`tests/` は不在を固定する `tests/unit/test_cache.py:26`（`test_read_json_is_removed`、`:32` の `assert not hasattr(cache, "read_json")`）のみ | `tests/unit/test_cache.py`（`read_json` の節を削除、`write_json` の節は維持） | 往復の同値性（観測不能）。**失われた網羅はない**ことを `write_json` の節が出力形式を固定し続けていることで確認 |
+| REM-002 `prompts.COMPILE_REPORT_PROMPT` | `src/` **0 件**、`tests/` **0 件**（参照を持つテストが元から無い） | なし | なし。残る 8 定数（X 4 ＋ YouTube 4）を `grep -n "^[A-Z_]* = " src/trend_researcher/prompts.py` で確認 |
+| REM-003 `--trends` 一式 | `src/` の `use_trends` **0 件**。`tests/` は不在を固定する 4 件（`test_configuration.py:65` / `test_models.py:29` / `test_parse_instruction.py:26` / 同 `:376`） | argparse のヘルプ、`tests/unit/test_configuration.py`、`tests/unit/test_parse_instruction.py`、`specs/001-test-suite-hardening/contracts/cli-contract.md`（同ディレクトリの `--trends` は **0 件**） | オプションの受理（利用者可視だが挙動を持たない）。終了コード・stdout/stderr の分離・レポート形式の断言は `tests/integration/test_cli_contract.py`（**54 passed**）で維持。JSON の意図差分は `test_rendering.py` の `JSON_EXCLUDED_KEYS` が 2 キー（`use_trends` / `table_for`）として固定 |
+| REM-003 の記載のずれ（実測で判明） | — | **`README.md` と `tests/integration/test_cli_contract.py` は元から `--trends` の記載／節が存在しなかった**（`grep -c -- '--trends' README.md` → **0**、`grep -rn -- "--trends" tests/` → **0 件**） | T032 の記載（両者を更新対象としていた）とのずれ。ファイルは無修正で、`tasks.md` §4 に「該当節は存在しなかった」として記録済み |
+| REM-004 `OutputSpec.table_for` | `src/` **0 件**、`tests/` は `tests/unit/test_models.py:20`（`assert "table_for" not in OutputSpec.model_fields`）のみ | `tests/unit/test_models.py`（既定値の断言を不在の断言へ） | 既定値の存在（観測不能）。JSON の意図差分は REM-003 と同じ 1 箇所で扱う |
+| REM-005 `tools/x_search.fetch_thread` | `src/` **0 件**、`tests/` は `tests/unit/test_x_search.py:58`（`assert not hasattr(x_search, "fetch_thread")`）のみ | `tests/unit/test_x_search.py` の `fetch_thread` の節を削除し、1 件の経路を `_threads()`（`:409`）経由で `test_fetch_threads_*` の 13 件が通す形へ移設 | 「1 件取得時に本文を連結する」性質は移設先（`test_fetch_threads_reads_main_parent_and_replies` ほか）が**同じ経路**で固定。複数件は `test_fetch_threads_gathers_each_candidate` が維持 |
+| REM-006 `Config` | `src/` の単独識別子 `Config` **0 件**（`hasattr(trend_researcher, "Config")` → **False**） | `__init__.py` の `__all__`、`__main__.py`、`nodes/*`、`graph.py`、`tests/unit/test_config.py`、`tests/integration/test_full_flow.py` | `TR_*` > `XTR_*`/`YTR_*` > 既定 の**解決結果**（期待値は書き換えず対象を `Configuration.load()` へ）。不在は `test_config.py:332` と `test_configuration.py:287` が固定 |
+| REM-007 `get_config()` | `src/` **0 件**（`trend_researcher.config` の `get_config` / `lru_cache` も **0 件**） | 上記テストの `cache_clear()` 呼び出し（経路ごと消滅） | 「同一引数で同一インスタンス」という内部同一性（観測不能）。`TR_*` の解決結果の断言は維持 |
+| REM-008 手書き番号と `TOTAL` | `src/` の `TOTAL` **0 件**、7 ノードの `emitter.emit` 全 14 箇所が `(NODE_X, phase[, detail=...])` | `tests/unit/test_progress.py`、7 ノードの呼び出し | 「`[i/7] name ... phase」の書式と行数（観測可能・**維持**）。`assert not hasattr(ProgressEmitter, "TOTAL")`（`test_progress.py:25`）と `test_progress.py:155` が手書き番号への回帰を固定 |
+| REM-009 描画関数群 | `src/` の定義は `rendering.py` の 6 件（`:13` `:20` `:54` `:59` `:71` `:113`）のみ。`graph.py` の `render` 参照 **0 件** | `rendering.py` へ移設、`graph.py` / `__main__.py` / `__init__.py` の参照を更新 | Markdown / JSON の内容（観測可能）。**移動**であり期待値は不変。`tests/unit/golden/` の 6 ファイルで byte 一致、旧 `test_compile_report.py` の描画節は `tests/unit/test_rendering.py` へ移設 |
+
+- 結論: REM-001〜REM-009 のいずれにも**未更新の参照**・**未更新のテスト**は残っていない（上表のコマンドで 0 件を実測）。
+  唯一のずれは REM-003 の (c) に記載していた 2 ファイルが元から対象外だったことで、契約文書はここで訂正した。
+
 
 ---
 
