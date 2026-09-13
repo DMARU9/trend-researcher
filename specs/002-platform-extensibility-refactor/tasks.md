@@ -86,7 +86,7 @@ description: "Task list for 002-platform-extensibility-refactor"
 - [X] T006 `quickstart.md` の手順 4-1 のコマンドを実行し、**変更前のツリー**から
       `tests/unit/golden/` の 6 ファイル（3 入力 × md/json）を採取する。採取後、`uv run pytest
       tests/unit/test_rendering.py -q` が緑になることを確認する
-- [ ] T007 決定論を確認する。T006 の採取をもう一度実行して `git status --short tests/unit/golden/`
+- [X] T007 決定論を確認する。T006 の採取をもう一度実行して `git status --short tests/unit/golden/`
       が空（byte 一致）であることを確かめる。差が出る場合は golden を採る対象（`render_json` の
       キー順、時刻の埋め込み）を特定し、「実装メモ」節に記録してから比較方法を確定する
       （決定論でない出力を byte 比較すると flaky なテストになる）
@@ -574,9 +574,15 @@ US1 / US2 のテストは緑のまま。
 
 | 項目 | 記録内容 | 実測 |
 |---|---|---|
-| 2 回採取の一致 | `git status --short tests/unit/golden/` | （未記入） |
-| 判定方法 | Markdown は byte 比較 / JSON は `use_trends` / `table_for` の 2 キーを両側で除去してから byte 比較 | （未記入） |
-| 除外キーの正当性 | 除外は RND-003 の 2 キーのみ。他のキーの差は失敗として扱う | （未記入） |
+| 2 回採取の一致 | `git status --short tests/unit/golden/` | **空（byte 一致。決定論を確認）** |
+| 判定方法 | Markdown は byte 比較 / JSON は `use_trends` / `table_for` の 2 キーを両側で除去してから byte 比較 | 実装どおり（`tests/unit/test_rendering.py` の `_normalize_json` / `JSON_EXCLUDED_KEYS`） |
+| 除外キーの正当性 | 除外は RND-003 の 2 キーのみ。他のキーの差は失敗として扱う | `JSON_EXCLUDED_KEYS = frozenset({"use_trends", "table_for"})` のみ。他キーの差は比較に残る |
+
+**決定論の担保（T007 の実測で判明した唯一の非決定要因）**: `ResearchReport.generated_at` は
+`default_factory=datetime.now` であり、`render_json` は `model_dump_json` を返すため
+**そのままでは JSON が毎回変わる**。`build_golden_cases()` が `FIXED_GENERATED_AT`
+（`2026-01-01T00:00:00Z`）を明示的に渡すことで決定論にしている（T004 で対応済み）。
+Markdown 側は `generated_at` を出力しないため影響しない。
 
 ### 4. 更新・削除したテスト（SC-008）
 
