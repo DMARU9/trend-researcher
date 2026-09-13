@@ -366,7 +366,7 @@ US1 の機能（走査・拡張）と golden は赤くなっていない。
       で確認する（`__main__.py` はカバレッジ 46% でテストの網が薄いため実測で確かめる）
 - [X] T048 [P] [US3] `src/trend_researcher/__init__.py` の `Config` re-export を削除する
       （`__all__` の更新を含む）。`Configuration` と `render_report` の re-export は維持する
-- [ ] T049 [P] [US3] `src/trend_researcher/tools/llm.py` の環境変数解決を `resolve_env` に寄せる
+- [X] T049 [P] [US3] `src/trend_researcher/tools/llm.py` の環境変数解決を `resolve_env` に寄せる
       （`build_model(role, env_prefix)` の内部で `resolve_env("MODEL", default="openai:mimo-v2.5",
       env_prefix=env_prefix)` を使う）。`TR_MODEL` → `{env_prefix}_MODEL` → 既定の順を変えない
 - [X] T050 [US3] `tests/integration/test_full_flow.py` の `Config` / `get_config` / `cache_clear` の
@@ -659,6 +659,17 @@ US1 / US2 のテストは緑のまま。
 | フルスイート | `uv run pytest -q` | **596 passed**、カバレッジ **96.55%**、**48.72 秒** |
 
 - `Configuration` を新たに `__init__.py` へ公開する変更は行わない（未公開のまま。設定の入口を広げる変更は本リファクタリングの範囲外であり、SC-003 の「同名項目の定義箇所が 1 つ」はモジュール単位で満たしている）。
+
+#### T049: LLM のモデル解決（実測）
+
+| 確認項目 | コマンド / テスト | 実測 |
+|---|---|---|
+| 解決規則 | `tests/unit/test_llm.py` の 7 件 | `TR_MODEL` → `{env_prefix}_MODEL` → 既定 `openai:mimo-v2.5`、空文字は未設定扱い、`env_prefix=None` では接頭辞を見ない、`.env` 読み込みは維持 |
+| 変異探針 1 | `llm.py` の `env_prefix=env_prefix` を**削除**して実行 | **1 failed, 6 passed**（`test_model_uses_platform_prefix_when_generic_is_unset` が `AssertionError`）→ 復元（sha256 一致）後に **7 passed** |
+| lint / 型 | `uv run ruff check .` / `uv run mypy --no-incremental src` | **0 件** / 26 ファイルで **0 件** |
+
+- **T049 の赤は存在しない**（旧実装と `resolve_env` は同値。`os.getenv` の falsy 判定と「空文字は未設定扱い」が同じ規則）。したがって「実装前 red」ではなく**変異探針**でテストの非空虚性を示した（憲法 原則 I の「テストが空でないこと」の担保）。記録として残す: 上記の変異で赤になるため、追加した 7 件は解決順を実際に固定している。
+- 変異探針の戻し忘れ防止のため、復元後に sha256 の一致と**フルスイート 1 回**（`uv run pytest -q` → **596 passed / 96.55% / 48.83 秒**。T048 / T049 のテスト追加を含む）を確認した。
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |

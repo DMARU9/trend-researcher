@@ -7,6 +7,8 @@ import os
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 
+from trend_researcher.configuration import resolve_env
+
 Role = str
 
 # 役割ごとの max_tokens（research.md R-3 を流用）
@@ -30,10 +32,9 @@ def build_model(role: Role = "research", env_prefix: str | None = None):
             provider が渡す。解決順は `TR_MODEL` → `{env_prefix}_MODEL` → 既定。
     """
     load_dotenv()
-    model = os.getenv("TR_MODEL")
-    if not model and env_prefix is not None:
-        model = os.getenv(f"{env_prefix}_MODEL")
-    model = model or "openai:mimo-v2.5"
+    # 解決規則は `resolve_env` に一本化する（SET-009。`TR_MODEL` → `{env_prefix}_MODEL`
+    # → 既定。接頭辞は provider が引数で渡す）
+    model = resolve_env("MODEL", default="openai:mimo-v2.5", env_prefix=env_prefix)
     api_key = os.getenv("OPENAI_API_KEY", "")
     base_url = os.getenv("OPENAI_BASE_URL", "https://opencode.ai/zen/go/v1")
     max_tokens = _ROLE_MAX_TOKENS.get(role, 10000)
