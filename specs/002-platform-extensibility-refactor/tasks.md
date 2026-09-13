@@ -853,6 +853,28 @@ US1 / US2 のテストは緑のまま。
 - `env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB uv run pytest -q --no-cov` →
   **599 passed / 46.77 秒**（FR-023）。
 
+#### T072: `quickstart.md` 手順 6-1 の走査コマンドの偽陽性（実測）
+
+| 論点 | 修正前（実測） | 修正後 |
+|---|---|---|
+| 手順 6-1 | `grep -rn "class Config\b\|def get_config\|Config\.load" src/` → **stderr に `grep: src/trend_researcher/__pycache__/config.cpython-312.pyc: binary file matches`、stdout は空、終了コード 0**。`|| echo "OK: 0 件"` が発火せず、期待表の `OK: 0 件` が現れない | `--include='*.py'` を付与 → **`OK: 0 件`**（`grep` が 0 件で終了コード 1 → `||` が発火） |
+| 手順 6-2（現 226 行目） | 既に `--include=*.py` があり汚染なし。ただしシェルの glob 展開で `--include=<cwd の .py>` に化け得る | `--include='*.py'` へクォートを揃えた（同種の欠陥クラスのため同一文書内で統一） |
+| 他の走査コマンド | quickstart 内の走査系コマンドは 6-1 / 6-2 の 2 件のみ（`grep` / `rg` / `find` / `ack` を全文検索）。他は pytest と `git diff` だけで、`__pycache__` の影響を受けない | 変更なし |
+
+- **偽陽性の正体**: `grep -r` はバイナリファイルに一致すると stdout へ何も出さず、**終了コード 0** とstderr の
+  `binary file matches` だけを返す。つまり「削除済みの `Config` クラス」が古い bytecode に残っている限り、
+  手順どおりに実行すると成功・失敗のどちらとも読めない出力になる（＝検証として機能しない）。
+- **辿り着けなかった理由**: `tasks.md` の過去メモ（T064 / T066 の実測表。`## 実装メモ` の 681 / 688 / 743 行など）
+  は当時から `--include=*.py` 必須と記録していたが、`quickstart.md` の本文へは反映されていなかった。
+- **非空虚性（探針・復元済み）**: `src/trend_researcher/state.py` へ一時的に `class Config:` を追記すると
+  修正後のコマンドが `src/trend_researcher/state.py:66:class Config:  # probe` を出力する（＝走査が生きている）。
+  `git checkout -- src/trend_researcher/state.py` で復元し、`git status --short` が空であることを確認した。
+- **過去タスクの測定記録は変更しない**: T066 のタスク文（477-478 行）や削除確認表（773 行など）にある
+  `--include` なしのコマンドは「その時点で実行したコマンドの記録」であり、当時の事実として残す
+  （`converge` の append-only 方針。既存タスクの書き換えはしない）。
+- 行番号のずれ: T072 のタスク文は「6-2 は 224 行目」と書いているが、本タスク自身の追記で 2 行繰り上がり
+  **226 行目**になった（過去の実測記録として残す）。
+
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |
@@ -1062,7 +1084,7 @@ Task: "Implement hooks in src/trend_researcher/providers/youtube.py"
       `OPENAI_*` の解決である。`tools/llm.py` の `.env` 読み込みを `config._load_env_once()` へ寄せて呼び出しを
       1 経路にし、Studio 経路（`Configuration.load()` を通らない実行）でも `.env` が読まれることをテストで
       固定する。寄せない場合は `settings-contract.md` に例外として明記する）
-- [ ] T072 `quickstart.md` 手順 6-1 の検証コマンドを偽陽性にならない形へ直す per SC-003 (partial)
+- [X] T072 `quickstart.md` 手順 6-1 の検証コマンドを偽陽性にならない形へ直す per SC-003 (partial)
       （実測: 手順 6-1 の `grep -rn "class Config\b\|def get_config\|Config\.load" src/` は
       `src/trend_researcher/__pycache__/config.cpython-312.pyc` に一致して **exit 0** になり、
       `|| echo "OK: 0 件"` が発火しない＝手順どおりに実行すると失敗して見える。同じ節の 6-2（224 行目）には

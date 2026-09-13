@@ -201,7 +201,9 @@ uv run python -m trend_researcher --platform bogus > /dev/null; echo "exit=$?"
 
 ```bash
 # 6-1. 設定型が 1 つであること
-grep -rn "class Config\b\|def get_config\|Config\.load" src/ || echo "OK: 0 件"
+#      --include='*.py' は必須（古い __pycache__/*.pyc が残っていると、削除済みの
+#      Config クラスが「binary file matches」で一致して stdout が空のまま終了コード 0 になる）
+grep -rn "class Config\b\|def get_config\|Config\.load" src/ --include='*.py' || echo "OK: 0 件"
 
 # 6-2. ノードが環境変数を読まないこと（走査テストの規則 (c)）
 uv run pytest tests/unit/test_platform_scan.py -q -k "nodes_do_not_read"
@@ -221,7 +223,7 @@ uv run pytest tests/unit/test_config.py tests/unit/test_configuration.py -q
 **プラットフォーム固有設定の所在**
 
 ```bash
-grep -rn "XTR_\|YTR_" src/ --include=*.py | grep -v "^src/trend_researcher/providers/" | grep -v "^src/trend_researcher/tools/" || echo "OK: 固有設定は provider / tools のみ"
+grep -rn "XTR_\|YTR_" src/ --include='*.py' | grep -v "^src/trend_researcher/providers/" | grep -v "^src/trend_researcher/tools/" || echo "OK: 固有設定は provider / tools のみ"
 ```
 
 **期待**: `OK: ...`（`configuration.py` / `nodes/` に `XTR_` / `YTR_` が現れない）。
