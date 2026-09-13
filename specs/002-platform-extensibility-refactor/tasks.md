@@ -484,7 +484,7 @@ US1 / US2 のテストは緑のまま。
 - [X] T068 一時ファイル・探針の後始末をする。`git status --short` で意図しないファイル
       （探針用の一時変更、`/tmp` 以外に残った作業ファイル、`tests/unit/golden_support.py` のような
       追加ヘルパ）が無いことを確認する。`tests/unit/golden/` の golden 6 ファイルだけが新規データとして残る
-- [ ] T069 最終ゲートを通す。`uv run pytest -q`（カバレッジ `fail_under = 90` 以上。**実行時間
+- [X] T069 最終ゲートを通す。`uv run pytest -q`（カバレッジ `fail_under = 90` 以上。**実行時間
       60 秒の判定もこのコマンドで行う**。SC-010）、`uv run ruff check .`（0 件）、
       `uv run mypy src`（0 件）。3 つすべてが緑であることを「実装メモ」節に記録し、
       未達なら該当タスクへ戻る。併せて **FR-024（新しい実行時依存を追加しない）** を
@@ -872,12 +872,20 @@ T037 で `contracts/removal-rationale.md` の REM-001〜REM-009 と実測を突�
 
 ### 5. 最終ゲート（T069）
 
+**Date**: 2026-09-13。判定コマンドは `uv run pytest -q`（カバレッジ込み。実行時間の判定もこのコマンドで行う。SC-010）。
+
 | ゲート | 基準 | 実測 |
 |---|---|---|
-| `uv run pytest -q` | 全件 green・カバレッジ 90% 以上・**60 秒以内**（SC-010） | （未記入。基準 547 passed / 95.29% / 49.67 秒） |
-| `uv run ruff check .` | 0 件 | （未記入） |
-| `uv run mypy src` | 0 件 | （未記入） |
-| `git diff -- pyproject.toml` | `[project].dependencies` / `optional-dependencies` に差分なし（FR-024） | （未記入） |
+| `uv run pytest -q` | 全件 green・カバレッジ 90% 以上・**60 秒以内**（SC-010 / `fail_under = 90`） | **598 passed / 96.63%（TOTAL 97%）/ 48.44 秒**（wall 計測 49.75 秒。exit=0）。基準（547 passed / 95.29% / 49.67 秒）に対し **+51 件・+1.34 ポイント・−1.23 秒** |
+| `uv run ruff check .` | 0 件 | **All checks passed!**（exit=0） |
+| `uv run mypy src` | 0 件 | **Success: no issues found in 27 source files**（plan / quickstart の表記は 26 だが、`rendering.py` の追加で 27。§2 のずれ表に記録済み） |
+| `git diff -- pyproject.toml` | `[project].dependencies` / `optional-dependencies` に差分なし（FR-024） | **差分なし**（`git diff $(git merge-base HEAD main)..HEAD -- pyproject.toml` が空）。現在値: `dependencies` 7 件（`langgraph` / `langchain` / `langchain-openai` / `twscrape` / `yt-dlp` / `pydantic` / `python-dotenv`）、`optional-dependencies.dev` 8 件。**新しい実行時依存は追加していない** |
+| quickstart 6-1 の再実行 | 旧設定型（`Config` / `get_config` / `Config.load`）が 0 件 | **OK: 0 件**（`grep -rn "class Config\b\|def get_config\|Config\.load" src/ --include=*.py`） |
+| 作業ツリー | 意図しないファイルなし | `git status --short --untracked-files=all` → **出力なし** |
+| CLI の不変条件（参考） | `--help` に `--trends` が無い／未登録プラットフォームは exit 2 | `grep -c -- "--trends"` → **0**、`--platform bogus` → **exit=2** |
+
+- **部分適用・`# noqa` による回避は行っていない**（ruff は 0 件、mypy も 0 件で、抑制コメントの追加なし）。
+- 結論: 4 つのゲートすべてが基準を満たし、US1〜US4 の成果がこの作業ツリーで同時に緑である。
 
 ---
 
