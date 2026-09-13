@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from trend_researcher.config import Config
+from trend_researcher.configuration import Configuration
 from trend_researcher.models import Candidate, Context
 from trend_researcher.prompts import (
     YOUTUBE_ANALYZE_CONTENT_PROMPT,
@@ -37,15 +37,18 @@ class YouTubeProvider:
         max_results: int,
         published_after: datetime | None,
         sort_by: str,
-        config: Config,
+        configuration: Configuration,
     ) -> list[Candidate]:
         # YouTube は単一クエリ（plan_search が 1 件生成）
         query = queries[0] if queries else ""
         return search_videos(query, max_results=max_results, published_after=published_after)
 
-    def fetch_contexts(self, candidates: list[Candidate], config: Config) -> tuple[list[Context], list[str]]:
+    def fetch_contexts(
+        self, candidates: list[Candidate], configuration: Configuration
+    ) -> tuple[list[Context], list[str]]:
         notes: list[str] = []
-        language = config.transcript_language
+        # 固有設定を持たないため、字幕言語は共通設定（Configuration）から読む
+        language = configuration.transcript_language
         contexts: list[Context] = []
         for cand in candidates:
             transcript = fetch_transcript(cand.id, language=language)

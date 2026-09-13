@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from trend_researcher.config import Config
+from trend_researcher.configuration import Configuration
 from trend_researcher.models import Candidate, Context
 
 
@@ -21,7 +21,8 @@ class Provider(Protocol):
     name: str  # "x" | "youtube"
 
     # --- コアへ渡す差の表現（コアは値を解釈せず、そのまま出力に載せる） ---
-    #: 環境変数の接頭辞（`{env_prefix}_MODEL` / `{env_prefix}_*`）。`Config.load` に渡す。
+    #: 環境変数の接頭辞（`{env_prefix}_MODEL` / `{env_prefix}_*`）。
+    #: 固有設定の解決（`configuration.resolve_env`）に引数として渡す。
     env_prefix: str
     #: 検索クエリ数の上限。`None` は無制限（単一クエリ設計のプラットフォーム用）。
     max_search_queries: int | None
@@ -41,14 +42,18 @@ class Provider(Protocol):
         max_results: int,
         published_after: datetime | None,
         sort_by: str,
-        config: Config,
+        configuration: Configuration,
     ) -> list[Candidate]:
-        """クエリから候補（Candidate）を検索し、上位 max_results 件を返す。"""
+        """クエリから候補（Candidate）を検索し、上位 max_results 件を返す。
+
+        `configuration` は実行時設定の 1 つの値（SET-001）。固有設定の解決
+        （`settings()`）は provider の内部で行い、コアは呼ばない（SET-003）。
+        """
         ...
 
     # --- 要約用ソース取得（X: スレッド/リプライ, YouTube: 字幕）---
     def fetch_contexts(
-        self, candidates: list[Candidate], config: Config
+        self, candidates: list[Candidate], configuration: Configuration
     ) -> tuple[list[Context], list[str]]:
         """候補から要約用ソースを取得する。戻り値は (contexts, notes)。"""
         ...

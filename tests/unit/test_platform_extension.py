@@ -85,13 +85,13 @@ class DummyProvider:
         max_results: int,
         published_after: datetime | None,
         sort_by: str,
-        config: Any,
+        configuration: Any,
     ) -> list[Candidate]:
         count = max_results if self.result_count is None else self.result_count
         return _dummy_candidates(count)
 
     def fetch_contexts(
-        self, candidates: list[Candidate], config: Any
+        self, candidates: list[Candidate], configuration: Any
     ) -> tuple[list[Context], list[str]]:
         contexts = [Context(id=c.id, text=f"{c.text} の追加文脈") for c in candidates]
         return contexts, ["試験用プラットフォームの取得メモ"]

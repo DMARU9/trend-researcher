@@ -337,23 +337,23 @@ US1 の機能（走査・拡張）と golden は赤くなっていない。
       **`src/` から `Config` / `get_config` の参照を 0 にする**。
       **注意**: 憲法の「技術制約と品質基準」が実行条件の供給元を `Config` と明記しているため、
       T065 と**同一の変更一式**として完了させる（片方だけを適用した状態は憲法違反になる。C2）
-- [ ] T043 [P] [US3] `src/trend_researcher/providers/x.py` に固有設定の解決を実装する（FR-003 / SET-003）。
+- [X] T043 [P] [US3] `src/trend_researcher/providers/x.py` に固有設定の解決を実装する（FR-003 / SET-003）。
       `@dataclass(frozen=True) class XSettings`（`accounts_db: Path` / `search_pool_size: int` /
       `max_retries: int`）と `XProvider.settings(configuration: Configuration) -> XSettings` を追加し、
       `resolve_env(..., env_prefix=self.env_prefix)` で解決する。`configuration.model_fields_set` に
       含まれる値は環境変数より優先する。`search` / `fetch_contexts` の引数型を `Config` から
       `Configuration` へ変更し、内部で `self.settings(configuration)` を使う。
       `providers/__init__.py` の `_PROVIDERS` の 2 行は**変更しない**（走査の許容リスト）
-- [ ] T044 [P] [US3] `src/trend_researcher/providers/youtube.py` と
+- [X] T044 [P] [US3] `src/trend_researcher/providers/youtube.py` と
       `src/trend_researcher/providers/base.py` の `config: Config` を
       `configuration: Configuration` へ変更する（YouTube は固有設定を持たないため、共通値を
       `Configuration` から読む）
-- [ ] T045 [US3] `src/trend_researcher/nodes/search.py` から `cfg = Config.load(platform=platform)` を
+- [X] T045 [US3] `src/trend_researcher/nodes/search.py` から `cfg = Config.load(platform=platform)` を
       削除し、`provider.search(..., configuration=configurable)` の形へ変更する。`max_results` の
       解決（`instruction.max_results or 5`）と既存コメント（FR-011 の優先順位）は**変更しない**。
       **ノードは `Configuration` を渡すだけで、`provider.settings(configuration)` は呼ばない**
       （固有設定の解決は provider の内部。ノードが設定型を知る範囲を広げない。data-model.md 2 節）
-- [ ] T046 [US3] `src/trend_researcher/nodes/fetch.py` から `cfg = Config.load(platform=platform)` を
+- [X] T046 [US3] `src/trend_researcher/nodes/fetch.py` から `cfg = Config.load(platform=platform)` を
       削除し、`provider.fetch_contexts(candidates, configurable)` の形へ変更する。
       `settings()` の呼び出しは provider の内部に閉じる（T045 と同じ方針）
 - [ ] T047 [US3] `src/trend_researcher/__main__.py` を `Configuration.load(env_prefix=provider.env_prefix)`
@@ -660,8 +660,9 @@ T037 で `contracts/removal-rationale.md` の REM-001〜REM-009 と実測を突�
 | テスト | 固定していた内容 | 処置（実測） | REM |
 |---|---|---|---|
 | `tests/unit/test_cache.py` | JSON の往復 | `read_json` の節 **5 件を削除**し、契約の列挙から読み戻しを除いた。不在断言 1 件を追加（計 12 passed） | REM-001 |
-| `tests/unit/test_x_search.py` | 1 件取得時の本文連結 | `fetch_thread` の節 **11 件を削除**し、**同じ 11 件を `fetch_threads` の 1 件経路（`_threads()` ヘルパ）へ移設**（リプライ上限 5 → 既定 3）。不在断言 1 件を追加（計 44 passed） | REM-005 |
-| `tests/unit/test_config.py` | `TR_*` > `XTR_*`/`YTR_*` > 既定 | 対象を `Config.load(env_prefix=...)` へ移行（期待値は維持） | REM-006 / REM-007 |
+| `tests/unit/test_x_search.py` | 1 件取得時の本文連結 | `fetch_thread` の節 **11 件を削除**し、**同じ 11 件を `fetch_threads` の 1 件経路（`_threads()` ヘルパ）へ移設**（リプライ上限 5 → 既定 3）。不在断言 1 件を追加。T043 で `config=` → `configuration=` へ追随し、`Config(search_pool_size=50, max_retries=2)` は環境変数（`XTR_MAX_RETRIES=2`）へ移した（テスト名も `..._come_from_settings` へ変更）＋ `XSettings` の解決テスト 6 件を追加 | REM-005 / SET-003 |
+| `tests/unit/test_config.py` | `TR_*` > `XTR_*`/`YTR_*` > 既定 | T025 で `Config.load(env_prefix=...)` へ、T039 で `Configuration.load()` / `resolve_env()` へ移行。`get_config` / `cache_clear` の節（2 件）と `OPENAI_*` / `model` の節（3 件）を削除し、`load()` のキャッシュ無し・明示指定優先の節（計 30 passed）へ置換 | REM-006 / REM-007 / SET-002 / SET-010 |
+| `tests/unit/test_youtube_search.py` / `tests/unit/test_platform_extension.py` | provider の `config` 引数 | 引数名を `configuration` へ追随（署名とテストの語彙のみ。期待値は不変） | SET-001 |
 | `tests/unit/test_configuration.py` | `DEFAULTS` 8 キー | `use_trends` を `DEFAULTS` と 3 テストから削除し、falsy パラメータを `published_after` へ差し替え。不在断言 1 件を追加 | REM-003 |
 | `tests/unit/test_progress.py` | 進捗行の書式と `TOTAL` | 新シグネチャへ書き換え（書式の断言は維持、2 件追加で 13 件） | REM-008 |
 | `tests/unit/test_parse_instruction.py` | `use_trends` と `transcript_language` の優先順位 | `transcript_language` のみを残して整理し、不在断言（`AgentInputState` / `AgentState`）を追加 | REM-003 |
