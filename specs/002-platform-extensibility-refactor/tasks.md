@@ -202,7 +202,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       2 行**（許容リストのみ）になり、**規則 (d) が 0 件**（T022 のヘルプ汎用化で解消）・
       **規則 (e) が 0 件**であることを確認する。「実装メモ」節に検出結果の内訳
       （(a)+(b): 16 → 2、(d): 1 → 0、(e): 0 → 0）を記録する
-- [ ] T024 [US1] 走査テストの**非空虚性**を変異探針で確認する。(1) `src/trend_researcher/graph.py` に
+- [X] T024 [US1] 走査テストの**非空虚性**を変異探針で確認する。(1) `src/trend_researcher/graph.py` に
       一時的に `_PLATFORM_HINT = "x"` の行を追加 → `uv run pytest tests/unit/test_platform_scan.py -q`
       が**赤**になる、(2) `src/trend_researcher/__main__.py` の `--platform` のヘルプに `"x"` を
       一時的に含める → 規則 (d) が**赤**になる、(3) `src/trend_researcher/providers/__init__.py` に
@@ -554,12 +554,12 @@ US1 / US2 のテストは緑のまま。
 | 走査テストの検出（変更後） | 規則 (a)+(b) の行数と内訳 | **2 行**（`providers/__init__.py:12` `"x": XProvider,` / `:13` `"youtube": YouTubeProvider,` = 許容リストそのもの）→ **違反 0 件で緑**（T023 実測） |
 | 走査テストの検出（変更前） | 規則 (d) `help=` / `description=` の名前列挙 | **1 件**（`__main__.py:32` の `--platform` ヘルプ）で赤。規則 (e) は 0 件（回帰ガード、緑） |
 | 走査テストの検出（変更後） | 規則 (d) / 規則 (e) | **ともに 0 件**（T023 実測。(d) は T022 のヘルプ汎用化で解消、(e) は回帰ガードのまま） |
-| T024 変異探針（走査） | `graph.py` に `_PLATFORM_HINT = "x"` を追加 → 赤 / 復元 → 緑 | （未記入） |
+| T024 変異探針（走査） | `graph.py` に `_PLATFORM_HINT = "x"` を追加 → 赤 / 復元 → 緑 | 赤: `test_platform_literals_are_confined_to_registry` のみ失敗（`1 failed, 2 passed`）。復元後 `3 passed`、sha256 一致、`git status` 空（T024 実測） |
 | T051 変異探針（ノードの env） | `nodes/search.py` に `os.getenv` を追加 → 赤 / 復元 → 緑 | （未記入） |
 | T027 導出の非空虚性 | `NODE_ORDER` を差し替え → 出力が追随 | （未記入） |
 | T053 引数の使用 | 実装前は「引数が無視される」ことで赤 | （未記入） |
-| 規則 (d) の非空虚性 | `__main__.py` のヘルプに `"x"` を一時追加 → 赤 / 復元 → 緑（sha256 一致） | （未記入） |
-| 規則 (e) の非空虚性 | `providers/__init__.py` に `_ALL: list[Provider] = []` を一時追加 → 赤 / 復元 → 緑 | （未記入） |
+| 規則 (d) の非空虚性 | `__main__.py` のヘルプに `"x"` を一時追加 → 赤 / 復元 → 緑（sha256 一致） | 赤: `test_help_text_does_not_enumerate_platforms` のみ失敗。復元後 `3 passed`、sha256 一致（T024 実測） |
+| 規則 (e) の非空虚性 | `providers/__init__.py` に `_ALL: list[Provider] = []` を一時追加 → 赤 / 復元 → 緑 | 赤: `test_platform_collections_are_absent` のみ失敗。復元後 `3 passed`、sha256 一致（T024 実測） |
 
 #### T010: 実装前の赤の理由（T008 / T009 実測）
 
