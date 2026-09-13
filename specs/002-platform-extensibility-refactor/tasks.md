@@ -436,7 +436,7 @@ US1 / US2 のテストは緑のまま。
       移し、ノード側には「`report` が状態に入る」「`cache.write_json` が呼ばれる」「描画が
       呼ばれる（メッセージ本文にレポートが含まれる）」を残す。**観測可能な断言は削除しない**
       （移動である。REM-009 / SC-008）
-- [ ] T062 [US4] `uv run pytest tests/unit/test_rendering.py -q` を実行し、golden 3 件が
+- [X] T062 [US4] `uv run pytest tests/unit/test_rendering.py -q` を実行し、golden 3 件が
       **byte 一致**であること、T053 / T054 が緑であることを確認する。
       比較は **Markdown は完全一致、JSON は `use_trends` / `table_for` の 2 キーのみ除外**（RND-003。
       FR-008 / FR-009 の削除に伴う意図的な差分。`removal-rationale.md` REM-003 / REM-004）。
@@ -704,6 +704,18 @@ US1 / US2 のテストは緑のまま。
 
 - 計測手順: T052 の import 切り替えで collection error になるため、T053 / T054 は**一時的に import を `nodes.compile_report` に戻した作業ツリー**で `-k "uses_passed_provider or graph_does_not"` を実行して赤を採取した（`2 failed, 7 deselected`）。復元は `cp /tmp/tr_rendering.bak` で行い、sha256 が `eb79949a689632bc32a98a2b34c6ec006011a33d5abe64540375d6773b02855e` と一致することを確認した。
 - 注記: 赤の間は `uv run ruff check .` が `I001`（import の並び）を報告する。ruff は未存在モジュールを first-party と判定できないためで、T056 で `rendering.py` が生えると解消する（T062 で確認）。
+
+#### T062: golden の byte 一致（実測）
+
+| 検証 | コマンド | 実測 |
+|---|---|---|
+| golden 3 件の一致（Markdown 完全一致 / JSON は 2 キーのみ除外） | `uv run pytest tests/unit/test_rendering.py -q` | **26 passed**（golden 6 件 ＝ Markdown 3 ＋ JSON 3、`test_markdown_uses_passed_provider`（T053）、`test_graph_does_not_reference_rendering`（T054）を含む）。golden ファイルは**無修正** |
+| カバレッジ gate の注意 | 同上 | サブセット実行では総合カバレッジ 43.37% となり `FAIL Required test coverage of 90.0% not reached` が出る（判定は全体実行で行う）。**テスト自体は 26 passed** |
+| 全件緑 | `uv run pytest -q` | **598 passed / 96.63% / 48.60 秒**（SC-010 の 60 秒以内） |
+| ruff | `uv run ruff check .` | **All checks passed!**（赤の間に出ていた `I001` は `rendering.py` の生成で解消） |
+
+- 移設の内訳: `test_rendering.py` 26 件（golden 6 ＋ 新規 2 ＋ 旧 `test_compile_report.py` から 18 件）／`test_compile_report.py` 20 件。
+- **T053 は実装前の赤（引数の無視）→ 実装後は緑**であることを同じテストで確認した（golden は変更していないため、`render_markdown` が provider を引数で受けるようになっても出力文字列は 1 文字も変わらないことが byte 比較で担保される）。
 
 ### 2. 基準値のずれ（spec は変更しない）
 
