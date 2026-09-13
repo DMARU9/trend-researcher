@@ -53,10 +53,10 @@ description: "Task list for 002-platform-extensibility-refactor"
       `uv run ruff check .`、`uv run mypy src` により再現し、作業ツリーが clean であることを
       `git status --short` で確認する（記録先: `specs/002-platform-extensibility-refactor/tasks.md`
       の「実装メモ」節）
-- [ ] T002 [P] 遅いテストを把握して時間予算を確保する。`uv run pytest -q --no-cov --durations=15` を実行し、
+- [X] T002 [P] 遅いテストを把握して時間予算を確保する。`uv run pytest -q --no-cov --durations=15` を実行し、
       上位 15 件の所要時間を「実装メモ」節に控える（SC-010 の 60 秒以内を守るため、追加する 3 テストの
       上限を決める根拠にする）
-- [ ] T003 [P] オフライン制約を実測する。`env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB
+- [X] T003 [P] オフライン制約を実測する。`env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB
       uv run pytest -q --no-cov` を実行し、認証情報なしでも 547 passed のままであることを確認する
       （FR-023 の基準。ここで赤が出る場合は既存テストの問題として記録し、本機能では触らない）
 
@@ -513,14 +513,38 @@ US1 / US2 のテストは緑のまま。
 #### T002: 遅いテスト上位 15 件（`uv run pytest -q --no-cov --durations=15`）
 
 ```
-（実行結果を記入）
+1.55s  test_cli_contract.py::test_cli_002_07_output_matches_stdout_rendering
+0.86s  test_cli_contract.py::test_cli_001_06_help_exits_zero
+0.84s  test_cli_contract.py::test_cli_002_05_002_03_stderr_only_for_diagnostics[error]
+0.83s  test_cli_contract.py::test_cli_001_10_unknown_platform
+0.82s  test_cli_contract.py::test_cli_002_05_information_messages_go_to_stderr
+0.82s  test_cli_contract.py::test_cli_001_17_blank_instruction[spaces]
+0.81s  test_cli_contract.py::test_cli_001_13_invalid_since
+0.81s  test_cli_contract.py::test_cli_004_05_sources_are_listed[youtube]
+0.81s  test_cli_contract.py::test_cli_005_enums_are_case_sensitive[sort-capitalized]
+0.81s  test_cli_contract.py::test_cli_003_05_json_has_no_markdown_headings
+0.81s  test_graph_wiring.py::test_success_path_progress_line_count
+0.80s  test_graph_wiring.py::test_success_path_runs_all_nodes
+0.80s  test_cli_contract.py::test_cli_001_04_output_json_file
+0.80s  test_cli_contract.py::test_cli_001_01_x_likes_sort_records_criterion
+0.80s  test_graph_wiring.py::test_zero_candidate_progress_line_count
+547 passed in 47.94s
 ```
+
+**時間予算の判断**: 遅いテストはすべて `tests/integration/` の subprocess 起動テスト（各 0.8〜1.55 秒）で、
+`tests/unit/` の最上位は 15 件に入っていない。新規 3 テスト（走査・拡張・golden）はいずれも
+`tests/unit/` のプロセス内テストであり、golden 比較は描画のみ（RND-007: 1 秒未満）で、
+拡張テストも既存の境界モック 1 回に留まる。増加見込みは 1〜2 秒で、
+`uv run pytest -q` の上限 60 秒（基準 49.79 秒）に対する余地 約 10 秒に収まる。
 
 #### T003: オフライン制約（`env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB uv run pytest -q --no-cov`）
 
 ```
-（実行結果を記入）
+547 passed in 47.94s
 ```
+
+認証情報（`OPENAI_API_KEY` / アカウント DB）を外しても 547 passed のまま。既存テストは
+外部 SDK をすべてモックしており、FR-023 の基準を満たす。修正は不要。
 
 ### 1. 検出と変異探針の結果
 
