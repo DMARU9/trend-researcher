@@ -198,7 +198,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       `choices=available_platforms()` に委ねる（登録の追加だけでヘルプが正しくなる状態にする。
       T008 の検出規則 (d) を 0 件にする）。`--help` の終了コードと出力先の契約は変えない
       （`tests/integration/test_cli_contract.py` が終了コードのみを固定していることは実測済み）
-- [ ] T023 [US1] `uv run pytest tests/unit/test_platform_scan.py -q` を実行し、**規則 (a)+(b) の検出が
+- [X] T023 [US1] `uv run pytest tests/unit/test_platform_scan.py -q` を実行し、**規則 (a)+(b) の検出が
       2 行**（許容リストのみ）になり、**規則 (d) が 0 件**（T022 のヘルプ汎用化で解消）・
       **規則 (e) が 0 件**であることを確認する。「実装メモ」節に検出結果の内訳
       （(a)+(b): 16 → 2、(d): 1 → 0、(e): 0 → 0）を記録する
@@ -551,9 +551,9 @@ US1 / US2 のテストは緑のまま。
 | 項目 | 記録内容 | 実測 |
 |---|---|---|
 | 走査テストの検出（変更前） | 規則 (a)+(b) の行数と内訳 | **16 行**（`__main__.py` 1 / `config.py` 2 / `configuration.py` 1 / `models.py` 2 / `nodes/compile_report.py` 3 / `nodes/plan_search.py` 2 / `providers/__init__.py` 2 / `state.py` 2 / `tools/llm.py` 1）。許容リストは `_PROVIDERS` の登録 2 行 → **違反 14 行で赤**（T008 実測） |
-| 走査テストの検出（変更後） | 規則 (a)+(b) の行数と内訳 | （未記入。目標: 2 行） |
+| 走査テストの検出（変更後） | 規則 (a)+(b) の行数と内訳 | **2 行**（`providers/__init__.py:12` `"x": XProvider,` / `:13` `"youtube": YouTubeProvider,` = 許容リストそのもの）→ **違反 0 件で緑**（T023 実測） |
 | 走査テストの検出（変更前） | 規則 (d) `help=` / `description=` の名前列挙 | **1 件**（`__main__.py:32` の `--platform` ヘルプ）で赤。規則 (e) は 0 件（回帰ガード、緑） |
-| 走査テストの検出（変更後） | 規則 (d) / 規則 (e) | （未記入。目標: ともに 0 件） |
+| 走査テストの検出（変更後） | 規則 (d) / 規則 (e) | **ともに 0 件**（T023 実測。(d) は T022 のヘルプ汎用化で解消、(e) は回帰ガードのまま） |
 | T024 変異探針（走査） | `graph.py` に `_PLATFORM_HINT = "x"` を追加 → 赤 / 復元 → 緑 | （未記入） |
 | T051 変異探針（ノードの env） | `nodes/search.py` に `os.getenv` を追加 → 赤 / 復元 → 緑 | （未記入） |
 | T027 導出の非空虚性 | `NODE_ORDER` を差し替え → 出力が追随 | （未記入） |
