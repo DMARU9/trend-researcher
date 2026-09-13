@@ -875,6 +875,26 @@ US1 / US2 のテストは緑のまま。
 - 行番号のずれ: T072 のタスク文は「6-2 は 224 行目」と書いているが、本タスク自身の追記で 2 行繰り上がり
   **226 行目**になった（過去の実測記録として残す）。
 
+#### T073: `env_prefix` の暫定表の削除とガードの追加（実測）
+
+| 論点 | 変更前（実測） | 変更後 |
+|---|---|---|
+| 暫定表 | `_ENV_PREFIX_FALLBACK = {"x": "XTR", "youtube": "YTR"}`（旧 57 行目）を `_env_prefixes()` のフォールバックに使用 | **削除**（定義・参照とも 0 件。`grep -rn "_ENV_PREFIX_FALLBACK" tests/ src/ --include=*.py` → 0 件） |
+| 解決できない `env_prefix` | 暫定表で補い、`if prefix:` で**黙ってスキップ**（規則 (b) の対象から外れる） | `AssertionError` を送出して**走査を中断**（材料が欠けた状態で「0 件」を返さない） |
+| 検証 | なし（暫定表を空にしても 4 passed ＝ 死んだ経路） | `test_env_prefix_guard_fails_loudly_when_unresolvable` を追加（`get_provider` を `env_prefix` を持たないスタブへ差し替え `pytest.raises(AssertionError, match="env_prefix")`。計 44 passed） |
+
+- **T008 / FR-025 の未達理由**: 規則 (b) の正規表現は `get_provider(name).env_prefix` から組み立てる、が要件で
+  あったが、暫定表を残していたため「provider が接頭辞を宣言していなくても走査が成立する」状態だった。
+  `XProvider.env_prefix = "XTR"`（`providers/x.py:88`）と `YouTubeProvider.env_prefix = "YTR"`
+  （`providers/youtube.py:23`）が既に実装済みのため、暫定表は不要である。
+- **変異探針1**（復元後に sha256 一致を確認）: `providers/x.py` の `env_prefix = "XTR"` を `None` へ置換 →
+  `AssertionError: provider 'x' の env_prefix を解決できませんでした…` で
+  `test_platform_literals_are_confined_to_registry` が**失敗**（ガードが実際に効くことを確認。他の 3 件は passed）。
+- **変異探針2**（同）: `_env_prefixes()` の `raise` を黙って `return prefixes` する形へ戻すと
+  `test_env_prefix_guard_fails_loudly_when_unresolvable` が**失敗**（追加テストは非空虚）。
+- 復元後は毎回フルスイートを再実行して確認した（`600 passed / 96.63% / 46.51 秒`。探針1 の前は 599 passed、
+  テストを 1 件追加して 600 件になった）。
+
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |
@@ -927,6 +947,7 @@ T037 で `contracts/removal-rationale.md` の REM-001〜REM-009 と実測を突�
 | `tests/integration/test_cli_contract.py` | `--trends` の受理 | **該当節は存在しなかった**（`grep -rn -- "--trends" tests/` が 0 件）。T032 の記載とのずれとしてここに記録し、ファイルは無修正 | REM-003 |
 | `tests/unit/test_config.py` | `.env` を読むヘルパの名前（`_load_env_once`）と `Configuration.load()` からの呼び出し | T071 で `load_env` へ改名（calls 3 件 ＋ テスト名 2 件を追随）。呼び出しが `config.py` の 1 箇所であることを固定する走査テスト **1 件を追加**（計 41 passed） | SET-002 / FR-013 |
 | `tests/unit/test_llm.py` | `build_model` が自前で `load_dotenv()` を呼ぶこと | T071 で `test_env_loading_is_invoked` を `test_env_loading_is_invoked_through_the_shared_loader` へ置換（境界が `config.load_env()` を通ることを固定）。autouse フィクスチャの遮断先を `config_module.load_dotenv` へ変更 | SET-002 / SET-009 |
+| `tests/unit/test_platform_scan.py` | `env_prefix` の暫定表 `_ENV_PREFIX_FALLBACK`（US1 時点の暫定。T008 の「`get_provider(name).env_prefix` から組み立てる」が未達になる） | T073 で暫定表とフォールバック分岐を削除し、`env_prefix` を解決できない provider があれば**走査を中断して失敗**させる。ガードの非空虚性を固定するテスト **1 件を追加**（計 44 passed） | T008 / FR-025 |
 | `tests/integration/test_full_flow.py` | 進行・7 行・件数 | `Config` 依存のみ追随（`env_prefix=` へ）。進捗 7 行の断言は**維持したまま緑** | REM-006 / REM-007 |
 
 **削除対象 5 件の残存参照（T037 実測）**: `src/` は全件 **0**。`tests/` に残るのは不在断言と
@@ -1090,7 +1111,7 @@ Task: "Implement hooks in src/trend_researcher/providers/youtube.py"
       `|| echo "OK: 0 件"` が発火しない＝手順どおりに実行すると失敗して見える。同じ節の 6-2（224 行目）には
       `--include=*.py` が付いており 6-1 だけが漏れている。`--include=*.py` を付けると 0 件。quickstart 内の
       他のディレクトリ走査コマンドも、テスト実行後（`__pycache__` が存在する状態）のツリーで成立することを点検する）
-- [ ] T073 `tests/unit/test_platform_scan.py` の暫定表 `_ENV_PREFIX_FALLBACK` を削除する per T008 / FR-025 (partial)
+- [X] T073 `tests/unit/test_platform_scan.py` の暫定表 `_ENV_PREFIX_FALLBACK` を削除する per T008 / FR-025 (partial)
       （実測（変異探針・復元確認済み）: `_ENV_PREFIX_FALLBACK = {"x": "XTR", "youtube": "YTR"}`（57 行目）を
       空 dict に置き換えても `test_platform_scan.py` は 4 passed ＝ 死んだ経路。`XProvider.env_prefix = "XTR"`
       （`providers/x.py:88`）と `YouTubeProvider.env_prefix = "YTR"`（`providers/youtube.py:23`）が実装済みで、

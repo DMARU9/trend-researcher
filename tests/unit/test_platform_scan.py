@@ -7,8 +7,9 @@
 検出規則は 4 本ある（`data-model.md` 4 節 / EXT-008）。
 
 - (a)+(b) `test_platform_literals_are_confined_to_registry`: 登録済みプラットフォーム名の
-  完全一致、および登録済み `env_prefix` の `^(XTR|YTR)_` 一致。許容リストは登録辞書の
-  キーの行のみ。
+  完全一致、および登録済み `env_prefix` の `^{prefix}_` 一致（接頭辞は
+  `get_provider(name).env_prefix` から動的に組み立てる。解決できない場合は走査を中断して
+  失敗させる）。許容リストは登録辞書のキーの行のみ。
 - (d) `test_help_text_does_not_enumerate_platforms`: CLI のヘルプ文（argparse の `help=` と
   `ArgumentParser(description=...)`）にプラットフォーム名を列挙しない。
 - (e) `test_platform_collections_are_absent`: プラットフォームの集合を扱う型を追加しない（FR-026）。
@@ -20,9 +21,12 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+
+import pytest
 
 from trend_researcher.providers import _PROVIDERS, available_platforms, get_provider
 
@@ -48,13 +52,6 @@ EXCLUDED_FILES = frozenset(
         "prompts.py",
     }
 )
-
-#: `env_prefix` が provider に実装されるまでの暫定表。
-#:
-#: 規則 (b) の正規表現は本来 `get_provider(name).env_prefix` から組み立てるが、
-#: US1 のテストを先に書く段階では属性がまだ無い。走査の目的は「コアに接頭辞
-#: リテラルを書かない」ことなので、テスト側が接頭辞を知っていても SC-002 は損なわれない。
-_ENV_PREFIX_FALLBACK = {"x": "XTR", "youtube": "YTR"}
 
 #: `Provider` の集合を表すコンテナ（規則 (e)）。
 _SEQUENCE_CONTAINERS = frozenset(
@@ -123,14 +120,22 @@ def _iter_node_sources() -> list[tuple[str, list[str], ast.Module]]:
 
 
 def _env_prefixes() -> list[str]:
-    """登録済みプラットフォームの `env_prefix` を集める（規則 (b) の材料）。"""
+    """登録済みプラットフォームの `env_prefix` を集める（規則 (b) の材料）。
+
+    `env_prefix` を解決できない provider があればそこで失敗させる。暫定表などで
+    黙って補うと、その provider が規則 (b)（接頭辞の `^{prefix}_` 一致）の対象から
+    静かに外れ、コアへの接頭辞リテラルの混入を見逃す。走査の材料が欠けた状態で
+    「0 件」を返さないことを優先する（T008 / FR-025）。
+    """
     prefixes: list[str] = []
     for name in available_platforms():
         prefix = getattr(get_provider(name), "env_prefix", None)
         if not isinstance(prefix, str) or not prefix:
-            prefix = _ENV_PREFIX_FALLBACK.get(name)
-        if prefix:
-            prefixes.append(prefix)
+            raise AssertionError(
+                f"provider {name!r} の env_prefix を解決できませんでした"
+                "（規則 (b) の対象から外れるため走査を中断します）"
+            )
+        prefixes.append(prefix)
     return prefixes
 
 
@@ -211,6 +216,24 @@ def test_platform_literals_are_confined_to_registry() -> None:
     assert not violations, _format_hits(
         [(hit.path, hit.lineno, hit.content) for hit in violations]
     )
+
+
+def test_env_prefix_guard_fails_loudly_when_unresolvable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """規則 (b) の材料が欠けたら「0 件」ではなく失敗を返す（T073）。
+
+    暫定表で補っていた頃は、`env_prefix` を持たない provider が規則 (b) の
+    対象から静かに外れても走査は成功していた（実測: 暫定表を空にしても 4 passed）。
+    """
+
+    class _NoPrefix:
+        """`env_prefix` を持たない provider の代役。"""
+
+    monkeypatch.setattr(sys.modules[__name__], "get_provider", lambda _name: _NoPrefix())
+
+    with pytest.raises(AssertionError, match="env_prefix"):
+        _env_prefixes()
 
 
 # --- 検出規則 (d) ----------------------------------------------------------
