@@ -129,7 +129,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       非空虚性は T024 の変異探針で確認する）。
       **(c)**（`nodes/**.py` に環境変数読み込みが 0 件）は **US3 の T038 で追加する**
       （US1 の時点では `Config.load` がまだ存在し、検出対象が実在するため）
-- [ ] T009 [P] [US1] `tests/unit/test_platform_extension.py` を作成する。`Provider` Protocol を満たす
+- [X] T009 [P] [US1] `tests/unit/test_platform_extension.py` を作成する。`Provider` Protocol を満たす
       試験用プラットフォーム（`name="dummy"` など、`env_prefix` を含む追加フック 5 つを実装）を
       `register_provider()` で登録し、境界（`search` / `fetch_contexts` / LLM）をテスト内のフェイクで
       置き換えて `build_graph()` のパイプラインを完走させる。検証は「`report` が生成される」
