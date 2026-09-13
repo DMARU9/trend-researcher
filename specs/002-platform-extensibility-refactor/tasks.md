@@ -814,6 +814,21 @@ US1 / US2 のテストは緑のまま。
 | スクラッチ領域 | `.gitignore` | `/tmp/` が無視対象として宣言済み（`# Scratch space (temporary scripts and generated files)`） |
 | 後始末後の全件 | `uv run pytest -q` | **598 passed / 96.63% / 49.57 秒**（pyc 削除の影響なし＝テストはソースから再生成される） |
 
+#### T070: 契約文書の訂正（実測。`spec.md` は変更しない）
+
+| 論点 | 訂正前（契約） | 実測 | 訂正内容 |
+|---|---|---|---|
+| `TR_MAX_RESULTS` が数値でない（SET-011） | 「既定値 5（例外にしない。現行と同じ）」 | `TR_MAX_RESULTS=abc` → `ValueError: invalid literal for int() with base 10: 'abc'`。`tests/unit/test_config.py::test_non_integer_numeric_setting_raises` が固定 | 表の行を「**例外にする**（`ValueError`。既定値へ黙って落とさない）」へ変更し、「実測による確定」段落で根拠を明記 |
+| `platform` の既定値を含む 7 項目（SET-005） | 対象を「名前・型・**既定値**」とし、「既存フィールドの削除・改名・型変更」を禁止 | `Configuration.platform` の既定は T017 で `"x"` → `""`（`src/trend_researcher/configuration.py:37-39`） | 対象を「名前・型（および**解決結果としての**既定値）」へ変更し、「既定値の変更」行を追加（`platform` のみ。他の 6 項目は不変） |
+
+- 併せて SET-005 の検証行の参照先を実測に合わせた（空文字の**保持**は
+  `test_configuration.py::test_platform_defaults_to_blank_so_the_registry_decides`、空文字の**解決**は
+  `test_providers.py::test_get_provider_resolves_blank_to_the_first_registration`。初稿では前者を
+  「同じファイルが `get_provider("")` の解決を固定する」と書いていたが、それは後者のテストであるため訂正した）。
+- `spec.md` / `plan.md` は変更していない（`use_trends` の削除は FR-009 の対象であり、他の 6 項目の既定値は
+  不変。`platform` は plan.md の「解釈の記録」で扱いを決めている）。
+- 判定は「終状態」で行い、契約の意図（Studio の入力欄と利用者が観測する解決結果を変えない）は充足していると確認した。
+
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |
@@ -997,3 +1012,45 @@ Task: "Implement hooks in src/trend_researcher/providers/youtube.py"
 - 各チェックポイントで `uv run pytest -q`（カバレッジ計測込み）を通し、547 passed から落ちていないこととカバレッジ 90% 以上を確認する
 - コミットはストーリー単位、または論理的なまとまりごとに行う
 - 避けること: 曖昧なタスク、同一ファイルの同時編集、ストーリーの独立性を壊す依存
+
+---
+
+## Phase 8: Convergence
+
+> T069 のゲート green 後に、`spec.md` / `plan.md` / `tasks.md` を意図の唯一の出所として現状の
+> コードを評価した結果、未達・部分達成と判定した残作業（実測 2026-09-14）。既存タスクの
+> 書き換え・再番号付けはしていない。`spec.md` / `plan.md` は変更しない。
+
+- [X] T070 `contracts/settings-contract.md` の記述を実装の実態に合わせて訂正する per SET-011 / SET-005 (contradicts)
+      （実測: 非数値の `TR_MAX_RESULTS` は `ValueError: invalid literal for int() with base 10: 'abc'` を投げ、
+      `tests/unit/test_config.py:197 test_non_integer_numeric_setting_raises` がそれを固定している。T039 の指示
+      「期待値は変更前と同一」に従い**例外を維持**する判断は `## 実装メモ` の「2. 基準値のずれ」に記録済みだが、
+      SET-011 の「既定値 5（例外にしない。現行と同じ）」は実装と矛盾したまま残っている。同じく SET-005 は
+      「既存 7 項目の名前・型・既定値」を不変としているが、`Configuration.platform` の既定は `"x"` → `""` へ
+      変更済み（FR-002 / SC-002。空文字は登録の先頭＝`x` に解決されるため解決結果は変わらない）。契約の当該行を
+      「例外を維持する」「既定値は解決結果を変えない範囲で変更した」へ訂正する。`spec.md` は触らない）
+- [ ] T071 `.env` の読み込みを 1 経路に寄せる、または境界の例外として契約に明記する per FR-013 (partial)
+      （実測: `load_dotenv` の呼び出しは 2 箇所 — `config.py:36` の `_load_env_once` と `tools/llm.py:34` の
+      引数なし `load_dotenv()`。FR-013 は「環境変数・`.env` の解決も同じ型の読み込み処理に集約 MUST」、
+      SET-002 は「`.env` は `Configuration.load()` の経路で 1 回」とし、SET-009 が境界として認めているのは
+      `OPENAI_*` の解決である。`tools/llm.py` の `.env` 読み込みを `config._load_env_once()` へ寄せて呼び出しを
+      1 経路にし、Studio 経路（`Configuration.load()` を通らない実行）でも `.env` が読まれることをテストで
+      固定する。寄せない場合は `settings-contract.md` に例外として明記する）
+- [ ] T072 `quickstart.md` 手順 6-1 の検証コマンドを偽陽性にならない形へ直す per SC-003 (partial)
+      （実測: 手順 6-1 の `grep -rn "class Config\b\|def get_config\|Config\.load" src/` は
+      `src/trend_researcher/__pycache__/config.cpython-312.pyc` に一致して **exit 0** になり、
+      `|| echo "OK: 0 件"` が発火しない＝手順どおりに実行すると失敗して見える。同じ節の 6-2（224 行目）には
+      `--include=*.py` が付いており 6-1 だけが漏れている。`--include=*.py` を付けると 0 件。quickstart 内の
+      他のディレクトリ走査コマンドも、テスト実行後（`__pycache__` が存在する状態）のツリーで成立することを点検する）
+- [ ] T073 `tests/unit/test_platform_scan.py` の暫定表 `_ENV_PREFIX_FALLBACK` を削除する per T008 / FR-025 (partial)
+      （実測（変異探針・復元確認済み）: `_ENV_PREFIX_FALLBACK = {"x": "XTR", "youtube": "YTR"}`（57 行目）を
+      空 dict に置き換えても `test_platform_scan.py` は 4 passed ＝ 死んだ経路。`XProvider.env_prefix = "XTR"`
+      （`providers/x.py:88`）と `YouTubeProvider.env_prefix = "YTR"`（`providers/youtube.py:23`）が実装済みで、
+      T008 が要求した「正規表現は `get_provider(name).env_prefix` から動的に組み立てる」が成立する。暫定表を
+      削除し、`env_prefix` を解決できない provider が現れた場合は走査側が明示的に失敗して規則 (b) の対象から
+      黙って外れないようにする。削除後に走査テスト・`tests/unit/test_providers.py` が緑であることを確認する）
+- [ ] T074 `tests/unit/test_configuration.py` の件数の記述を実態に合わせる per FR-019 (partial)
+      （実測: module docstring の「1. 宣言されたフィールドと既定値（`published_after` を含む **8 件**）」に対し、
+      `DEFAULTS` は 7 キー（`use_trends` は T032 で削除済み）。挙動には影響しないが、内部構造の更新に追随して
+      いない記述であり、`## 実装メモ` の「4. 更新・削除したテスト」に記録した更新内容（`DEFAULTS` から
+      `use_trends` を削除）と食い違っているため 7 件へ直す）

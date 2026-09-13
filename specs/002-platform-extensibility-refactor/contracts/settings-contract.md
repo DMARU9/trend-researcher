@@ -64,10 +64,17 @@
 
 | 契約 | 内容 |
 |---|---|
-| 対象 | `Configuration` の既存 **8 フィールド**（`platform` / `output_format` / `max_results` / `sort_by` / `transcript_language` / `use_trends` / `cache_dir` / `published_after`）のうち `use_trends` を除く 7 項目の**名前・型・既定値** |
+| 対象 | `Configuration` の既存 **8 フィールド**（`platform` / `output_format` / `max_results` / `sort_by` / `transcript_language` / `use_trends` / `cache_dir` / `published_after`）のうち `use_trends` を除く 7 項目の**名前・型**（および**解決結果としての**既定値） |
 | 禁止 | 既存フィールドの削除・改名・型変更（`use_trends` を除く。これは FR-009 の削除対象）。**新しいフィールドも追加しない**（Studio の入力欄を広げない） |
+| 既定値の変更 | `platform` の既定値を `"x"` → `""` へ変更した（T017 / FR-002 / SC-002）。空文字は登録辞書の先頭（＝`x`）に解決されるため、**実行時の解決結果は変更前と同一**である。既定値の変更は、型にプラットフォーム名を埋め込まないために必須（`plan.md` の「解釈の記録」を参照）。他の 6 項目の既定値は変更していない |
 | 注記 | `model` というフィールドは `Configuration` に**存在しない**（LLM のモデル名は `tools/llm.py` が環境変数から解決する） |
-| 検証 | `tests/unit/test_configuration.py` の `DEFAULTS` から `use_trends` を除いた全キーが存在し、既定値が一致すること |
+| 検証 | `tests/unit/test_configuration.py` の `DEFAULTS` から `use_trends` を除いた全キーが存在し、既定値が一致すること（`platform` は `""`。同ファイルの `test_platform_defaults_to_blank_so_the_registry_decides` が空文字の保持を固定する）。空文字が登録の先頭に解決されることは `tests/unit/test_providers.py::test_get_provider_resolves_blank_to_the_first_registration` が固定する |
+
+**実測による確定（2026-09-14。T070）**: 初版の対象行は「7 項目の**名前・型・既定値**」と読める書き方
+だったが、`platform` の既定値は T017 で `"x"` → `""` へ変更済みであり、字義どおりには充足しない。
+契約の意図は「Studio の入力欄（フィールドの意味）と利用者が観測する解決結果を変えないこと」であり、
+これは満たされている（`platform=""` は `get_provider()` の解決で `x` になる）。そこで対象行を
+「名前・型（および解決結果としての既定値）」へ、変更内容を「既定値の変更」行へ明記した。
 
 ---
 
@@ -142,10 +149,18 @@
 | 状況 | 契約 |
 |---|---|
 | `TR_MAX_RESULTS` が空文字 | 既定値 5 |
-| `TR_MAX_RESULTS` が数値でない | 既定値 5（例外にしない。現行と同じ） |
+| `TR_MAX_RESULTS` が数値でない | **例外にする**（`ValueError`。既定値へ黙って落とさない） |
 | `XTR_ACCOUNTS_DB` が未設定 | X の実行時は現行と同じ縮退（アカウント DB が見つからない場合のエラー経路を維持） |
 | `platform` が空文字 | 登録辞書の先頭のプラットフォームとして解決 |
-| 検証 | `tests/unit/test_config.py` / `tests/unit/test_configuration.py` |
+| 検証 | `tests/unit/test_config.py`（`test_non_integer_numeric_setting_raises`）/ `tests/unit/test_configuration.py` |
+
+**実測による確定（2026-09-14。T070）**: 本契約の初版は「`TR_MAX_RESULTS` が数値でない → 既定値 5
+（例外にしない。現行と同じ）」としていたが、**実測では `int()` が `ValueError: invalid literal for
+int() with base 10: 'abc'` を投げる**（`TR_MAX_RESULTS=abc uv run python -c "from
+trend_researcher.configuration import Configuration; Configuration.load()"`）。この挙動は変更前から
+のもので、既存テスト `tests/unit/test_config.py` の `test_non_integer_numeric_setting_raises` が
+固定している。T039 の指示「期待値は変更前と同一」に従い**例外を維持する**ため、契約の当該行を
+実装に合わせて訂正した（`tasks.md` の「2. 基準値のずれ」に同じ判断を記録済み）。
 
 ---
 
