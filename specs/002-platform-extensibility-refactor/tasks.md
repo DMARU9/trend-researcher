@@ -829,6 +829,30 @@ US1 / US2 のテストは緑のまま。
   不変。`platform` は plan.md の「解釈の記録」で扱いを決めている）。
 - 判定は「終状態」で行い、契約の意図（Studio の入力欄と利用者が観測する解決結果を変えない）は充足していると確認した。
 
+#### T071: `.env` の読み込みの 1 経路化（実測）
+
+| 論点 | 変更前（実測） | 変更後 |
+|---|---|---|
+| `load_dotenv` の呼び出し箇所 | 2 箇所（`config.py:36` の `_load_env_once` と `tools/llm.py:34` の引数なし `load_dotenv()`） | `src/trend_researcher/config.py:46` の **1 箇所のみ**（`grep -rn "load_dotenv(" src/ --include=*.py`） |
+| 関数名 | `config._load_env_once()`（private。`load()` のみが呼ぶ） | `config.load_env()`（public。`Configuration.load()` と `tools/llm.py` の両方が呼ぶ）。T071 のタスク文の `config._load_env_once()` ではなく**この名前**にした（境界から呼ぶ公開の 1 経路として命名し直した。旧名を残さない。FR-020） |
+| 検証 | `test_env_loading_is_invoked` が `llm.load_dotenv` を直接見ていた（実装の内部構造に依存） | 走査テスト `test_dotenv_is_read_from_exactly_one_module`（`load_dotenv(` を含む `src/trend_researcher/**.py` が `config.py` のみ）＋ `test_env_loading_is_invoked_through_the_shared_loader`（`config.load_env()` が読むパス） |
+
+- 呼び出しが 2 箇所になること自体は維持する（Studio のように `Configuration.load()` を通らない実行でも
+  `.env` から `OPENAI_API_KEY` / `OPENAI_BASE_URL` を解決する必要があるため）。「1 経路」とは
+  **`load_dotenv` を呼ぶ場所が 1 つ（`config.load_env()`）** であることを指す。契約 SET-002 の
+  「`Configuration.load()` の経路で 1 回」という記述はこの意味へ更新した。
+- `load_dotenv` は既定（`override=False`）で既存の環境変数を上書きしないため、2 回呼ばれても
+  実行中の値は変わらない（挙動不変）。
+- `tests/unit/test_llm.py` の autouse フィクスチャの遮断先を `llm.load_dotenv` から
+  `config_module.load_dotenv` へ変更した（前者は存在しなくなるため。実リポジトリの `.env` を
+  読ませない隔离は維持）。
+- **変異探針**（復元後に sha256 一致を確認）: `tools/llm.py` を「自前で `load_dotenv()` を呼ぶ」
+  形へ戻すと 3 件が失敗（`test_dotenv_is_read_from_exactly_one_module` /
+  `test_env_loading_is_invoked_through_the_shared_loader` /
+  `test_model_uses_platform_prefix_when_generic_is_unset`）→ 走査テストは非空虚。
+- `env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB uv run pytest -q --no-cov` →
+  **599 passed / 46.77 秒**（FR-023）。
+
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |
@@ -879,6 +903,8 @@ T037 で `contracts/removal-rationale.md` の REM-001〜REM-009 と実測を突�
 | `tests/unit/test_platform_extension.py` | `from trend_researcher.graph import render_report` | import 元を `trend_researcher.rendering` へ変更し、既存の `provider = get_provider(dummy_platform)` をそのまま引数に渡す | REM-006 |
 | `tests/unit/test_cli_entry.py` | `cli.render_report` のスタブ | 1 引数の lambda を 2 引数（`report, provider`）へ変更（呼び出し契約が変わったため） | REM-006 |
 | `tests/integration/test_cli_contract.py` | `--trends` の受理 | **該当節は存在しなかった**（`grep -rn -- "--trends" tests/` が 0 件）。T032 の記載とのずれとしてここに記録し、ファイルは無修正 | REM-003 |
+| `tests/unit/test_config.py` | `.env` を読むヘルパの名前（`_load_env_once`）と `Configuration.load()` からの呼び出し | T071 で `load_env` へ改名（calls 3 件 ＋ テスト名 2 件を追随）。呼び出しが `config.py` の 1 箇所であることを固定する走査テスト **1 件を追加**（計 41 passed） | SET-002 / FR-013 |
+| `tests/unit/test_llm.py` | `build_model` が自前で `load_dotenv()` を呼ぶこと | T071 で `test_env_loading_is_invoked` を `test_env_loading_is_invoked_through_the_shared_loader` へ置換（境界が `config.load_env()` を通ることを固定）。autouse フィクスチャの遮断先を `config_module.load_dotenv` へ変更 | SET-002 / SET-009 |
 | `tests/integration/test_full_flow.py` | 進行・7 行・件数 | `Config` 依存のみ追随（`env_prefix=` へ）。進捗 7 行の断言は**維持したまま緑** | REM-006 / REM-007 |
 
 **削除対象 5 件の残存参照（T037 実測）**: `src/` は全件 **0**。`tests/` に残るのは不在断言と
@@ -1029,7 +1055,7 @@ Task: "Implement hooks in src/trend_researcher/providers/youtube.py"
       「既存 7 項目の名前・型・既定値」を不変としているが、`Configuration.platform` の既定は `"x"` → `""` へ
       変更済み（FR-002 / SC-002。空文字は登録の先頭＝`x` に解決されるため解決結果は変わらない）。契約の当該行を
       「例外を維持する」「既定値は解決結果を変えない範囲で変更した」へ訂正する。`spec.md` は触らない）
-- [ ] T071 `.env` の読み込みを 1 経路に寄せる、または境界の例外として契約に明記する per FR-013 (partial)
+- [X] T071 `.env` の読み込みを 1 経路に寄せる、または境界の例外として契約に明記する per FR-013 (partial)
       （実測: `load_dotenv` の呼び出しは 2 箇所 — `config.py:36` の `_load_env_once` と `tools/llm.py:34` の
       引数なし `load_dotenv()`。FR-013 は「環境変数・`.env` の解決も同じ型の読み込み処理に集約 MUST」、
       SET-002 は「`.env` は `Configuration.load()` の経路で 1 回」とし、SET-009 が境界として認めているのは

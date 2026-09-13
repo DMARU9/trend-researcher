@@ -12,7 +12,8 @@
 
 実リポジトリの `.env` は読み込ませない。`.env` の内容でテスト結果が変わると、
 「環境ごとに結果が違う」テストになり検証として成立しないためである
-（`.env` を読む経路自体は `_load_env_once` の単体テストで固定する）。
+（`.env` を読む経路自体は `config.load_env()` の単体テストで固定する。読み込みが
+`config.py` の 1 箇所であることも同節の走査テストで固定する）。
 """
 
 from __future__ import annotations
@@ -286,7 +287,7 @@ def test_explicit_cache_dir_beats_environment(tmp_path: Path, monkeypatch: pytes
 # --- .env の読み込み ------------------------------------------------------
 
 
-def test_load_env_once_reads_env_file_when_present(
+def test_load_env_reads_env_file_when_present(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[Path] = []
@@ -294,25 +295,42 @@ def test_load_env_once_reads_env_file_when_present(
     monkeypatch.setattr(config_module, "load_dotenv", lambda path=None, **kw: calls.append(path))
     (tmp_path / ".env").write_text("TR_MODEL=from-file\n", encoding="utf-8")
 
-    config_module._load_env_once()
+    config_module.load_env()
 
     assert calls == [tmp_path / ".env"]
 
 
-def test_load_env_once_does_nothing_when_env_file_is_absent(
+def test_load_env_does_nothing_when_env_file_is_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[Path] = []
     monkeypatch.setattr(config_module, "_REPO_ROOT", tmp_path)
     monkeypatch.setattr(config_module, "load_dotenv", lambda path=None, **kw: calls.append(path))
 
-    config_module._load_env_once()
+    config_module.load_env()
 
     assert calls == []
 
 
+def test_dotenv_is_read_from_exactly_one_module() -> None:
+    """`load_dotenv` を呼ぶのは `config.py` の 1 箇所だけ（FR-013 / SET-002）。
+
+    LLM 構築の境界（`tools/llm.py`）も `config.load_env()` を通す。境界が自前で
+    `.env` を読むと、Studio のように `Configuration.load()` を通らない実行で
+    「どの値が効くのか」が 2 箇所に分かれる（T071）。
+    """
+    package_root = Path(config_module.__file__).resolve().parent
+    hits = sorted(
+        path.relative_to(package_root).as_posix()
+        for path in package_root.rglob("*.py")
+        if "load_dotenv(" in path.read_text(encoding="utf-8")
+    )
+
+    assert hits == ["config.py"]
+
+
 def test_config_load_invokes_env_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`Configuration.load()` は毎回 `_load_env_once()` を通る（呼び出し側で事前準備が不要）。"""
+    """`Configuration.load()` は毎回 `load_env()` を通る（呼び出し側で事前準備が不要）。"""
     monkeypatch.setattr(config_module, "_REPO_ROOT", tmp_path)
     loads: list[int] = []
     monkeypatch.setattr(

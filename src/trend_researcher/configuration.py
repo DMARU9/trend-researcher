@@ -7,7 +7,7 @@ import os
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
-from trend_researcher.config import _REPO_ROOT, _load_env_once, _resolve_path
+from trend_researcher.config import _REPO_ROOT, _resolve_path, load_env
 
 
 def resolve_env(name: str, *, default: str, env_prefix: str | None = None) -> str:
@@ -68,7 +68,7 @@ class Configuration(BaseModel):
           の順を保てる（SET-002 / SET-006）
         - `lru_cache` を持たない（毎回環境変数を読む。キャッシュの破棄が不要）
         """
-        _load_env_once()
+        load_env()
         cache_dir = _resolve_path(
             resolve_env("CACHE_DIR", default=str(_REPO_ROOT / "cache"), env_prefix=env_prefix)
         )

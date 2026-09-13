@@ -13,13 +13,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest import mock
 
 import pytest
 
 from trend_researcher import config as config_module
-from trend_researcher.tools import llm
 from trend_researcher.tools.llm import build_model
 
 #: モデル解決に影響する環境変数。テストごとに全消しする。
@@ -31,8 +31,12 @@ _DEFAULT_MODEL = "openai:mimo-v2.5"
 
 @pytest.fixture(autouse=True)
 def isolated_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`.env` の読み込みとプロセス環境を遮断し、検証を決定的にする。"""
-    monkeypatch.setattr(llm, "load_dotenv", lambda *args, **kwargs: None)
+    """`.env` の読み込みとプロセス環境を遮断し、検証を決定的にする。
+
+    `build_model` は `.env` を `config.load_env()` の 1 経路で読むため、遮断はその
+    経路（`config.py` の `load_dotenv`）に対して行う。
+    """
+    monkeypatch.setattr(config_module, "load_dotenv", lambda *args, **kwargs: None)
     for key in _ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
 
@@ -93,12 +97,21 @@ def test_empty_model_falls_back_to_the_default(monkeypatch: pytest.MonkeyPatch) 
     assert _model_name(env_prefix="XTR") == _DEFAULT_MODEL
 
 
-def test_env_loading_is_invoked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`build_model` は `.env` の読み込みを通す（環境変数の出所を保つ）。"""
-    called: list[bool] = []
-    monkeypatch.setattr(llm, "load_dotenv", lambda *a, **k: called.append(True))
-    monkeypatch.setattr(config_module, "load_dotenv", lambda *a, **k: None)
+def test_env_loading_is_invoked_through_the_shared_loader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`build_model` は `.env` の読み込みを `config.load_env()` の 1 経路に委ねる。
+
+    Studio のように `Configuration.load()` を通らない実行でも、この経路があるため
+    `OPENAI_API_KEY` / `OPENAI_BASE_URL` を `.env` から解決できる（T071 / FR-013 /
+    SET-002 / SET-009）。自前で `load_dotenv()` を呼ぶ実装に戻ると、`.env` を読む
+    場所が 2 つになる。
+    """
+    calls: list[Path] = []
+    monkeypatch.setattr(config_module, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(config_module, "load_dotenv", lambda path=None, **kw: calls.append(path))
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-file\n", encoding="utf-8")
 
     _model_name()
 
-    assert called == [True]
+    assert calls == [tmp_path / ".env"]

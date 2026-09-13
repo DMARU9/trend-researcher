@@ -24,12 +24,12 @@
 | 契約 | 内容 |
 |---|---|
 | 共通設定 | `configuration.py` の `resolve_env(name, *, default, env_prefix=None)` が `TR_{name}` → `{env_prefix}_{name}` → 既定 の順で解決する（既存 `Config._env()` の実装を移す） |
-| 一括の入口 | `Configuration.load(env_prefix: str \| None = None)`（`.env` の読み込みもここで 1 回だけ行う） |
-| `.env` | `python-dotenv` による読み込みを `Configuration.load()` の経路で 1 回行う |
+| 一括の入口 | `Configuration.load(env_prefix: str \| None = None)`（`.env` の読み込みもここで行う） |
+| `.env` | `python-dotenv` を呼ぶのは `config.load_env()` の **1 箇所のみ**。`Configuration.load()` と LLM 構築の境界（`tools/llm.py`）の両方がこの関数を呼ぶ（Studio のように `Configuration.load()` を通らない実行でも `.env` から `OPENAI_API_KEY` などを解決できるようにするため。SET-009）。`load_dotenv` は既定で既存の環境変数を上書きしない（`override=False`）ため、複数回呼ばれても実行中の値は変わらない |
 | 優先順位 | 明示指定（`model_fields_set` に残る値） > `TR_*` > `{env_prefix}_*` > 既定値 |
 | 空文字の扱い | 空文字の環境変数は「未設定」として扱う（現行 `Config._env()` と同じ） |
 | 変数名 | `MODEL` / `MAX_RESULTS` / `SEARCH_POOL_SIZE` / `ACCOUNTS_DB` / `TRANSCRIPT_LANG` / `CACHE_DIR` / `MAX_RETRIES`（現行と同一。名前を変えない） |
-| 検証 | `tests/unit/test_config.py` を `Configuration.load()` に対して実行し、既存の期待値を維持する |
+| 検証 | `tests/unit/test_config.py` を `Configuration.load()` に対して実行し、既存の期待値を維持する。`.env` の読み込みは同ファイルの `load_env()` 節（`test_load_env_reads_env_file_when_present` / `test_load_env_does_nothing_when_env_file_is_absent` / `test_config_load_invokes_env_loading`）と、**走査テスト** `test_dotenv_is_read_from_exactly_one_module`（`load_dotenv(` を含む `src/trend_researcher/**.py` が `config.py` のみ）で固定する |
 
 ---
 
@@ -127,9 +127,10 @@
 | 契約 | 内容 |
 |---|---|
 | 契約の維持 | 環境変数 `OPENAI_API_KEY` / `OPENAI_BASE_URL`、`TR_MODEL` → `{env_prefix}_MODEL`（現行の直列と同じ順） |
-| 解決場所 | `tools/llm.py`（境界）。`Configuration` に `model` フィールドは無く、追加もしない |
+| 解決場所 | `tools/llm.py`（境界）。`Configuration` に `model` フィールドは無く、追加もしない。`.env` の読み込みだけは境界も `config.load_env()` を通す（SET-002。Studio 経路で `Configuration.load()` を通らない場合の出所を確保する） |
 | 削除 | `Config.openai_api_key` / `Config.openai_base_url` / `Config.model`（`src/` からの参照が 0。実測。`Config` クラスごと削除する） |
-| 検証 | `tests/unit/test_llm.py`（既存）が green であること |
+| 検証 | `tests/unit/test_llm.py`（既存）が green であること。`.env` の経路は
+`test_env_loading_is_invoked_through_the_shared_loader` が固定する（実リポジトリの `.env` は autouse フィクスチャで遮断し、`config.load_env()` が読むパスだけを検証する） |
 
 ---
 

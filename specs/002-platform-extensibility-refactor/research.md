@@ -117,7 +117,9 @@ spec の数値は変更しない（差は `plan.md` の「基準値のずれ」�
 - `Configuration` = LangGraph Studio の設定入力の型（既存 8 フィールドの契約は変更しない。`use_trends` のみ削除）+ 共通の実行時設定。
 - 環境変数・`.env` の**解決の実装**は `configuration.py` の 1 か所に集約する（次の 2 つ）。
   - `Configuration.load(env_prefix: str | None = None) -> Configuration`: 解決済みの設定を返す一括の入口。
-    `.env` の読み込み（`load_dotenv`）もここで 1 回だけ行う。
+    `.env` の読み込みもここで行う（実装は `config.load_env()` の **1 箇所**。T071 で LLM 構築の境界
+    （`tools/llm.py`）からも同じ関数を呼ぶ形へ集約した。Studio のように `Configuration.load()` を
+    通らない実行でも `OPENAI_API_KEY` などの出所を確保するため、呼び出しは 2 箇所になる）。
   - `resolve_env(name, *, default, env_prefix=None) -> str`: `TR_{name}` → `{env_prefix}_{name}` → 既定 の
     順で解決する汎用のヘルパ。`env_prefix` は**引数**であり、`configuration.py` にプラットフォーム名は現れない。
 - **プラットフォーム固有**の値（X の `accounts_db` / `search_pool_size` / `max_retries`）は、

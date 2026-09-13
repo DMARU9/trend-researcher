@@ -29,8 +29,18 @@ def _resolve_path(value: str) -> Path:
     return path.resolve()
 
 
-def _load_env_once() -> None:
-    """プロジェクトの .env を一度だけ読み込む。"""
+def load_env() -> None:
+    """プロジェクトの `.env` を読み込む（`load_dotenv` を呼ぶ唯一の場所）。
+
+    環境変数・`.env` の解決は実行時設定の型に集約する（FR-013 / SET-002）。この関数が
+    その読み込みの 1 経路であり、`Configuration.load()` と LLM 構築の境界
+    （`tools/llm.py`）の両方が呼ぶ。後者が呼ぶのは、Studio のように
+    `Configuration.load()` を通らない実行でも `OPENAI_API_KEY` などを `.env` から
+    解決できるようにするためである（SET-009）。
+
+    `load_dotenv` は既定で既存の環境変数を上書きしない（`override=False`）ため、
+    複数回呼ばれても実行中の値は変わらない。
+    """
     env_path = _REPO_ROOT / ".env"
     if env_path.exists():
         load_dotenv(env_path)

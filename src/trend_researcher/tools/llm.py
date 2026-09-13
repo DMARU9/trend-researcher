@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 
-from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 
+from trend_researcher.config import load_env
 from trend_researcher.configuration import resolve_env
 
 Role = str
@@ -31,7 +31,10 @@ def build_model(role: Role = "research", env_prefix: str | None = None):
         env_prefix: プラットフォーム固有の環境変数接頭辞（例: `XTR` / `YTR`）。
             provider が渡す。解決順は `TR_MODEL` → `{env_prefix}_MODEL` → 既定。
     """
-    load_dotenv()
+    # `.env` の読み込みは `config.load_env()` の 1 経路に集約する（FR-013 / SET-002）。
+    # Studio のような `Configuration.load()` を通らない実行でも、ここで境界として
+    # `OPENAI_API_KEY` / `OPENAI_BASE_URL` の出所を確保する（SET-009）。
+    load_env()
     # 解決規則は `resolve_env` に一本化する（SET-009。`TR_MODEL` → `{env_prefix}_MODEL`
     # → 既定。接頭辞は provider が引数で渡す）
     model = resolve_env("MODEL", default="openai:mimo-v2.5", env_prefix=env_prefix)

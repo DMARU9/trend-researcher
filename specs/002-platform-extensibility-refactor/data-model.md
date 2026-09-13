@@ -90,7 +90,7 @@ Studio の入力スキーマを広げないため）。既定値は Studio の�
 - `Configuration.from_runnable_config(...)` は現行の `if v is not None` フィルタを維持する。
   渡されたキーは Pydantic v2 の `model_fields_set` に残るため、「明示指定」と「既定値」を区別できる。
 - `Configuration.load(env_prefix: str | None = None) -> Configuration` を追加する。`.env` の読み込み
-  （`load_dotenv`）もこの 1 経路で行う。
+  もこの 1 経路で行う（実装は `config.load_env()`。T071 で `tools/llm.py` も同じ関数を通す）。
 - `resolve_env(name, *, default, env_prefix=None) -> str` を `configuration.py` に置く（`TR_{name}` →
   `{env_prefix}_{name}` → 既定）。既存 `Config._env()` と同じ規則・同じ変数名
   （`MODEL` / `MAX_RESULTS` / `SEARCH_POOL_SIZE` / `ACCOUNTS_DB` / `TRANSCRIPT_LANG` / `CACHE_DIR` /
