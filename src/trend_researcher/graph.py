@@ -7,19 +7,13 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from trend_researcher.models import ResearchReport
 from trend_researcher.nodes.analyze_content import analyze_content
-from trend_researcher.nodes.compile_report import (
-    compile_report,
-    render_json,
-    render_markdown,
-)
+from trend_researcher.nodes.compile_report import compile_report
 from trend_researcher.nodes.extract_common import extract_common
 from trend_researcher.nodes.fetch import fetch_node
 from trend_researcher.nodes.parse_instruction import parse_instruction
 from trend_researcher.nodes.plan_search import plan_search
 from trend_researcher.nodes.search import search_node
-from trend_researcher.providers import get_provider
 from trend_researcher.state import AgentInputState, AgentState
 
 EXECUTION_TIMEOUT = timedelta(minutes=100)
@@ -59,12 +53,3 @@ def _route_after_search(state: dict) -> str:
 
 # LangGraph Studio エントリポイント
 trend_researcher = build_graph()
-
-
-def render_report(report: ResearchReport) -> str:
-    """レポートを指示された形式（既定 markdown）で描画。"""
-    fmt = report.instruction.output.format
-    if fmt == "json":
-        return render_json(report)
-    provider = get_provider(report.instruction.platform)
-    return render_markdown(report, provider)

@@ -13,9 +13,10 @@ from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from trend_researcher.configuration import Configuration
-from trend_researcher.graph import EXECUTION_TIMEOUT, render_report, trend_researcher
+from trend_researcher.graph import EXECUTION_TIMEOUT, trend_researcher
 from trend_researcher.models import OutputFormat
 from trend_researcher.providers import available_platforms, get_provider
+from trend_researcher.rendering import render_report
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -161,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
             flush=True,
         )
-        rendered = render_report(report)
+        rendered = render_report(report, provider)
     else:
         requested = report.instruction.max_results or settings.max_results
         if len(report.candidates) < requested:
@@ -171,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
                 flush=True,
             )
-        rendered = render_report(report)
+        rendered = render_report(report, provider)
 
     if args.output:
         try:

@@ -412,7 +412,7 @@ US1 / US2 のテストは緑のまま。
 
 ### Implementation for User Story 4
 
-- [ ] T056 [US4] `src/trend_researcher/rendering.py` を新規作成し、
+- [X] T056 [US4] `src/trend_researcher/rendering.py` を新規作成し、
       `src/trend_researcher/nodes/compile_report.py` から
       `render_markdown` / `render_json` / `render_report` / `_render_candidates_table` /
       `_render_analysis_block` / `_render_common_themes` を**移動**する（コピーではない）。
@@ -420,17 +420,17 @@ US1 / US2 のテストは緑のまま。
       `provider = get_provider(report.instruction.platform)` を削除して**引数の provider を使う**、
       (b) `render_report(report, provider)` を置き、`format == "json"` なら `render_json(report)` を
       呼ぶ。**出力文字列は 1 文字も変えない**。`render_json(report)` の署名は変更しない
-- [ ] T057 [US4] `src/trend_researcher/nodes/compile_report.py` から移動済みの関数を削除し、
+- [X] T057 [US4] `src/trend_researcher/nodes/compile_report.py` から移動済みの関数を削除し、
       `from trend_researcher.rendering import render_markdown` を使って
       `rendered = render_markdown(report, provider)` を呼ぶ形にする。ノードの責務
       （`report` の組み立て / `cache.write_json` / 進捗 / メッセージ）は変更しない（RND-005）
-- [ ] T058 [US4] `src/trend_researcher/graph.py` から描画関連の import と `render_report` を削除する。
+- [X] T058 [US4] `src/trend_researcher/graph.py` から描画関連の import と `render_report` を削除する。
       残すのは `build_graph()` / `_route_after_search` / `trend_researcher` / `EXECUTION_TIMEOUT`
       （FR-016 / RND-001）
-- [ ] T059 [US4] `src/trend_researcher/__main__.py` で `render_report` を
+- [X] T059 [US4] `src/trend_researcher/__main__.py` で `render_report` を
       `trend_researcher.rendering` から import し、`render_report(report, provider)` を呼ぶようにする。
       `provider` は `main()` で 1 回だけ解決して再利用する（描画の内部で解決し直さない）
-- [ ] T060 [P] [US4] `src/trend_researcher/__init__.py` の `render_report` の re-export 元を
+- [X] T060 [P] [US4] `src/trend_researcher/__init__.py` の `render_report` の re-export 元を
       `rendering.py` へ変更する（`__all__` は維持）
 - [ ] T061 [US4] `tests/unit/test_compile_report.py` の描画の断言を `tests/unit/test_rendering.py` へ
       移し、ノード側には「`report` が状態に入る」「`cache.write_json` が呼ばれる」「描画が
