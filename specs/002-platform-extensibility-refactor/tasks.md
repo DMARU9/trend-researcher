@@ -308,7 +308,7 @@ US1 の機能（走査・拡張）と golden は赤くなっていない。
 
 ### Tests for User Story 3（憲法 原則 I により必須）⚠️
 
-- [ ] T038 [P] [US3] `tests/unit/test_platform_scan.py` に
+- [X] T038 [P] [US3] `tests/unit/test_platform_scan.py` に
       `test_nodes_do_not_read_environment` を追加する（SET-004 / SC-004）。`src/trend_researcher/nodes/**`
       を AST 走査し、`os.getenv` / `os.environ` / `load_dotenv` / `Config.load` の呼び出しが
       **0 件**であることを確認する。実装前は 2 件（`nodes/search.py` / `nodes/fetch.py`）で**赤**

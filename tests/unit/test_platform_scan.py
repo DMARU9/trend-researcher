@@ -12,8 +12,8 @@
 - (d) `test_help_text_does_not_enumerate_platforms`: CLI のヘルプ文（argparse の `help=` と
   `ArgumentParser(description=...)`）にプラットフォーム名を列挙しない。
 - (e) `test_platform_collections_are_absent`: プラットフォームの集合を扱う型を追加しない（FR-026）。
-- (c) `test_nodes_do_not_read_environment` は規則 (c) として US3 で追加する
-  （US1 の時点では `Config` が実在し、検出対象が残るため）。
+- (c) `test_nodes_do_not_read_environment`: `nodes/**` が環境変数・`.env` を読まない
+  （SET-004 / SC-004。US1 の時点では `Config` が実在し検出対象が残るため US3 で追加した）。
 """
 
 from __future__ import annotations
@@ -110,6 +110,16 @@ def _docstring_lines(tree: ast.Module) -> set[int]:
             end = getattr(first, "end_lineno", None) or first.lineno
             lines.update(range(first.lineno, end + 1))
     return lines
+
+
+def _iter_node_sources() -> list[tuple[str, list[str], ast.Module]]:
+    """`nodes/**` のソースを (相対パス, 行リスト, AST) で返す（規則 (c)）。"""
+    sources: list[tuple[str, list[str], ast.Module]] = []
+    for path in sorted(NODES_ROOT.rglob("*.py")):
+        rel = path.relative_to(SRC_ROOT).as_posix()
+        source = path.read_text(encoding="utf-8")
+        sources.append((rel, source.splitlines(), ast.parse(source)))
+    return sources
 
 
 def _env_prefixes() -> list[str]:
@@ -293,5 +303,67 @@ def _provider_collection_hits() -> list[Hit]:
 def test_platform_collections_are_absent() -> None:
     """規則 (e)。1 実行 = 1 プラットフォームのため集合型を追加しない（FR-026）。"""
     hits = _provider_collection_hits()
+
+    assert not hits, _format_hits({(h.path, h.lineno, h.content) for h in hits})
+
+
+# --- 検出規則 (c) ----------------------------------------------------------
+
+
+def _dotted(node: ast.expr) -> str | None:
+    """属性アクセスを `os.environ.get` のような点線表記にする（名前でなければ None）。"""
+    parts: list[str] = []
+    current: ast.expr = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return None
+    parts.append(current.id)
+    return ".".join(reversed(parts))
+
+
+def _reads_environment(node: ast.expr) -> bool:
+    """環境変数・`.env`・削除対象の設定ローダを指す式か（規則 (c)）。"""
+    dotted = _dotted(node)
+    if dotted is None:
+        return False
+    return (
+        dotted == "load_dotenv"
+        or dotted.endswith(".load_dotenv")
+        or dotted == "getenv"
+        or dotted.endswith(".getenv")
+        or "environ" in dotted.split(".")
+        or dotted == "Config.load"
+    )
+
+
+def _environment_read_hits() -> list[Hit]:
+    hits: list[Hit] = []
+    for rel, lines, tree in _iter_node_sources():
+        found: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                if _reads_environment(node.func):
+                    found.add(node.func.lineno)
+            elif isinstance(node, ast.Subscript):
+                # `os.environ["TR_X"]` の形（呼び出しを伴わない読み取り）
+                if _reads_environment(node.value):
+                    found.add(node.value.lineno)
+        hits.extend(Hit(rel, lineno, lines[lineno - 1].strip()) for lineno in sorted(found))
+    return hits
+
+
+def test_nodes_do_not_read_environment() -> None:
+    """規則 (c)。ノードは環境変数・`.env`・`Config.load` を読まない（SET-004 / SC-004）。
+
+    ノードが受け取るのは `RunnableConfig` 経由の `Configuration` 1 つだけであり、
+    環境の解決は境界（provider / CLI）に閉じる。走査対象が空になると無効化される
+    ため、対象件数も合わせて確認する。
+    """
+    sources = _iter_node_sources()
+    assert sources, "走査対象のノードが 0 件（NODES_ROOT の設定を確認）"
+
+    hits = _environment_read_hits()
 
     assert not hits, _format_hits({(h.path, h.lineno, h.content) for h in hits})
