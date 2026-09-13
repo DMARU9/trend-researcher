@@ -253,11 +253,11 @@ description: "Task list for 002-platform-extensibility-refactor"
 
 ### Implementation for User Story 2
 
-- [ ] T030 [US2] `src/trend_researcher/cache.py` から `read_json` を削除し、docstring の
+- [X] T030 [US2] `src/trend_researcher/cache.py` から `read_json` を削除し、docstring の
       「将来の途中再開等に備えて用意」の記述を削除する。`write_json` は変更しない（REM-001）
-- [ ] T031 [P] [US2] `src/trend_researcher/prompts.py` から `COMPILE_REPORT_PROMPT` を削除する
+- [X] T031 [P] [US2] `src/trend_researcher/prompts.py` から `COMPILE_REPORT_PROMPT` を削除する
       （REM-002。他のプロンプト本文は変更しない）
-- [ ] T032 [US2] `--trends` 一式を削除する（REM-003）:
+- [X] T032 [US2] `--trends` 一式を削除する（REM-003）:
       `src/trend_researcher/__main__.py` の `--trends` 定義と `use_trends=args.trends`、
       `src/trend_researcher/configuration.py` の `use_trends` フィールド、
       `src/trend_researcher/models.py` の `ResearchInstruction.use_trends`、
@@ -270,9 +270,9 @@ description: "Task list for 002-platform-extensibility-refactor"
       `tests/integration/test_cli_contract.py`（`--trends` の受理）。
       **`specs/001-test-suite-hardening/` の `plan.md` / `tasks.md` / `research.md` /
       `data-model.md` / `quickstart.md` は履歴のため書き換えない**
-- [ ] T033 [P] [US2] `src/trend_researcher/models.py` から `OutputSpec.table_for` を削除する
+- [X] T033 [P] [US2] `src/trend_researcher/models.py` から `OutputSpec.table_for` を削除する
       （REM-004）
-- [ ] T034 [US2] `src/trend_researcher/tools/x_search.py` から `fetch_thread` を削除する（REM-005）。
+- [X] T034 [US2] `src/trend_researcher/tools/x_search.py` から `fetch_thread` を削除する（REM-005）。
       **失われる網羅を補う**: `fetch_threads` のテストに「1 件だけ返る場合」のケースを追加し、
       本文の連結が同じ経路で検証されるようにする
 - [ ] T035 [US2] `src/trend_researcher/progress.py` を単一の定義へ変更する（FR-012 / REM-008）。
