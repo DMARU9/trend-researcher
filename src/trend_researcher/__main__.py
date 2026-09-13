@@ -29,7 +29,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--platform",
         choices=available_platforms(),
         required=True,
-        help="対象プラットフォーム（x=X/Twitter、youtube=YouTube）",
+        help="対象プラットフォーム（利用可能な値は choices の一覧）",
     )
     parser.add_argument("--output", help="レポート書き込み先ファイル（省略時は stdout）")
     parser.add_argument(
@@ -151,8 +151,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if not report.candidates:
-        subject = "ツイート" if platform == "x" else "動画"
-        print(f"該当なし: 指定された指示に一致する{subject}が見つかりませんでした。", file=sys.stderr, flush=True)
+        print(
+            f"該当なし: 指定された指示に一致する{provider.content_noun}が見つかりませんでした。",
+            file=sys.stderr,
+            flush=True,
+        )
         rendered = render_report(report)
     else:
         requested = report.instruction.max_results or config.max_results

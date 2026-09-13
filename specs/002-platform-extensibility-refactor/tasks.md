@@ -190,7 +190,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       （`:37` 選定基準の注記 / `:45` の名詞 / `:85` の表題）を provider のフック
       （`selection_note` / `content_noun` / `candidates_section_title`）へ置き換える。
       **出力文字列は 1 文字も変えない**（golden で検証される）
-- [ ] T022 [US1] `src/trend_researcher/__main__.py` の
+- [X] T022 [US1] `src/trend_researcher/__main__.py` の
       `subject = "ツイート" if platform == "x" else "動画"` を `get_provider(platform).content_noun` に
       置き換える。`get_provider` は `try` の外（引数検証済みの位置）で 1 回だけ解決する。
       併せて `--platform` のヘルプ本文にあるプラットフォーム名の列挙
