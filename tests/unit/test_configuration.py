@@ -22,7 +22,7 @@ from trend_researcher.configuration import Configuration
 
 #: 宣言された全フィールドと既定値。
 DEFAULTS = {
-    "platform": "x",
+    "platform": "",
     "output_format": None,
     "max_results": 5,
     "sort_by": "relevance",
@@ -71,14 +71,20 @@ def test_custom_values_are_preserved():
 def test_platform_is_not_validated_at_this_layer():
     """`platform` は文字列として受理し、検証は provider 解決側に任せる。
 
-    `state.AgentInputState.platform` は `Literal["x", "youtube"]` だが、
-    `Configuration` は CLI の `--platform` をそのまま受け取る層であり、
-    未知の値は「provider が見つからない」として CLI が終了コード 2 で扱う。
-    ここで `Literal` にすると、その終了コード契約より手前で例外になる。
+    未指定（空文字）は「既定のプラットフォーム」として `get_provider` が
+    最初の登録に解決し、未知の値は「provider が見つからない」として CLI が
+    終了コード 2 で扱う。ここで列挙型にすると、その終了コード契約より手前で
+    例外になる。
     """
     unknown = Configuration(platform="bogus")
 
     assert unknown.platform == "bogus"
+
+
+def test_platform_defaults_to_blank_so_the_registry_decides():
+    """未指定は空文字のまま保持し、既定をコアが決めない（FR-007）。"""
+    assert Configuration().platform == ""
+    assert Configuration.from_runnable_config({"configurable": {}}).platform == ""
 
 
 def test_from_runnable_config_uses_configurable_values():

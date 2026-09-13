@@ -2,7 +2,9 @@
 
 固定する契約:
 
-- 優先順位は `TR_*`（一般） > `XTR_*` / `YTR_*`（プラットフォーム固有） > 既定値
+- 優先順位は `TR_*`（一般） > `{env_prefix}_*`（プラットフォーム固有） > 既定値。
+  接頭辞は provider が渡す（`get_provider(platform).env_prefix` で `XTR` / `YTR`）。
+  `env_prefix=None` のときは `TR_*` のみを見る
 - 空文字は「未設定」として扱い、次の優先順位へフォールバックする（`or` の意味）
 - 相対パスはリポジトリ直下基準、`~` は展開、絶対パスはそのまま解決する
 - `cache_dir` と `max_results` の引数上書きは環境変数より強い
@@ -80,31 +82,31 @@ def test_generic_tr_wins_over_platform_prefix(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("TR_MODEL", "generic-model")
     monkeypatch.setenv("XTR_MODEL", "x-model")
 
-    assert Config.load(platform="x").model == "generic-model"
+    assert Config.load(env_prefix="XTR").model == "generic-model"
 
 
 def test_platform_prefix_is_used_when_generic_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XTR_MODEL", "x-model")
 
-    assert Config.load(platform="x").model == "x-model"
+    assert Config.load(env_prefix="XTR").model == "x-model"
 
 
 def test_platform_prefix_does_not_leak_across_platforms(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XTR_MODEL", "x-model")
     monkeypatch.setenv("YTR_MODEL", "youtube-model")
 
-    assert Config.load(platform="x").model == "x-model"
-    assert Config.load(platform="youtube").model == "youtube-model"
+    assert Config.load(env_prefix="XTR").model == "x-model"
+    assert Config.load(env_prefix="YTR").model == "youtube-model"
 
 
 def test_youtube_prefix_is_not_used_for_x(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("YTR_MODEL", "youtube-model")
 
-    assert Config.load(platform="x").model == DEFAULT_MODEL
+    assert Config.load(env_prefix="XTR").model == DEFAULT_MODEL
 
 
 def test_default_is_used_when_neither_is_set() -> None:
-    assert Config.load(platform="youtube").model == DEFAULT_MODEL
+    assert Config.load(env_prefix="YTR").model == DEFAULT_MODEL
 
 
 # --- 空文字の扱い ---------------------------------------------------------
@@ -115,14 +117,14 @@ def test_empty_generic_falls_back_to_platform_prefix(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("TR_MODEL", "")
     monkeypatch.setenv("XTR_MODEL", "x-model")
 
-    assert Config.load(platform="x").model == "x-model"
+    assert Config.load(env_prefix="XTR").model == "x-model"
 
 
 def test_empty_generic_and_prefix_fall_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TR_MODEL", "")
     monkeypatch.setenv("XTR_MODEL", "")
 
-    assert Config.load(platform="x").model == DEFAULT_MODEL
+    assert Config.load(env_prefix="XTR").model == DEFAULT_MODEL
 
 
 def test_empty_string_is_kept_for_unprefixed_openai_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,7 +139,7 @@ def test_openai_variables_are_not_prefixed(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("TR_OPENAI_BASE_URL", "https://tr.example/v1")
     monkeypatch.setenv("XTR_OPENAI_BASE_URL", "https://xtr.example/v1")
 
-    assert Config.load(platform="x").openai_base_url == DEFAULT_BASE_URL
+    assert Config.load(env_prefix="XTR").openai_base_url == DEFAULT_BASE_URL
 
 
 def test_openai_api_key_and_base_url_are_read_directly(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -207,8 +209,8 @@ def test_accounts_db_uses_platform_prefix_and_repo_root(
     """`XTR_ACCOUNTS_DB` は X でだけ読まれ、相対パスはリポジトリ直下基準で解決される。"""
     monkeypatch.setenv("XTR_ACCOUNTS_DB", "data/accounts.db")
 
-    assert Config.load(platform="x").accounts_db == (_REPO_ROOT / "data/accounts.db").resolve()
-    assert Config.load(platform="youtube").accounts_db == (_REPO_ROOT / "accounts.db").resolve()
+    assert Config.load(env_prefix="XTR").accounts_db == (_REPO_ROOT / "data/accounts.db").resolve()
+    assert Config.load(env_prefix="YTR").accounts_db == (_REPO_ROOT / "accounts.db").resolve()
 
 
 def test_resolve_path_expands_tilde_and_absolute(tmp_path: Path) -> None:
@@ -292,7 +294,8 @@ def test_config_load_invokes_env_loading(tmp_path: Path, monkeypatch: pytest.Mon
 # --- プロセス内共有 -------------------------------------------------------
 
 
-def test_get_config_is_cached_and_uses_x_defaults() -> None:
+def test_get_config_is_cached_without_env_prefix() -> None:
+    """`get_config()` はプロセス内で共有され、接頭辞なし（`TR_*` のみ）で解決する。"""
     first = get_config()
 
     assert first is get_config()

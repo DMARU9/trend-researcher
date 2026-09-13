@@ -142,9 +142,13 @@ class FakeModelFactory:
         #: （例: analyze_content は候補ごとに呼ぶ）でも全件残すため、
         #: インスタンスごとのリストではなくノード単位で共有する。
         self.prompt_log: dict[str, list[str]] = {}
+        #: ノードごとの `env_prefix` 記録。各ノードが provider の接頭辞を渡して
+        #: いるか（コアが接頭辞を組み立てていないか）を観測できる。
+        self.env_prefix_log: dict[str, list[str | None]] = {}
 
     def _build_model(self, node: str, content: str | None) -> Callable[..., _FakeLLM]:
-        def _build(role: str = "research") -> _FakeLLM:
+        def _build(role: str = "research", env_prefix: str | None = None) -> _FakeLLM:
+            self.env_prefix_log.setdefault(node, []).append(env_prefix)
             if content is None:
                 raise AssertionError(
                     f"fake_model_factory: ノード {node} の応答が指定されていません。"
@@ -165,6 +169,7 @@ class FakeModelFactory:
 
         self.models = {}
         self.prompt_log = {}
+        self.env_prefix_log = {}
         with ExitStack() as stack:
             for node in LLM_NODES:
                 content = responses.get(node)
@@ -180,6 +185,10 @@ class FakeModelFactory:
         """指定ノードの `build_model` に渡されたプロンプトの一覧（全インスタンス分）。"""
         instance = self.models.get(node)
         return list(instance.prompts) if instance else []
+
+    def env_prefixes_for(self, node: str) -> list[str | None]:
+        """指定ノードが `build_model` に渡した `env_prefix` の一覧（呼び出し順）。"""
+        return list(self.env_prefix_log.get(node, []))
 
 
 # --- 境界モックフィクスチャ 5 種（data-model 1.2 / LAYOUT-003-3） ----------

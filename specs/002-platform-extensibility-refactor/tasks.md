@@ -210,7 +210,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       各探針は `git checkout -- <file>` で復元し、**復元後に 3 つとも緑に戻る**ことを確認する。
       さらに復元後の sha256 が探針前と一致することを確かめる（`sha256sum` で比較）。
       結果（赤のログの要点）を「実装メモ」節に記録する
-- [ ] T025 [US1] 影響を受ける既存テストを追随させる。`tests/unit/test_config.py`
+- [X] T025 [US1] 影響を受ける既存テストを追随させる。`tests/unit/test_config.py`
       （`Config.load(platform=...)` → `env_prefix=...`。**期待値は変えず、`XTR_*` / `YTR_*` の
       解決結果の断言を維持する**）、`tests/unit/test_providers.py`（追加フックの存在）、
       `tests/unit/test_plan_search.py`（上限が provider 由来になったこと）、
@@ -567,6 +567,31 @@ US1 / US2 のテストは緑のまま。
 |---|---|---|
 | `test_platform_scan.py` | `test_platform_literals_are_confined_to_registry` が「計 14 件」で失敗（検出 16 行 − 許容 2 行）。`test_help_text_does_not_enumerate_platforms` が `__main__.py:32` の 1 件で失敗。`test_platform_collections_are_absent` は緑（回帰ガード） | T011〜T022 の実装後に (a)+(b) が 0 件・(d) が 0 件になる（T023） |
 | `test_platform_extension.py` | 収集時に `ImportError: cannot import name 'register_provider' from 'trend_researcher.providers'`（T014 で追加）。加えて T011 の追加フック 5 つが未定義 | T011〜T022 の実装後に 4 テストが緑になる（T026） |
+
+#### T025: 既存テストの追随（実測）
+
+| ファイル | 追随の内容 | 件数 |
+|---|---|---|
+| `tests/unit/test_config.py` | `Config.load(platform="x"\|"youtube")` → `Config.load(env_prefix="XTR"\|"YTR")`。`XTR_MODEL` / `YTR_MODEL` の解決結果・優先順位の断言は**そのまま維持**（変更なし）。`test_get_config_is_cached_and_uses_x_defaults` → `test_get_config_is_cached_without_env_prefix` に改名（既定が `x` 固定でなくなったため） | 11 箇所 / 30 passed |
+| `tests/unit/test_providers.py` | (1) 未知プラットフォームのパラメータから `""` / `"   "` を除外（空文字は「登録の先頭」へ解決する仕様になったため）、(2) エラー文言の断言を `"'x' または 'youtube'"` → `"'x'、'youtube' のいずれかを指定してください"`（登録キーからの生成）へ、(3) `test_provider_exposes_the_full_interface` に新フック 5 つ（`env_prefix` / `max_search_queries` / `content_noun` / `candidates_section_title` / `selection_note`）の存在確認を追加 | 追加 3 / 修正 2 |
+| `tests/unit/test_configuration.py` | `DEFAULTS["platform"]` を `"x"` → `""`。`test_platform_is_not_validated_at_this_layer` の docstring から削除済みの `Literal["x","youtube"]` の記述を除去し、**空文字＝登録の先頭**という新仕様のテスト（`test_platform_defaults_to_blank_so_the_registry_decides`）を追加 | 修正 2 / 追加 1 |
+| `tests/unit/test_fixtures.py` | `Config.load(platform="youtube")` → `Config.load(env_prefix="YTR")` | 1 箇所 |
+| `tests/integration/test_full_flow.py` | `Config.load(platform="x", ...)` → `Config.load(env_prefix="XTR", ...)`（3 箇所）。**新規に `test_llm_nodes_receive_the_platform_env_prefix` を追加**（4 ノードが `provider.env_prefix` を `build_model` に渡していること。X=`XTR` / YouTube=`YTR` の 2 パラメータ） | 修正 3 / 追加 1 |
+| `tests/conftest.py` | `FakeModelFactory._build_model` の内側 `_build` を `(role="research", env_prefix=None)` に拡大し、呼び出しごとの `env_prefix` を `env_prefix_log` に記録（`env_prefixes_for(node)` で観測）。第 2 位置引数を受けないための `TypeError` で `test_plan_search.py` 13 件が落ちていたのを解消 | 記録用の観測点を追加 |
+| `tests/unit/test_plan_search.py` | **変更不要**（`fake_model_factory` の引数拡大のみで緑に復帰）。上限が provider 由来（`max_search_queries`）になったことは既存の切り詰めテストがそのまま通ることで確認 | 0 箇所 |
+| `tests/unit/test_compile_report.py` | **変更不要**（45 passed のまま）。T021 の分岐→フック移設で出力文字列が不変であることをこの無修正が担保 | 0 箇所 |
+
+- 追随で消えた網羅は「空文字・空白のみの解決」の 1 項目（`""` / `"   "` は旧テストでは**例外**を期待していた）。同等以上の入力を `test_get_provider_resolves_blank_to_the_first_registration`（`""` / `"   "` の 2 パラメータ → 登録の先頭クラスを返す）として残した。
+- **T025 の変異探針**（各探針後に復元 → 緑復帰 → sha256 一致 → `git status` に src の差分なし）:
+
+| 探針 | 変異 | 赤になったテスト |
+|---|---|---|
+| P1 | `nodes/parse_instruction.py` の `build_model("research", provider.env_prefix)` → `build_model("research")` | `test_llm_nodes_receive_the_platform_env_prefix` **2 failed** → 復元後 2 passed |
+| P2 | `providers/__init__.py` の `_resolve_key` の `return next(iter(_PROVIDERS))` → `raise ValueError(platform)` | `test_get_provider_resolves_blank_to_the_first_registration` **2 failed** → 復元後 2 passed |
+| P3 | `providers/__init__.py` の `choices = "、".join(f"'{name}'" for name in _PROVIDERS)` → 固定文字列 | `test_unknown_platform_message_enumerates_every_registration` **1 failed** → 復元後 1 passed |
+
+- 実測値: `tests/unit/test_config.py` 30 passed / スイート全体 **567 passed**（47 秒）/ `ruff check .` 0 / `mypy --no-incremental src` 0（26 files）。
+- 注記: `nodes/search.py` / `nodes/fetch.py` の `Config.load(env_prefix=provider.env_prefix)` の配線は、境界がフェイクのため既存テストでは観測できない。この経路の網羅は T051（ノードの env 読みの変異探針）で行う。
 
 ### 2. 基準値のずれ（spec は変更しない）
 

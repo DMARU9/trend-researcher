@@ -231,6 +231,34 @@ def test_node_responses_are_recorded_per_node(fake_model_factory, x_flow) -> Non
     assert len(fake_model_factory.prompts_for("extract_common")) == 1
 
 
+@pytest.mark.parametrize(
+    ("platform", "flow_fixture", "prefix"),
+    [("x", "x_flow", "XTR"), ("youtube", "youtube_flow", "YTR")],
+)
+def test_llm_nodes_receive_the_platform_env_prefix(
+    request: pytest.FixtureRequest,
+    fake_model_factory,
+    platform: str,
+    flow_fixture: str,
+    prefix: str,
+) -> None:
+    """LLM ノードは provider の接頭辞を渡す（コアが接頭辞を組み立てない・FR-007）。
+
+    接頭辞が渡らなくなると `TR_MODEL` しか見えなくなり、プラットフォーム別の
+    モデル設定（`XTR_MODEL` / `YTR_MODEL`）が黙って無視される。
+    """
+    request.getfixturevalue(flow_fixture)
+    responses = _X_RESPONSES if platform == "x" else _YOUTUBE_RESPONSES
+
+    with fake_model_factory.install(responses):
+        _run_graph("困りごとを調査したい", platform=platform)
+
+    for node in ("parse_instruction", "plan_search", "analyze_content", "extract_common"):
+        prefixes = fake_model_factory.env_prefixes_for(node)
+        assert prefixes, f"{node} が build_model を呼んでいない"
+        assert set(prefixes) == {prefix}, node
+
+
 # --- X: 正常系 ----------------------------------------------------------------
 
 
@@ -525,7 +553,7 @@ def _capture_cli_invocation(
 
 def test_cli_wires_cache_dir_into_the_runnable_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`--cache-dir` が Configuration まで届く（`_run_async` の配線）。"""
-    config = Config.load(platform="x", cache_dir=str(tmp_path))
+    config = Config.load(env_prefix="XTR", cache_dir=str(tmp_path))
     captured = _capture_cli_invocation(
         monkeypatch, ["オタクの困りごと", "--platform", "x", "--cache-dir", str(tmp_path)], config
     )
@@ -542,7 +570,7 @@ def test_cli_omits_max_results_from_state_when_not_given(
     常に 5 を載せると、ノード側で「明示指定」と区別できず本文の自然言語
     （「20件」）が無視される（FR-011）。
     """
-    config = Config.load(platform="x", cache_dir=str(tmp_path))
+    config = Config.load(env_prefix="XTR", cache_dir=str(tmp_path))
     captured = _capture_cli_invocation(monkeypatch, ["20件の動画を調べて", "--platform", "x"], config)
 
     assert "max_results" not in captured["state"]
@@ -552,7 +580,7 @@ def test_cli_passes_explicit_max_results_even_when_it_is_the_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """明示指定は既定値と同じ 5 でも state に載せる（FR-011: 明示指定が最優先）。"""
-    config = Config.load(platform="x", cache_dir=str(tmp_path))
+    config = Config.load(env_prefix="XTR", cache_dir=str(tmp_path))
     captured = _capture_cli_invocation(
         monkeypatch, ["20件の動画を調べて", "--platform", "x", "--max-results", "5"], config
     )

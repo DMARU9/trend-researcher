@@ -13,7 +13,12 @@ from typing import Any
 import pytest
 
 from trend_researcher.models import Candidate
-from trend_researcher.providers import _PROVIDERS, available_platforms, get_provider
+from trend_researcher.providers import (
+    _PROVIDERS,
+    available_platforms,
+    get_provider,
+    register_provider,
+)
 from trend_researcher.providers.base import Provider
 from trend_researcher.providers.x import XProvider
 from trend_researcher.providers.youtube import YouTubeProvider
@@ -109,14 +114,43 @@ def test_get_provider_normalizes_platform_name(platform: str, expected: type) ->
     assert isinstance(get_provider(platform), expected)
 
 
-@pytest.mark.parametrize("platform", ["reddit", "", "   ", "x/youtube", "ツイッター"])
+@pytest.mark.parametrize("platform", ["reddit", "x/youtube", "ツイッター"])
 def test_get_provider_rejects_unknown_platform(platform: str) -> None:
     with pytest.raises(ValueError) as exc:
         get_provider(platform)
 
     message = str(exc.value)
     assert f"未知のプラットフォーム: {platform}" in message
-    assert "'x' または 'youtube'" in message
+    # 利用可能な値の提示は登録キーから生成される（リテラルを埋め込まない）。
+    assert "'x'、'youtube' のいずれかを指定してください" in message
+
+
+@pytest.mark.parametrize("platform", ["", "   "])
+def test_get_provider_resolves_blank_to_the_first_registration(platform: str) -> None:
+    """未指定（空文字・空白のみ）は登録の先頭へ解決する（FR-007）。
+
+    `Configuration.platform` の既定が空文字なので、CLI が `--platform` を
+    省略した場合はここで既定が決まる。コアが "x" を書かないための入口。
+    """
+    first = next(iter(_PROVIDERS))
+
+    assert isinstance(get_provider(platform), _PROVIDERS[first])
+
+
+def test_unknown_platform_message_enumerates_every_registration() -> None:
+    """エラー文言は登録の全件を列挙する（登録追加に自動追随）。
+
+    クラスを 1 つ登録するだけで文言が変わることを見る。実レジストリを
+    汚さないように `finally` で除く。
+    """
+    register_provider(_StubProvider)
+    try:
+        with pytest.raises(ValueError) as exc:
+            get_provider("reddit")
+
+        assert "'stub'" in str(exc.value)
+    finally:
+        _PROVIDERS.pop("stub", None)
 
 
 def test_get_provider_returns_a_fresh_instance_per_call() -> None:
@@ -155,6 +189,7 @@ def test_provider_exposes_the_full_interface(platform: str) -> None:
         "render_candidate_row",
         "render_block_title",
         "render_block_meta",
+        "selection_note",
     ):
         assert callable(getattr(provider, method)), method
     for prompt in (
@@ -165,6 +200,27 @@ def test_provider_exposes_the_full_interface(platform: str) -> None:
         "common_theme_supporting_label",
     ):
         assert isinstance(getattr(provider, prompt), str), prompt
+    # コアが解釈せず provider から読む値（FR-004 / FR-007 / FR-012）。
+    assert isinstance(provider.name, str) and provider.name
+    assert isinstance(provider.env_prefix, str) and provider.env_prefix
+    assert provider.max_search_queries is None or isinstance(provider.max_search_queries, int)
+    assert isinstance(provider.content_noun, str) and provider.content_noun
+    assert isinstance(provider.candidates_section_title, str)
+    assert provider.candidates_section_title.startswith("## ")
+
+
+@pytest.mark.parametrize(
+    ("platform", "env_prefix", "content_noun"),
+    [("x", "XTR", "ツイート"), ("youtube", "YTR", "動画")],
+)
+def test_platform_hooks_match_each_platform(
+    platform: str, env_prefix: str, content_noun: str
+) -> None:
+    """環境変数接頭辞・名詞が各プラットフォームの値になっていること。"""
+    provider = get_provider(platform)
+
+    assert provider.env_prefix == env_prefix
+    assert provider.content_noun == content_noun
 
 
 # ---------------------------------------------------------------------------
