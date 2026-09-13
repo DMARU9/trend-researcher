@@ -186,7 +186,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       `if platform == "x" and len(queries) > 8:` を、`provider.max_search_queries` による上限適用へ
       置き換える（`None` は無制限）。既存コメント（X のみ適用・YouTube は単一クエリ）を残しつつ、
       プラットフォーム名を書かない形に書き直す
-- [ ] T021 [US1] `src/trend_researcher/nodes/compile_report.py` の分岐 3 箇所
+- [X] T021 [US1] `src/trend_researcher/nodes/compile_report.py` の分岐 3 箇所
       （`:37` 選定基準の注記 / `:45` の名詞 / `:85` の表題）を provider のフック
       （`selection_note` / `content_noun` / `candidates_section_title`）へ置き換える。
       **出力文字列は 1 文字も変えない**（golden で検証される）

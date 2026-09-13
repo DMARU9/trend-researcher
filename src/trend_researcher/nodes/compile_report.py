@@ -34,16 +34,14 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
     if published_after is not None:
         notes.append(f"投稿日フィルタ: {published_after.date()} 以降に公開された投稿を対象")
 
-    if provider.name == "x":
-        # relevance モードは fetch 後に「いいね昇順」で並べ替えるため、ラベルもそれに合わせる
-        sort_label = "いいね数の多い順" if (instruction.sort_by or "relevance") == "likes" else "いいね数の少ない順"
-        notes.append(f"選定基準: 検索結果から{sort_label}に上位 N 件を採用")
-    else:
-        notes.append("選定基準: 検索結果の関連度順に上位 N 件を採用")
+    # 選定基準の注記は provider が文面を持つ（コアは文面を組み立てない）
+    notes.append(provider.selection_note(instruction.sort_by or "relevance"))
 
     if not candidates:
-        subject = "ツイート" if provider.name == "x" else "動画"
-        notes.append(f"該当する{subject}が見つかりませんでした（検索クエリまたは期間フィルタの条件に一致する投稿なし）。")
+        notes.append(
+            f"該当する{provider.content_noun}が見つかりませんでした"
+            "（検索クエリまたは期間フィルタの条件に一致する投稿なし）。"
+        )
 
     sources = [c.url for c in candidates if c.url]
 
@@ -82,7 +80,7 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
 
 
 def _render_candidates_table(report: ResearchReport, provider: Provider) -> list[str]:
-    title_line = "## 選定ツイートリスト（上位 N 件）" if provider.name == "x" else "## 選定動画リスト（関連度順上位 N 件）"
+    title_line = provider.candidates_section_title
     lines = [title_line, ""]
     head, sep = provider.candidate_table_header()
     lines.append(head)
