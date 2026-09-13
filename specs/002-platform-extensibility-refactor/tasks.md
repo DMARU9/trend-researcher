@@ -164,7 +164,7 @@ description: "Task list for 002-platform-extensibility-refactor"
 - [X] T015 [US1] `src/trend_researcher/state.py` の `platform` 2 箇所（`AgentInputState` /
       `AgentState`）を `Literal["x", "youtube"]` から `str` へ変更する（FR-002）。
       `Literal` の import が不要になれば削除する
-- [ ] T016 [US1] `src/trend_researcher/models.py` の `platform` 2 箇所
+- [X] T016 [US1] `src/trend_researcher/models.py` の `platform` 2 箇所
       （`ResearchInstruction` / `Candidate`）の既定を `"x"` から `""` へ変更する（FR-002）。
       docstring に「空文字は登録済みプラットフォームの先頭として解決される」旨を追記する
 - [ ] T017 [US1] `src/trend_researcher/configuration.py` の `platform` の既定を `"x"` から `""` へ変更し、

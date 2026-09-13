@@ -26,10 +26,14 @@ class OutputSpec(BaseModel):
 
 
 class ResearchInstruction(BaseModel):
-    """ユーザー指示を構造化したもの（parse_instruction で抽出）。"""
+    """ユーザー指示を構造化したもの（parse_instruction で抽出）。
+
+    `platform` の空文字は「未指定」を意味し、登録済みプラットフォームの先頭
+    （`providers.get_provider("")` の解決先）として扱われる（FR-002）。
+    """
 
     raw_text: str
-    platform: str = "x"  # "x" | "youtube"
+    platform: str = ""
     topic: str = ""
     max_results: int = 5
     output: OutputSpec = Field(default_factory=OutputSpec)
@@ -42,9 +46,13 @@ class ResearchInstruction(BaseModel):
 
 
 class Candidate(BaseModel):
-    """検索で選定された 1 件（ツイートまたは動画）。プラットフォーム共通。"""
+    """検索で選定された 1 件（ツイートまたは動画）。プラットフォーム共通。
 
-    platform: str = "x"
+    `platform` の空文字は「未指定」を意味し、登録済みプラットフォームの先頭と
+    して扱われる（`ResearchInstruction` と同じ扱い）。
+    """
+
+    platform: str = ""
     id: str  # tweet_id または video_id
     title: str = ""  # 動画タイトル（YouTube）/ ツイートは空
     text: str = ""  # ツイート本文（X）/ 動画は空
