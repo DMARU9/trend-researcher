@@ -326,7 +326,7 @@ US1 の機能（走査・拡張）と golden は赤くなっていない。
 
 ### Implementation for User Story 3
 
-- [ ] T041 [US3] `src/trend_researcher/configuration.py` に
+- [X] T041 [US3] `src/trend_researcher/configuration.py` に
       `resolve_env(name, *, default, env_prefix=None) -> str`（`TR_{name}` → `{env_prefix}_{name}` →
       既定。空文字は未設定扱い）と `Configuration.load(env_prefix: str | None = None) -> Configuration`
       を追加する。`.env` の読み込み（`load_dotenv`）とパス解決（`config.py` の `_REPO_ROOT` /

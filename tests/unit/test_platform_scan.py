@@ -328,28 +328,29 @@ def _reads_environment(node: ast.expr) -> bool:
     dotted = _dotted(node)
     if dotted is None:
         return False
-    return (
-        dotted == "load_dotenv"
-        or dotted.endswith(".load_dotenv")
-        or dotted == "getenv"
-        or dotted.endswith(".getenv")
-        or "environ" in dotted.split(".")
-        or dotted == "Config.load"
-    )
+    parts = dotted.split(".")
+    if dotted == "Config.load" or "environ" in parts:
+        return True
+    return parts[-1] in {"getenv", "load_dotenv"}
+
+
+def _environment_read_line(node: ast.AST) -> int | None:
+    """環境の読み取りを表す式の行番号（読み取りでなければ `None`）。
+
+    `os.getenv(...)` のような呼び出しに加え、`os.environ["TR_X"]` の形
+    （呼び出しを伴わない読み取り）も検出する。
+    """
+    if isinstance(node, ast.Call) and _reads_environment(node.func):
+        return node.func.lineno
+    if isinstance(node, ast.Subscript) and _reads_environment(node.value):
+        return node.value.lineno
+    return None
 
 
 def _environment_read_hits() -> list[Hit]:
     hits: list[Hit] = []
     for rel, lines, tree in _iter_node_sources():
-        found: set[int] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                if _reads_environment(node.func):
-                    found.add(node.func.lineno)
-            elif isinstance(node, ast.Subscript):
-                # `os.environ["TR_X"]` の形（呼び出しを伴わない読み取り）
-                if _reads_environment(node.value):
-                    found.add(node.value.lineno)
+        found = {lineno for node in ast.walk(tree) if (lineno := _environment_read_line(node))}
         hits.extend(Hit(rel, lineno, lines[lineno - 1].strip()) for lineno in sorted(found))
     return hits
 
