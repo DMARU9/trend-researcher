@@ -41,6 +41,20 @@ def _dedupe(candidates: list[Candidate]) -> list[Candidate]:
 class XProvider:
     name = "x"
 
+    # --- コアへ渡す差の表現（コアは値を解釈しない） ---
+    env_prefix = "XTR"
+    #: 検索クエリ数のハード上限（LLM が 5 件を守らなくても安全に切り詰める）
+    #: 注: Protocol の可変属性は mypy では不変（invariant）のため、`int | None` を
+    #: 明示しないと `int` 推論になって適合しない。
+    max_search_queries: int | None = 8
+    content_noun = "ツイート"
+    candidates_section_title = "## 選定ツイートリスト（上位 N 件）"
+
+    def selection_note(self, sort_by: str) -> str:
+        """選定基準の注記。relevance は fetch 後の「いいね昇順」並べ替えに合わせる。"""
+        label = "いいね数の多い順" if sort_by == "likes" else "いいね数の少ない順"
+        return f"選定基準: 検索結果から{label}に上位 N 件を採用"
+
     def search(
         self,
         queries: list[str],

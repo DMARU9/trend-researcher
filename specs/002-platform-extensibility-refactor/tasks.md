@@ -146,7 +146,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       定義する（`env_prefix: str` / `max_search_queries: int | None` / `content_noun: str` /
       `candidates_section_title: str` / `selection_note(self, sort_by: str) -> str`）。
       docstring に「コアは値を解釈しない（差の表現のみを担う）」旨を記す。既存 13 メンバは変更しない
-- [ ] T012 [P] [US1] `src/trend_researcher/providers/x.py` にフックを実装する。
+- [X] T012 [P] [US1] `src/trend_researcher/providers/x.py` にフックを実装する。
       `env_prefix = "XTR"`、`max_search_queries = 8`、`content_noun = "ツイート"`、
       `candidates_section_title = "## 選定ツイートリスト（上位 N 件）"`、
       `selection_note(sort_by)`（`sort_by == "likes"` なら「いいね数の多い順」、それ以外は
