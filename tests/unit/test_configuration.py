@@ -18,6 +18,7 @@ from __future__ import annotations
 import pytest
 from langchain_core.runnables import RunnableConfig
 
+from trend_researcher import config as config_module
 from trend_researcher.configuration import Configuration
 
 #: 宣言された全フィールドと既定値。
@@ -30,6 +31,23 @@ DEFAULTS = {
     "cache_dir": None,
     "published_after": None,
 }
+
+
+@pytest.fixture(autouse=True)
+def isolated_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """実 `.env` と `TR_*` / `XTR_*` / `YTR_*` を遮断し、検証を決定的にする。
+
+    `load()` を検証するテストが実環境の `.env` の内容で変わると、「環境ごとに
+    結果が違う」テストになり検証として成立しない。
+    """
+    monkeypatch.setattr(config_module, "load_dotenv", lambda *args, **kwargs: None)
+    for key in ("TR_", "XTR_", "YTR_"):
+        monkeypatch.delenv(f"{key}MAX_RESULTS", raising=False)
+        monkeypatch.delenv(f"{key}TRANSCRIPT_LANG", raising=False)
+        monkeypatch.delenv(f"{key}CACHE_DIR", raising=False)
+        monkeypatch.delenv(f"{key}SORT_BY", raising=False)
+        monkeypatch.delenv(f"{key}PLATFORM", raising=False)
+        monkeypatch.delenv(f"{key}OUTPUT_FORMAT", raising=False)
 
 
 def test_defaults_cover_every_declared_field():
@@ -206,3 +224,58 @@ def test_model_dump_roundtrip():
     original = Configuration(platform="youtube", max_results=10)
 
     assert Configuration(**original.model_dump()) == original
+
+
+# --- 環境変数を読む範囲（SET-002 / SET-005）--------------------------------
+
+
+def test_load_resolves_only_the_three_settings(monkeypatch: pytest.MonkeyPatch):
+    """`load()` が環境変数から読むのは 3 項目だけ（他のフィールドは増やさない）。
+
+    Studio の入力欄は宣言から生成されるため、環境変数から読む項目が増えると
+    「宣言していないのに値が変わる」フィールドができる（SET-005）。
+    """
+    monkeypatch.setenv("TR_MAX_RESULTS", "9")
+    monkeypatch.setenv("TR_TRANSCRIPT_LANG", "en")
+    monkeypatch.setenv("XTR_CACHE_DIR", "/tmp/from-env")
+    # 宣言はあるが環境変数からは読まない項目（未定義の環境変数として無視される）
+    monkeypatch.setenv("TR_SORT_BY", "likes")
+    monkeypatch.setenv("TR_PLATFORM", "youtube")
+    monkeypatch.setenv("TR_OUTPUT_FORMAT", "json")
+
+    config = Configuration.load(env_prefix="XTR")
+
+    assert config.max_results == 9
+    assert config.transcript_language == "en"
+    assert config.cache_dir == "/tmp/from-env"
+    assert config.sort_by == "relevance"
+    assert config.platform == ""
+    assert config.output_format is None
+
+
+# --- 環境変数を読まない経路（SET-007）--------------------------------------
+
+
+def test_from_runnable_config_does_not_read_environment(monkeypatch: pytest.MonkeyPatch):
+    """`from_runnable_config` は環境変数を読まない。
+
+    ノードが受け取る値は注入された 1 経路（`configurable`）だけで決まる（FR-014）。
+    解決は呼び出し側（CLI / Studio）が `load()` で済ませておく。
+    """
+    monkeypatch.setenv("TR_MAX_RESULTS", "9")
+    monkeypatch.setenv("TR_TRANSCRIPT_LANG", "en")
+
+    config = Configuration.from_runnable_config({"configurable": {}})
+
+    assert config.max_results == 5
+    assert config.transcript_language == "ja"
+
+
+def test_explicit_values_beat_environment_after_load(monkeypatch: pytest.MonkeyPatch):
+    """`load()` の結果に明示指定を重ねると明示指定が残る（SET-006 の合成規則）。"""
+    monkeypatch.setenv("TR_MAX_RESULTS", "9")
+
+    config = Configuration.load(env_prefix="XTR").model_copy(update={"max_results": 3})
+
+    assert config.max_results == 3
+    assert "max_results" in config.model_fields_set

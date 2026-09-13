@@ -356,7 +356,7 @@ US1 の機能（走査・拡張）と golden は赤くなっていない。
 - [X] T046 [US3] `src/trend_researcher/nodes/fetch.py` から `cfg = Config.load(platform=platform)` を
       削除し、`provider.fetch_contexts(candidates, configurable)` の形へ変更する。
       `settings()` の呼び出しは provider の内部に閉じる（T045 と同じ方針）
-- [ ] T047 [US3] `src/trend_researcher/__main__.py` を `Configuration.load(env_prefix=provider.env_prefix)`
+- [X] T047 [US3] `src/trend_researcher/__main__.py` を `Configuration.load(env_prefix=provider.env_prefix)`
       の経路へ変更する（`Config` の import と `Config.load(...)` を削除）。`--cache-dir` /
       `--max-results` の明示指定は `Configuration` のフィールドとして与え、`RunnableConfig` に載せる
       （SET-006 の優先順位を維持）。**`config` を参照する残り 2 箇所も同時に置換する**:
@@ -369,7 +369,7 @@ US1 の機能（走査・拡張）と golden は赤くなっていない。
 - [ ] T049 [P] [US3] `src/trend_researcher/tools/llm.py` の環境変数解決を `resolve_env` に寄せる
       （`build_model(role, env_prefix)` の内部で `resolve_env("MODEL", default="openai:mimo-v2.5",
       env_prefix=env_prefix)` を使う）。`TR_MODEL` → `{env_prefix}_MODEL` → 既定の順を変えない
-- [ ] T050 [US3] `tests/integration/test_full_flow.py` の `Config` / `get_config` / `cache_clear` の
+- [X] T050 [US3] `tests/integration/test_full_flow.py` の `Config` / `get_config` / `cache_clear` の
       参照を `Configuration` へ追随させる（**進行・件数・出力の断言は変更しない**）。
       `tests/unit/test_configuration.py` の `DEFAULTS` から `use_trends` を除き、`load()` の解決規則の
       節を追加する
@@ -628,10 +628,33 @@ US1 / US2 のテストは緑のまま。
 - 旧「引数による上書き」の節（`Config.load(cache_dir=..., max_results=...)`）は、明示指定を `model_copy(update=...)` で与える形（明示指定 > 環境変数）へ置き換えた。`model_copy(update=...)` の値が `model_fields_set` に載ることは T039 のテストで固定した（SET-002 / SET-006）。
 - `OPENAI_*` と `model` の解決は `Config` のフィールドだったため、この節からは落ちた。SET-009 のとおり契約は `tools/llm.py` が担い、`tests/unit/test_llm.py` が検証する（T049 で `TR_MODEL` → `{env_prefix}_MODEL` を `resolve_env` へ寄せる際に期待値を確認する）。
 
+#### T047 / T050: CLI の設定経路とテストの追随（実測）
+
+| 確認項目 | コマンド / テスト | 実測 |
+|---|---|---|
+| 旧型の参照 | `grep -n 'config\.' src/trend_researcher/__main__.py` | **0 件**（grep の終了コード 1 = 一致なし）。解決済みの設定は `settings` という名前で保持する |
+| 環境変数が実行まで届く | `tests/unit/test_cli_entry.py::test_environment_variable_reaches_runnable_config` | 実装前は `5 == 9` で赤 → 緑。**同じ赤が `XTR_MAX_RESULTS` の節でも出る（`5 == 7`）** |
+| 明示指定 > 環境変数 | `tests/unit/test_cli_entry.py::test_explicit_cli_options_override_environment` | `TR_MAX_RESULTS=9` ＋ `--max-results 3` → `configurable["max_results"] == 3`。`--lang` / `--cache-dir` も同様 |
+| フルスイート | `uv run pytest -q` | **588 passed**、カバレッジ **96.48%**、**48.36 秒**（SC-010 の 60 秒以内） |
+| lint / 型 | `uv run ruff check .` / `uv run mypy --no-incremental src` | **0 件** / 26 ファイルで **0 件** |
+| 薄いモジュールのカバレッジ | `uv run pytest -q` の `__main__.py` 行 | 46% → **67%**（95 stmts / 31 miss。`test_cli_entry.py` の 6 件が `main()` / `_run_async` の配線を通すため） |
+
+- **T047**: `_run_async(args, settings: Configuration)` へ変更。CLI の明示指定は `main()` で
+  `settings.model_copy(update=...)` として与え（`model_fields_set` に載せて SET-006 / SET-007 の
+  順序を保つ）、`RunnableConfig` には**解決済みの 1 つの `Configuration`** を載せる
+  （`platform` / `output_format` / `sort_by` / `published_after` は CLI が上書き）。`--cache-dir` の
+  明示指定だけは現行と同じく実行時 CWD 基準で絶対パス化する（`Path(...).expanduser().resolve()`）。
+- **T050**: `tests/integration/test_full_flow.py` から `Config` / `get_config` / `cache_clear` を外した
+  （`get_config.cache_clear()` の 2 箇所は SET-010 により不要。**進捗・件数・出力の断言は不変**）。
+  併せて `tests/unit/test_configuration.py` に 3 件追加（`load()` が読むのは 3 項目のみ =
+  `TR_SORT_BY` / `TR_PLATFORM` / `TR_OUTPUT_FORMAT` は無視される、`from_runnable_config` は
+  環境変数を読まない、`load()` に明示指定を重ねると明示指定が残る）。
+
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |
 |---|---|---|---|
+| `TR_MAX_RESULTS` の到達範囲（FR-015） | 「設定値の優先順位（明示指定 > 環境変数 > 指示本文の自然言語 > LLM の解釈）を維持 MUST」 | 変更前の `__main__.py` はグラフへ `max_results=args.max_results or 5` を渡しており、環境変数は `config.max_results`（stderr の「要求件数」表示のみ）に効いていた。変更後は `Configuration.load()` の解決値（環境変数を含む）が `configurable` に載るため、**`--max-results` 未指定かつ `TR_MAX_RESULTS` / `XTR_MAX_RESULTS` 設定時**は解析件数がその値になる | T047 で設定を `Configuration` の 1 経路に統一した結果。FR-015 が定める順序（環境変数 > 指示本文）へ**整列する方向**であり、CLI オプションを指定したときの結果・stdout / stderr の分離・終了コード・golden は不変（golden 採取時は `TR_*` / `XTR_*` / `YTR_*` を遮断している。T004 / T050） |
 | プラットフォーム名の混入 | 15 箇所（文単位） | 走査で 16 行（`config.py` の引数既定値 1 件が集計外） | SC-002 の判定は終状態 2 行で行う（`plan.md` の「基準値のずれ」） |
 | 設定の重複項目 | 7 項目 | 3 フィールド（`max_results` / `transcript_language` / `cache_dir`）＋ 引数 `platform` 1 | SC-003 の判定は「同名項目の定義箇所が 1 つ」の終状態で行う |
 | レポート出力の一致（SC-006） | 「変更前と完全に一致」（Markdown と JSON の両方） | `render_json` は `report.model_dump_json` のため、FR-008 / FR-009 で削除する `use_trends` と `table_for` が JSON から消える | Markdown は byte 一致を維持。JSON は当該 2 キーのみ除外して比較し、**意図的な差分**として記録（RND-003 / REM-003 / REM-004） |

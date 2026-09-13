@@ -26,7 +26,7 @@ from langchain_core.messages import HumanMessage
 
 from trend_researcher import __main__ as main_module
 from trend_researcher import config as config_module
-from trend_researcher.config import Config, get_config
+from trend_researcher.configuration import Configuration
 from trend_researcher.graph import render_report, trend_researcher
 from trend_researcher.models import Candidate, Context, OutputFormat, ResearchReport
 
@@ -82,15 +82,16 @@ _YOUTUBE_RESPONSES: dict[str, str] = {
 
 
 @pytest.fixture(autouse=True)
-def _isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """実 `.env` と `TR_*` 環境変数を遮断する（FR-021: 実行環境に依存しない）。"""
+def _isolated_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """実 `.env` と `TR_*` 環境変数を遮断する（FR-021: 実行環境に依存しない）。
+
+    設定の解決は `Configuration.load()` に集約され、プロセス内キャッシュを持たない
+    （SET-010）ため、旧 `get_config.cache_clear()` は不要になった。
+    """
     monkeypatch.setattr(config_module, "load_dotenv", lambda *a, **k: None)
     for key in list(os.environ):
         if key.startswith(("TR_", "XTR_", "YTR_")):
             monkeypatch.delenv(key, raising=False)
-    get_config.cache_clear()
-    yield
-    get_config.cache_clear()
 
 
 def _candidates(platform: str, count: int) -> list[Candidate]:
@@ -534,7 +535,7 @@ def test_unwritable_cache_dir_is_recorded_and_the_run_succeeds(
 
 
 def _capture_cli_invocation(
-    monkeypatch: pytest.MonkeyPatch, argv: list[str], config: Config
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], settings: Configuration
 ) -> dict[str, Any]:
     """`_run_async` がグラフへ渡した state / config を記録する（グラフだけ差し替える）。"""
     captured: dict[str, Any] = {}
@@ -547,15 +548,21 @@ def _capture_cli_invocation(
 
     monkeypatch.setattr(main_module, "trend_researcher", _Recorder())
     args = main_module._parse_args(argv)
-    asyncio.run(main_module._run_async(args, config))
+    asyncio.run(main_module._run_async(args, settings))
     return captured
+
+
+def _settings_with_cache_dir(cache_dir: Path) -> Configuration:
+    """`--cache-dir` を明示指定したのと同じ設定を作る（SET-006 の「明示指定」）。"""
+    return Configuration.load(env_prefix="XTR").model_copy(update={"cache_dir": str(cache_dir)})
 
 
 def test_cli_wires_cache_dir_into_the_runnable_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`--cache-dir` が Configuration まで届く（`_run_async` の配線）。"""
-    config = Config.load(env_prefix="XTR", cache_dir=str(tmp_path))
     captured = _capture_cli_invocation(
-        monkeypatch, ["オタクの困りごと", "--platform", "x", "--cache-dir", str(tmp_path)], config
+        monkeypatch,
+        ["オタクの困りごと", "--platform", "x", "--cache-dir", str(tmp_path)],
+        _settings_with_cache_dir(tmp_path),
     )
 
     assert captured["config"]["configurable"]["cache_dir"] == str(tmp_path)
@@ -570,7 +577,7 @@ def test_cli_omits_max_results_from_state_when_not_given(
     常に 5 を載せると、ノード側で「明示指定」と区別できず本文の自然言語
     （「20件」）が無視される（FR-011）。
     """
-    config = Config.load(env_prefix="XTR", cache_dir=str(tmp_path))
+    config = _settings_with_cache_dir(tmp_path)
     captured = _capture_cli_invocation(monkeypatch, ["20件の動画を調べて", "--platform", "x"], config)
 
     assert "max_results" not in captured["state"]
@@ -580,7 +587,7 @@ def test_cli_passes_explicit_max_results_even_when_it_is_the_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """明示指定は既定値と同じ 5 でも state に載せる（FR-011: 明示指定が最優先）。"""
-    config = Config.load(env_prefix="XTR", cache_dir=str(tmp_path))
+    config = _settings_with_cache_dir(tmp_path)
     captured = _capture_cli_invocation(
         monkeypatch, ["20件の動画を調べて", "--platform", "x", "--max-results", "5"], config
     )

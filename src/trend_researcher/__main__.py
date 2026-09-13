@@ -12,7 +12,6 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from trend_researcher.config import Config
 from trend_researcher.configuration import Configuration
 from trend_researcher.graph import EXECUTION_TIMEOUT, render_report, trend_researcher
 from trend_researcher.models import OutputFormat
@@ -55,25 +54,28 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-async def _run_async(args: argparse.Namespace, config: Config) -> dict:
-    """非同期でリサーチを実行し、結果辞書を返す。"""
+async def _run_async(args: argparse.Namespace, settings: Configuration) -> dict:
+    """非同期でリサーチを実行し、結果辞書を返す。
+
+    `settings` は `Configuration.load()` で解決済みの実行時設定（明示指定 >
+    環境変数 > 既定）。グラフへは**この値**を `RunnableConfig` で渡す（SET-006）。
+    """
     platform = args.platform
-    lang = args.lang or config.transcript_language
     output_format = OutputFormat.JSON if args.format == "json" else OutputFormat.MARKDOWN
 
     since: datetime | None = None
     if args.since:
         since = datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=UTC)
 
-    # Configuration に設定値を反映
-    configuration = Configuration(
-        platform=platform,
-        output_format=output_format.value,
-        max_results=args.max_results or 5,
-        sort_by=args.sort,
-        transcript_language=lang,
-        cache_dir=str(config.cache_dir),
-        published_after=since.isoformat() if since else None,
+    # CLI が決める値（プラットフォーム・出力形式・選定基準・投稿日下限）を載せて
+    # グラフへ渡す。設定の解決（環境変数・既定値）は Settings 側で完了している。
+    configuration = settings.model_copy(
+        update={
+            "platform": platform,
+            "output_format": output_format.value,
+            "sort_by": args.sort,
+            "published_after": since.isoformat() if since else None,
+        }
     )
 
     runnable_config: RunnableConfig = {
@@ -112,11 +114,20 @@ def main(argv: list[str] | None = None) -> int:
     platform = args.platform
     # 登録済みプラットフォームの解決は引数検証直後に 1 回だけ行う（差は provider が持つ）
     provider = get_provider(platform)
-    config = Config.load(
-        env_prefix=provider.env_prefix,
-        cache_dir=args.cache_dir,
-        max_results=args.max_results,
-    )
+    # 実行時設定は単一の型で解決する（FR-013 / SET-002）。明示指定（CLI）は
+    # `model_copy(update=...)` で与え、`model_fields_set` に載せて環境変数より
+    # 優先させる（SET-006 / SET-007）。
+    settings = Configuration.load(env_prefix=provider.env_prefix)
+    overrides: dict[str, Any] = {}
+    if args.max_results is not None:
+        overrides["max_results"] = args.max_results
+    if args.lang is not None:
+        overrides["transcript_language"] = args.lang
+    if args.cache_dir is not None:
+        # 明示指定のパスは実行時の CWD 基準で解決する（現行の `--cache-dir` と同じ）
+        overrides["cache_dir"] = str(Path(args.cache_dir).expanduser().resolve())
+    if overrides:
+        settings = settings.model_copy(update=overrides)
 
     if args.since:
         try:
@@ -126,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     try:
-        result = asyncio.run(_run_async(args, config))
+        result = asyncio.run(_run_async(args, settings))
     except TimeoutError:
         print(
             f"[警告] リサーチが時間上限（{int(EXECUTION_TIMEOUT.total_seconds() / 60)}分）に達しました。途中結果を返します。",
@@ -152,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         rendered = render_report(report)
     else:
-        requested = report.instruction.max_results or config.max_results
+        requested = report.instruction.max_results or settings.max_results
         if len(report.candidates) < requested:
             print(
                 f"[情報] 要求件数 {requested} 件に対し、実際に見つかったのは "
