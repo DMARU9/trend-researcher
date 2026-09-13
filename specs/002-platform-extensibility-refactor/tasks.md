@@ -161,7 +161,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       **空文字・空白のみの名前は登録辞書の先頭のプラットフォームとして解決する**
       （`Configuration.platform` の既定を空文字にするため。research.md R-8 / EXT-007）。
       `available_platforms()` は現行どおり登録順のキー一覧を返す
-- [ ] T015 [US1] `src/trend_researcher/state.py` の `platform` 2 箇所（`AgentInputState` /
+- [X] T015 [US1] `src/trend_researcher/state.py` の `platform` 2 箇所（`AgentInputState` /
       `AgentState`）を `Literal["x", "youtube"]` から `str` へ変更する（FR-002）。
       `Literal` の import が不要になれば削除する
 - [ ] T016 [US1] `src/trend_researcher/models.py` の `platform` 2 箇所
