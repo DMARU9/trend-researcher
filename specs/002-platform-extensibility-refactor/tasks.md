@@ -167,7 +167,7 @@ description: "Task list for 002-platform-extensibility-refactor"
 - [X] T016 [US1] `src/trend_researcher/models.py` の `platform` 2 箇所
       （`ResearchInstruction` / `Candidate`）の既定を `"x"` から `""` へ変更する（FR-002）。
       docstring に「空文字は登録済みプラットフォームの先頭として解決される」旨を追記する
-- [ ] T017 [US1] `src/trend_researcher/configuration.py` の `platform` の既定を `"x"` から `""` へ変更し、
+- [X] T017 [US1] `src/trend_researcher/configuration.py` の `platform` の既定を `"x"` から `""` へ変更し、
       `description` を「対象プラットフォーム（未指定時は既定のプラットフォーム）」に更新する
       （FR-002。フィールドの追加・削除はしない）
 - [ ] T018 [US1] `src/trend_researcher/config.py` の `Config.load()` の引数 `platform: str = "x"` を

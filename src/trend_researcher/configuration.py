@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 class Configuration(BaseModel):
     """LangGraph Studio UI でパラメータ変更に対応する設定クラス。"""
 
-    platform: str = Field(default="x", description="対象プラットフォーム（x/youtube）")
+    platform: str = Field(
+        default="", description="対象プラットフォーム（未指定時は既定のプラットフォーム）"
+    )
     output_format: str | None = Field(default=None, description="出力形式（markdown/json）。未設定時は LLM が判断。")
     max_results: int = Field(default=5, description="解析対象件数")
     sort_by: str = Field(default="relevance", description="選定基準（relevance/likes）")
