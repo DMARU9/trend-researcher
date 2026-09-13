@@ -137,7 +137,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       `candidates_section_title` / `selection_note` が反映される」の 3 点。
       **後始末で登録を解除し、他のテストへ影響を残さない**（フィクスチャの `finally` で行う）。
       実装前はフックが存在しないため**赤**になることを確認する
-- [ ] T010 [US1] T008 / T009 が**期待どおりの理由で**赤であることを確認し、「実装メモ」節に記録する
+- [X] T010 [US1] T008 / T009 が**期待どおりの理由で**赤であることを確認し、「実装メモ」節に記録する
       （T008 は「16 行検出」、T009 は「`register_provider` が無い」または「フックが無い」）
 
 ### Implementation for User Story 1
@@ -560,6 +560,13 @@ US1 / US2 のテストは緑のまま。
 | T053 引数の使用 | 実装前は「引数が無視される」ことで赤 | （未記入） |
 | 規則 (d) の非空虚性 | `__main__.py` のヘルプに `"x"` を一時追加 → 赤 / 復元 → 緑（sha256 一致） | （未記入） |
 | 規則 (e) の非空虚性 | `providers/__init__.py` に `_ALL: list[Provider] = []` を一時追加 → 赤 / 復元 → 緑 | （未記入） |
+
+#### T010: 実装前の赤の理由（T008 / T009 実測）
+
+| テスト | 赤の理由（実測） | 期待する緑化の条件 |
+|---|---|---|
+| `test_platform_scan.py` | `test_platform_literals_are_confined_to_registry` が「計 14 件」で失敗（検出 16 行 − 許容 2 行）。`test_help_text_does_not_enumerate_platforms` が `__main__.py:32` の 1 件で失敗。`test_platform_collections_are_absent` は緑（回帰ガード） | T011〜T022 の実装後に (a)+(b) が 0 件・(d) が 0 件になる（T023） |
+| `test_platform_extension.py` | 収集時に `ImportError: cannot import name 'register_provider' from 'trend_researcher.providers'`（T014 で追加）。加えて T011 の追加フック 5 つが未定義 | T011〜T022 の実装後に 4 テストが緑になる（T026） |
 
 ### 2. 基準値のずれ（spec は変更しない）
 
