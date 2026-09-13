@@ -407,7 +407,7 @@ US1 / US2 のテストは緑のまま。
       AST 走査し、`rendering` の import・参照が 0 件であることと、
       `render_report` / `render_markdown` / `render_json` の名前が現れないことを確認する。
       実装前は**赤**になることを確認する
-- [ ] T055 [US4] T052 / T053 / T054 が期待どおり赤であることを確認し、「実装メモ」節に記録する
+- [X] T055 [US4] T052 / T053 / T054 が期待どおり赤であることを確認し、「実装メモ」節に記録する
       （T053 は「引数が無視されている」という**現行の不具合**を示す赤であることを明記する）
 
 ### Implementation for User Story 4
@@ -557,7 +557,7 @@ US1 / US2 のテストは緑のまま。
 | T024 変異探針（走査） | `graph.py` に `_PLATFORM_HINT = "x"` を追加 → 赤 / 復元 → 緑 | 赤: `test_platform_literals_are_confined_to_registry` のみ失敗（`1 failed, 2 passed`）。復元後 `3 passed`、sha256 一致、`git status` 空（T024 実測） |
 | T051 変異探針（ノードの env） | `nodes/search.py` に `os.getenv` を追加 → 赤 / 復元 → 緑 | 赤: `import os` ＋ `_probe = os.getenv("TR_MAX_RESULTS")` を一時追加すると `test_nodes_do_not_read_environment` のみ失敗（`nodes/search.py:33` を検出、`1 failed, 3 deselected`）。復元後 `1 passed`、sha256 一致、`git status` に search.py の差なし（T051 実測） |
 | T027 導出の非空虚性 | `NODE_ORDER` を差し替え → 出力が追随 | （未記入） |
-| T053 引数の使用 | 実装前は「引数が無視される」ことで赤 | （未記入） |
+| T053 引数の使用 | 実装前は「引数が無視される」ことで赤 | 赤: X のレポート ＋ YouTube の provider を渡すと `assert '## 選定動画リスト（関連度順上位 N 件）' in passed` で失敗（出力は「## 選定ツイートリスト（上位 N 件）」）。`provider = get_provider(report.instruction.platform)` が引数を上書きしている**現行の不具合**を示す赤（T055 実測） |
 | 規則 (d) の非空虚性 | `__main__.py` のヘルプに `"x"` を一時追加 → 赤 / 復元 → 緑（sha256 一致） | 赤: `test_help_text_does_not_enumerate_platforms` のみ失敗。復元後 `3 passed`、sha256 一致（T024 実測） |
 | 規則 (e) の非空虚性 | `providers/__init__.py` に `_ALL: list[Provider] = []` を一時追加 → 赤 / 復元 → 緑 | 赤: `test_platform_collections_are_absent` のみ失敗。復元後 `3 passed`、sha256 一致（T024 実測） |
 
@@ -693,6 +693,18 @@ US1 / US2 のテストは緑のまま。
 | 品質ゲート | `uv run pytest -q` / `uv run ruff check .` / `uv run mypy --no-incremental src` | **597 passed / 96.63% / 48.26 秒**、**0 件**、26 ファイルで **0 件** |
 
 - T051 の検証は **T042 の削除を適用した作業ツリー**で行った（C2 によりコミットは T065 と同一変更一式）。T069 の最終ゲートで 6-1 を**再実行**して確定させる。
+
+#### T052 / T053 / T054: 実装前の赤（T055 実測）
+
+| タスク | 赤の実測 | 赤の理由 |
+|---|---|---|
+| T052 import の切り替え | `uv run pytest tests/unit/test_rendering.py -q --no-cov` → `ModuleNotFoundError: No module named 'trend_researcher.rendering'`（collection error 1 件） | 描画の置き場所（`rendering.py`）が未作成。**T056 の作成で解消**する |
+| T053 引数の使用 | 現行 `nodes.compile_report.render_markdown` に対し `test_markdown_uses_passed_provider` のみ実行 → `assert '## 選定動画リスト（関連度順上位 N 件）' in passed` で失敗（出力は「## 選定ツイートリスト（上位 N 件）」） | 現行実装が先頭で `provider = get_provider(report.instruction.platform)` と**引数を上書き**している。すなわち引数は飾りで、レポート側のプラットフォームが常に勝つ（FR-017 / RND-007 が潰すべき**現行の不具合**） |
+| T054 骨格の無参照 | 同テストのみ実行 → `assert not (RENDERING_NAMES & referenced)` で失敗（`referenced` に `render_report` / `render_markdown` / `render_json` が出現） | `graph.py` が `nodes.compile_report` から 3 名を import し、`render_report()` を自前で定義している（FR-016 / RND-001 違反） |
+
+- 計測手順: T052 の import 切り替えで collection error になるため、T053 / T054 は**一時的に import を `nodes.compile_report` に戻した作業ツリー**で `-k "uses_passed_provider or graph_does_not"` を実行して赤を採取した（`2 failed, 7 deselected`）。復元は `cp /tmp/tr_rendering.bak` で行い、sha256 が `eb79949a689632bc32a98a2b34c6ec006011a33d5abe64540375d6773b02855e` と一致することを確認した。
+- 注記: 赤の間は `uv run ruff check .` が `I001`（import の並び）を報告する。ruff は未存在モジュールを first-party と判定できないためで、T056 で `rendering.py` が生えると解消する（T062 で確認）。
+
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |
