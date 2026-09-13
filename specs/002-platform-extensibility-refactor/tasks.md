@@ -618,6 +618,16 @@ US1 / US2 のテストは緑のまま。
 計 **6 failed, 67 passed**（対象 6 ファイル・T028 実測）。削除対象 5 件に対し断言は 6 件
 （`use_trends` を `Configuration` / `ResearchInstruction` / `AgentState` の 3 宣言で個別に固定したため）。
 
+#### T038 / T039: 実装前の赤（T040 実測）
+
+| テストファイル | 赤の理由（実測） | 緑化の条件 |
+|---|---|---|
+| `tests/unit/test_platform_scan.py` | `test_nodes_do_not_read_environment` が `AssertionError`。検出 **2 件**（`nodes/fetch.py:23` / `nodes/search.py:26` の `cfg = Config.load(env_prefix=provider.env_prefix)`）。同ファイルの既存 3 テストは緑のまま（**1 failed, 3 passed**） | T045 / T046 で `Config.load()` の呼び出しを消し、T042 で `Config` を削除すると 0 件になる |
+| `tests/unit/test_config.py` | collection error。`ImportError: cannot import name 'resolve_env' from 'trend_researcher.configuration'` | T041 の `resolve_env` / `Configuration.load()` の追加で緑 |
+
+- 旧「引数による上書き」の節（`Config.load(cache_dir=..., max_results=...)`）は、明示指定を `model_copy(update=...)` で与える形（明示指定 > 環境変数）へ置き換えた。`model_copy(update=...)` の値が `model_fields_set` に載ることは T039 のテストで固定した（SET-002 / SET-006）。
+- `OPENAI_*` と `model` の解決は `Config` のフィールドだったため、この節からは落ちた。SET-009 のとおり契約は `tools/llm.py` が担い、`tests/unit/test_llm.py` が検証する（T049 で `TR_MODEL` → `{env_prefix}_MODEL` を `resolve_env` へ寄せる際に期待値を確認する）。
+
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |
@@ -626,6 +636,7 @@ US1 / US2 のテストは緑のまま。
 | 設定の重複項目 | 7 項目 | 3 フィールド（`max_results` / `transcript_language` / `cache_dir`）＋ 引数 `platform` 1 | SC-003 の判定は「同名項目の定義箇所が 1 つ」の終状態で行う |
 | レポート出力の一致（SC-006） | 「変更前と完全に一致」（Markdown と JSON の両方） | `render_json` は `report.model_dump_json` のため、FR-008 / FR-009 で削除する `use_trends` と `table_for` が JSON から消える | Markdown は byte 一致を維持。JSON は当該 2 キーのみ除外して比較し、**意図的な差分**として記録（RND-003 / REM-003 / REM-004） |
 | `platform` の既定値（FR-007） | 既存フィールドの「型・**意味**」を変えてはならない MUST NOT | `ResearchInstruction.platform` / `Candidate.platform` の既定を `"x"` → `""` にする | FR-002 / SC-002 を満たすための必要な例外。空文字は登録の先頭（= `x`）として解決され**実行時の結果は同一**（`plan.md` の「設計上の解釈」）。golden は既定に依存させない（T004） |
+| 数値でない `TR_MAX_RESULTS`（SET-011） | 「既定値 5（例外にしない。現行と同じ）」 | 現行実装は `int()` で `ValueError: invalid literal for int()` になる（既存テスト `test_non_integer_numeric_setting_raises` が固定） | T039 の指示「期待値は変更前と同一」に従い**例外を維持**する（挙動を変えない）。SET-011 の記述を根拠に黙って既定へ落とすと既存テストと矛盾する |
 
 ### 3. golden の決定論（T007）
 
