@@ -451,7 +451,7 @@ US1 / US2 のテストは緑のまま。
 
 **Purpose**: 仕様・文書・ゲートの最終確認。
 
-- [ ] T063 [P] `README.md` を更新する。`--trends` の記載を削除し、環境変数を `TR_*`（共通）/
+- [X] T063 [P] `README.md` を更新する。`--trends` の記載を削除し、環境変数を `TR_*`（共通）/
       `XTR_*`（X 固有）/ `YTR_*`（YouTube 固有）の 3 群で整理する。`--platform` の説明は変更しない
 - [ ] T064 [P] `specs/002-platform-extensibility-refactor/quickstart.md` の手順 1〜7 を通しで実行し、
       各手順の実測値を「実装メモ」節に記録する（とくに手順 2 の検出 2 行、手順 3 の完走、
