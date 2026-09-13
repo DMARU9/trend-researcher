@@ -10,9 +10,29 @@ from trend_researcher.models import Candidate, Context
 
 
 class Provider(Protocol):
-    """プラットフォームごとの検索・取得・レンダリング差を吸収するインターフェース。"""
+    """プラットフォームごとの検索・取得・レンダリング差を吸収するインターフェース。
+
+    コア（`nodes/` / `graph.py` / `__main__.py`）はここに載る値を**解釈しない**。
+    文字列・数値はそのまま出力や設定の解決に使われ、差の表現（文面・件数上限・
+    環境変数の接頭辞）は provider 側がすべて担う。新しいプラットフォームは
+    `register_provider()` で登録するだけでよい（コアの変更は不要。FR-002）。
+    """
 
     name: str  # "x" | "youtube"
+
+    # --- コアへ渡す差の表現（コアは値を解釈せず、そのまま出力に載せる） ---
+    #: 環境変数の接頭辞（`{env_prefix}_MODEL` / `{env_prefix}_*`）。`Config.load` に渡す。
+    env_prefix: str
+    #: 検索クエリ数の上限。`None` は無制限（単一クエリ設計のプラットフォーム用）。
+    max_search_queries: int | None
+    #: 検索 0 件時の文面に使う名詞（「該当する<content_noun>が見つかりませんでした」）。
+    content_noun: str
+    #: 選定リストの見出し行（`render_markdown` がそのまま使う）。
+    candidates_section_title: str
+
+    def selection_note(self, sort_by: str) -> str:
+        """選定基準の注記（`sort_by` を解釈してよいのは provider 側だけ）。"""
+        ...
 
     # --- 検索 ---
     def search(

@@ -142,7 +142,7 @@ description: "Task list for 002-platform-extensibility-refactor"
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] `src/trend_researcher/providers/base.py` の `Provider` Protocol に追加フック 5 つを
+- [X] T011 [US1] `src/trend_researcher/providers/base.py` の `Provider` Protocol に追加フック 5 つを
       定義する（`env_prefix: str` / `max_search_queries: int | None` / `content_noun: str` /
       `candidates_section_title: str` / `selection_note(self, sort_by: str) -> str`）。
       docstring に「コアは値を解釈しない（差の表現のみを担う）」旨を記す。既存 13 メンバは変更しない
