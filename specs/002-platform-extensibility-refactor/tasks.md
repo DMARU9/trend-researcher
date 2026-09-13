@@ -181,7 +181,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       （`XTR_MODEL` / `YTR_MODEL` の直列を排除）。呼び出し側
       （`nodes/parse_instruction.py` / `nodes/plan_search.py` / `nodes/analyze_content.py` /
       `nodes/extract_common.py`）で `provider.env_prefix` を渡すようにする
-- [ ] T020 [US1] `src/trend_researcher/nodes/plan_search.py` の
+- [X] T020 [US1] `src/trend_researcher/nodes/plan_search.py` の
       `platform = (instruction.platform or "x").lower()` と
       `if platform == "x" and len(queries) > 8:` を、`provider.max_search_queries` による上限適用へ
       置き換える（`None` は無制限）。既存コメント（X のみ適用・YouTube は単一クエリ）を残しつつ、
