@@ -216,7 +216,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       `tests/unit/test_plan_search.py`（上限が provider 由来になったこと）、
       `tests/unit/test_compile_report.py`（出力文字列が不変であること）。
       追随で消える網羅があれば、同等の入力を残して補う
-- [ ] T026 [US1] `uv run pytest -q` を実行して全件緑を確認する。併せて `quickstart.md` 手順 3 の
+- [X] T026 [US1] `uv run pytest -q` を実行して全件緑を確認する。併せて `quickstart.md` 手順 3 の
       diff 確認（コアに追加の差分が出ていないこと）を行い、走査・拡張の 2 テストと既存 2
       プラットフォームのテストが同時に緑であることを確認する（SC-001 / FR-006）
 
@@ -592,6 +592,17 @@ US1 / US2 のテストは緑のまま。
 
 - 実測値: `tests/unit/test_config.py` 30 passed / スイート全体 **567 passed**（47 秒）/ `ruff check .` 0 / `mypy --no-incremental src` 0（26 files）。
 - 注記: `nodes/search.py` / `nodes/fetch.py` の `Config.load(env_prefix=provider.env_prefix)` の配線は、境界がフェイクのため既存テストでは観測できない。この経路の網羅は T051（ノードの env 読みの変異探針）で行う。
+
+#### T026: US1 の受け入れ確認（実測）
+
+| 確認 | コマンド | 実測 |
+|---|---|---|
+| フルスイート（カバレッジ込み・実行時間の判定コマンド） | `uv run pytest -q` | **567 passed**、カバレッジ **95.24%**（`fail_under = 90` を満たす）、**48.79 秒**（上限 60 秒以内・SC-010） |
+| 走査＋拡張の 2 テスト | `uv run pytest tests/unit/test_platform_scan.py tests/unit/test_platform_extension.py -q` | **7 passed**（走査 3 / 拡張 4）。既存 X / YouTube のテストと**同時に**緑 |
+| 手順 3 の diff 確認 | `git diff --name-only -- src/trend_researcher/graph.py src/trend_researcher/state.py src/trend_researcher/models.py src/trend_researcher/configuration.py src/trend_researcher/nodes/ src/trend_researcher/rendering.py` | **0 ファイル**（出力なし）。試験用プラットフォームの追加はテスト内の登録だけで完結し、コアに追加編集が発生していない（SC-001） |
+
+- 進捗行 7 行（各ノード `開始` / `完了`）とレポート本文の不変は、`tests/integration/test_full_flow.py` の進捗断言と `tests/unit/test_rendering.py` の golden 比較（byte 一致）が同時に緑であることで担保した。
+- 基準値（手順 1）との差: 547 → **567 passed**（+20 は T008 / T009 の 7 件と T025 の追加 13 件）、カバレッジ 95.29% → **95.24%**（新規テストで分母も増えたため。ゲートは 90%）。
 
 ### 2. 基準値のずれ（spec は変更しない）
 
