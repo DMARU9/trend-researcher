@@ -1,0 +1,110 @@
+{
+  "instruction": {
+    "raw_text": "AI 動向 について調べて",
+    "platform": "x",
+    "topic": "AI 動向",
+    "max_results": 2,
+    "output": {
+      "format": "markdown",
+      "table_for": [
+        "common_points"
+      ]
+    },
+    "use_trends": false,
+    "sort_by": "likes",
+    "transcript_language": "ja"
+  },
+  "generated_at": "2026-01-01T00:00:00Z",
+  "candidates": [
+    {
+      "platform": "x",
+      "id": "t1",
+      "title": "",
+      "text": "本文1です。2行目のテキスト。",
+      "url": "https://example.test/x/1",
+      "author_handle": "user1",
+      "author_name": "ユーザー1",
+      "author_followers": 100,
+      "channel_id": "",
+      "published_at": "2026-01-01T09:00:00Z",
+      "like_count": 10,
+      "retweet_count": 2,
+      "quote_count": 1,
+      "relevance_rank": 1
+    },
+    {
+      "platform": "x",
+      "id": "t2",
+      "title": "",
+      "text": "本文2です。2行目のテキスト。",
+      "url": "https://example.test/x/2",
+      "author_handle": "user2",
+      "author_name": "ユーザー2",
+      "author_followers": 200,
+      "channel_id": "",
+      "published_at": "2026-01-02T09:00:00Z",
+      "relevance_rank": 2
+    }
+  ],
+  "analyses": [
+    {
+      "id": "t1",
+      "title": "タイトル1",
+      "summary": "要約1",
+      "angles": [
+        {
+          "angle": "切り口A",
+          "value": "価値A",
+          "key_phrase": "フレーズA"
+        },
+        {
+          "angle": "切り口B",
+          "value": "価値B",
+          "key_phrase": "フレーズB"
+        }
+      ],
+      "key_points": [
+        "要点1"
+      ],
+      "evidence": [
+        "引用1",
+        "引用2"
+      ]
+    },
+    {
+      "id": "t2",
+      "title": "",
+      "summary": "要約2",
+      "angles": [],
+      "key_points": [],
+      "evidence": []
+    }
+  ],
+  "common_themes": [
+    {
+      "theme": "テーマA",
+      "description": "説明A",
+      "supporting_ids": [
+        "t1",
+        "t2"
+      ],
+      "example_quotes": [
+        "引用A"
+      ]
+    },
+    {
+      "theme": "テーマB",
+      "description": "説明B",
+      "supporting_ids": [],
+      "example_quotes": []
+    }
+  ],
+  "sources": [
+    "https://example.test/x/1",
+    "https://example.test/x/2"
+  ],
+  "notes": [
+    "投稿日フィルタ: 2026-01-05 以降に公開された投稿を対象",
+    "選定基準: 検索結果からいいね数の多い順に上位 N 件を採用"
+  ]
+}

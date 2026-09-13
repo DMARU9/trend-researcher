@@ -1,0 +1,91 @@
+{
+  "instruction": {
+    "raw_text": "Python 入門 について調べて",
+    "platform": "youtube",
+    "topic": "Python 入門",
+    "max_results": 2,
+    "output": {
+      "format": "markdown",
+      "table_for": [
+        "common_points"
+      ]
+    },
+    "use_trends": false,
+    "sort_by": "relevance",
+    "transcript_language": "ja"
+  },
+  "generated_at": "2026-01-01T00:00:00Z",
+  "candidates": [
+    {
+      "platform": "youtube",
+      "id": "v1",
+      "title": "動画1のタイトル",
+      "text": "",
+      "url": "https://example.test/youtube/1",
+      "author_handle": "",
+      "author_name": "チャンネル1",
+      "channel_id": "channel1",
+      "published_at": "2026-01-01T09:00:00Z",
+      "view_count": 1000,
+      "relevance_rank": 1
+    },
+    {
+      "platform": "youtube",
+      "id": "v2",
+      "title": "動画2のタイトル",
+      "text": "",
+      "url": "https://example.test/youtube/2",
+      "author_handle": "",
+      "author_name": "チャンネル2",
+      "channel_id": "channel2",
+      "published_at": "2026-01-02T09:00:00Z",
+      "relevance_rank": 2
+    }
+  ],
+  "analyses": [
+    {
+      "id": "v1",
+      "title": "動画1のタイトル",
+      "summary": "要約1",
+      "angles": [
+        {
+          "angle": "切り口A",
+          "value": "価値A",
+          "key_phrase": "フレーズA"
+        }
+      ],
+      "key_points": [],
+      "evidence": [
+        "引用1"
+      ]
+    },
+    {
+      "id": "v2",
+      "title": "動画2のタイトル",
+      "summary": "要約2",
+      "angles": [],
+      "key_points": [],
+      "evidence": []
+    }
+  ],
+  "common_themes": [
+    {
+      "theme": "テーマA",
+      "description": "説明A",
+      "supporting_ids": [
+        "v1"
+      ],
+      "example_quotes": [
+        "引用A"
+      ]
+    }
+  ],
+  "sources": [
+    "https://example.test/youtube/1",
+    "https://example.test/youtube/2"
+  ],
+  "notes": [
+    "投稿日フィルタ: 2026-01-05 以降に公開された投稿を対象",
+    "選定基準: 検索結果の関連度順に上位 N 件を採用"
+  ]
+}

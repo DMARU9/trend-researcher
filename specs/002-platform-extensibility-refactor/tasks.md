@@ -83,7 +83,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       **変更前の所在である `from trend_researcher.nodes.compile_report import render_json, render_markdown`
       を import する**（US4 の T052 で `trend_researcher.rendering` へ切り替える）。
       このタスクは T004 と T006 の後に行い、golden が無い状態では赤になることを確認する
-- [ ] T006 `quickstart.md` の手順 4-1 のコマンドを実行し、**変更前のツリー**から
+- [X] T006 `quickstart.md` の手順 4-1 のコマンドを実行し、**変更前のツリー**から
       `tests/unit/golden/` の 6 ファイル（3 入力 × md/json）を採取する。採取後、`uv run pytest
       tests/unit/test_rendering.py -q` が緑になることを確認する
 - [ ] T007 決定論を確認する。T006 の採取をもう一度実行して `git status --short tests/unit/golden/`
