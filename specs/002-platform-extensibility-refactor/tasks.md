@@ -47,7 +47,7 @@ description: "Task list for 002-platform-extensibility-refactor"
 
 **Purpose**: 変更前の安全網を確定する。コードは変更しない。
 
-- [ ] T001 `plan.md` の「基準値のずれ」と Constitution Check に記録した基準値（547 passed /
+- [X] T001 `plan.md` の「基準値のずれ」と Constitution Check に記録した基準値（547 passed /
       カバレッジ 95.29% / `ruff` 0 件 / `mypy` 0 件 / 49.67 秒）を、ブランチ
       `002-platform-extensibility-refactor` の作業ツリーで `uv run pytest -q`、
       `uv run ruff check .`、`uv run mypy src` により再現し、作業ツリーが clean であることを
@@ -498,6 +498,29 @@ US1 / US2 のテストは緑のまま。
 ## 実装メモ（実装中に記録する）
 
 実装者はこの節に実測値を記入する（未記入のまま完了としない）。
+
+### 0. 基準値（T001〜T003）
+
+| 項目 | 実測（2026-09-13、ブランチ `specs/002-platform-extensibility-refactor`） |
+|---|---|
+| `uv run pytest -q` | **547 passed / カバレッジ 95.29% / 49.79 秒**（`fail_under = 90` を満たす） |
+| `uv run ruff check .` | `All checks passed!`（0 件） |
+| `uv run mypy src` | `Success: no issues found in 26 source files` |
+| `git status --short` | 空（作業ツリー clean） |
+| 遅いテスト上位（T002） | `--no-cov --durations=15` の実測は下欄「T002」に記載 |
+| オフライン制約（T003） | 認証情報を外しても 547 passed（下欄「T003」に記載） |
+
+#### T002: 遅いテスト上位 15 件（`uv run pytest -q --no-cov --durations=15`）
+
+```
+（実行結果を記入）
+```
+
+#### T003: オフライン制約（`env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB uv run pytest -q --no-cov`）
+
+```
+（実行結果を記入）
+```
 
 ### 1. 検出と変異探針の結果
 
