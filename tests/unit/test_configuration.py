@@ -27,7 +27,6 @@ DEFAULTS = {
     "max_results": 5,
     "sort_by": "relevance",
     "transcript_language": "ja",
-    "use_trends": False,
     "cache_dir": None,
     "published_after": None,
 }
@@ -45,6 +44,11 @@ def test_defaults_cover_every_declared_field():
     assert {key: getattr(config, key) for key in DEFAULTS} == DEFAULTS
 
 
+def test_use_trends_is_not_declared():
+    """`use_trends` は宣言されていない（FR-009 / REM-003）。"""
+    assert "use_trends" not in Configuration.model_fields
+
+
 def test_custom_values_are_preserved():
     """明示した値はそのまま保持される。"""
     config = Configuration(
@@ -53,7 +57,6 @@ def test_custom_values_are_preserved():
         max_results=10,
         sort_by="likes",
         transcript_language="en",
-        use_trends=True,
         cache_dir="/tmp/cache",
         published_after="2025-01-01",
     )
@@ -63,7 +66,6 @@ def test_custom_values_are_preserved():
     assert config.max_results == 10
     assert config.sort_by == "likes"
     assert config.transcript_language == "en"
-    assert config.use_trends is True
     assert config.cache_dir == "/tmp/cache"
     assert config.published_after == "2025-01-01"
 
@@ -96,7 +98,6 @@ def test_from_runnable_config_uses_configurable_values():
             "max_results": 10,
             "sort_by": "likes",
             "transcript_language": "en",
-            "use_trends": True,
             "cache_dir": "/tmp/cache",
             "published_after": "2025-01-01",
         }
@@ -110,7 +111,6 @@ def test_from_runnable_config_uses_configurable_values():
         "max_results": 10,
         "sort_by": "likes",
         "transcript_language": "en",
-        "use_trends": True,
         "cache_dir": "/tmp/cache",
         "published_after": "2025-01-01",
     }
@@ -144,15 +144,15 @@ def test_from_runnable_config_with_none():
     ("key", "value"),
     [
         pytest.param("max_results", 0, id="zero"),
-        pytest.param("use_trends", False, id="false"),
+        pytest.param("published_after", "", id="empty-string"),
         pytest.param("cache_dir", "", id="empty-string-list"),
     ],
 )
 def test_falsy_values_are_treated_as_specified(key: str, value: object) -> None:
-    """`0` / `False` / 空文字は「指定」として扱う。
+    """`0` / 空文字は「指定」として扱う。
 
     フィルタを `if v is not None` ではなく `if v` にすると、これらの指定が
-    無言で既定値に戻る（`use_trends=False` が `False` のままなのは偶然一致）。
+    無言で既定値に戻る。
     """
     config = Configuration.from_runnable_config({"configurable": {key: value}})
 

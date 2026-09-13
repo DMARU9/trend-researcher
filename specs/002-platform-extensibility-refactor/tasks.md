@@ -235,21 +235,21 @@ description: "Task list for 002-platform-extensibility-refactor"
 
 ### Tests for User Story 2（憲法 原則 I により必須）⚠️
 
-- [ ] T027 [P] [US2] `tests/unit/test_progress.py` を新しい形へ書き換える。検証内容:
+- [X] T027 [P] [US2] `tests/unit/test_progress.py` を新しい形へ書き換える。検証内容:
       (a) `emit(node_name, phase, detail)` の 1 引数化に伴い、表示番号が
       `NODE_ORDER.index(node_name) + 1`、総数が `len(NODE_ORDER)` になること、
       (b) 進捗行の書式 `[i/total] name ... phase（detail）` が現行と一致すること、
       (c) 未登録のノード名は `ValueError` になること、
       (d) **導出の非空虚性**: `monkeypatch.setattr(progress, "NODE_ORDER", [...])` で順序・件数を
       変えると出力が追随すること（手書きの番号に戻したら落ちるテストにする）
-- [ ] T028 [US2] 削除対象の不在を固定する。既存テストに次の断言を追加する:
+- [X] T028 [US2] 削除対象の不在を固定する。既存テストに次の断言を追加する:
       `tests/unit/test_cache.py`（`hasattr(cache, "read_json")` が偽）、
       `tests/unit/test_models.py`（`OutputSpec` に `table_for` が無い）、
       `tests/unit/test_x_search.py`（`hasattr(x_search, "fetch_thread")` が偽）、
       `tests/unit/test_providers.py` または `tests/unit/test_parse_instruction.py`
       （`Configuration.model_fields` / `ResearchInstruction.model_fields` / `AgentState.__annotations__`
       に `use_trends` が無い）。実装前は赤になることを確認する
-- [ ] T029 [US2] T027 / T028 が期待どおり赤であることを確認し、「実装メモ」節に記録する
+- [X] T029 [US2] T027 / T028 が期待どおり赤であることを確認し、「実装メモ」節に記録する
 
 ### Implementation for User Story 2
 
@@ -603,6 +603,20 @@ US1 / US2 のテストは緑のまま。
 
 - 進捗行 7 行（各ノード `開始` / `完了`）とレポート本文の不変は、`tests/integration/test_full_flow.py` の進捗断言と `tests/unit/test_rendering.py` の golden 比較（byte 一致）が同時に緑であることで担保した。
 - 基準値（手順 1）との差: 547 → **567 passed**（+20 は T008 / T009 の 7 件と T025 の追加 13 件）、カバレッジ 95.29% → **95.24%**（新規テストで分母も増えたため。ゲートは 90%）。
+
+#### T027 / T028: 実装前の赤（T029 実測）
+
+| テストファイル | 赤の理由（実測） | 期待する緑化の条件 |
+|---|---|---|
+| `tests/unit/test_progress.py` | 旧シグネチャ `emit(node_index, node_name, phase, detail)` のため `TypeError: ProgressEmitter.emit() missing 1 required positional argument: 'phase'`（8 件）。加えて `test_total_is_not_duplicated_as_a_class_constant` は `ProgressEmitter.TOTAL` が実在するため失敗、`test_emit_derives_the_index_from_node_order` / `test_emitted_index_follows_the_current_node_order` / `test_emit_rejects_unknown_node_name` も同名の `TypeError`。→ **11 failed, 2 passed**（T027 実測） | T035（`emit(node_name, phase, detail)` 化＋`TOTAL` 削除）と T036（呼び出し側の数値引数削除）で緑 |
+| `tests/unit/test_cache.py` | `test_read_json_is_removed` が `AssertionError`（`hasattr(cache, "read_json")` が真） | T030 の削除で緑（**T037 で赤になる節の削除も完了**） |
+| `tests/unit/test_models.py` | `test_output_spec_has_no_table_for` / `test_research_instruction_has_no_use_trends` が `AssertionError` | T033 / T032 の削除で緑 |
+| `tests/unit/test_x_search.py` | `test_fetch_thread_is_removed` が `AssertionError`（`hasattr(x_search, "fetch_thread")` が真）。**収集時に `ImportError` にはならない**（`from trend_researcher.tools import x_search` に変更したため） | T034 の削除で緑（11 件の `fetch_thread` テストは T034 で `fetch_threads` の 1 件経路へ移した） |
+| `tests/unit/test_configuration.py` | `test_use_trends_is_not_declared` が `AssertionError` | T032 の削除で緑 |
+| `tests/unit/test_parse_instruction.py` | `test_use_trends_is_not_in_the_state_declarations` が `AssertionError`（`AgentState.__annotations__` に `use_trends` が実在） | T032 の削除で緑 |
+
+計 **6 failed, 67 passed**（対象 6 ファイル・T028 実測）。削除対象 5 件に対し断言は 6 件
+（`use_trends` を `Configuration` / `ResearchInstruction` / `AgentState` の 3 宣言で個別に固定したため）。
 
 ### 2. 基準値のずれ（spec は変更しない）
 
