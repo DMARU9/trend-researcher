@@ -5,7 +5,7 @@ LangGraph の `RunnableConfig`（Studio UI / `__main__.py` が組み立てる
 `Configuration.from_runnable_config(config)` で毎回読むため、パイプライン全体の
 既定値の出所になる。ここでは次を固定する。
 
-1. 宣言されたフィールドと既定値（`published_after` を含む 8 件）
+1. 宣言されたフィールドと既定値（`published_after` を含む 7 件。`use_trends` は T032 で削除済み）
 2. `configurable` に指定された値がそのまま採用されること
 3. 指定のない値・明示的な `None` は既定値へフォールバックすること
 4. `configurable` 以外のキー・未知のキーがあっても例外にしないこと

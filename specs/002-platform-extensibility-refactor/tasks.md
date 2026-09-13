@@ -895,6 +895,20 @@ US1 / US2 のテストは緑のまま。
 - 復元後は毎回フルスイートを再実行して確認した（`600 passed / 96.63% / 46.51 秒`。探針1 の前は 599 passed、
   テストを 1 件追加して 600 件になった）。
 
+#### T074: `test_configuration.py` の件数の記述（実測）
+
+| 論点 | 修正前 | 実測 | 修正後 |
+|---|---|---|---|
+| module docstring 1 項 | 「宣言されたフィールドと既定値（`published_after` を含む **8 件**）」 | `len(Configuration.model_fields)` = **7**（`platform` / `output_format` / `max_results` / `sort_by` / `transcript_language` / `cache_dir` / `published_after`）。`DEFAULTS` も 7 キー | 「`published_after` を含む **7 件**。`use_trends` は T032 で削除済み」 |
+
+- 件数はテストで自動照合されない（`assert set(config.model_dump()) == set(DEFAULTS)` は `DEFAULTS` と
+  実装の一致を見るが、docstring の数字は見ない）ため、記述のずれは静かに残る。`DEFAULTS` の `use_trends`
+  削除（`### 4. 更新・削除したテスト` の `test_configuration.py` 行）に docstring だけが追随していなかった。
+- 「8」は変更前のフィールド数として `data-model.md:76`（「既存 8 フィールドのうち 1 つを削除し、7 フィールドに
+  なる」）と整合する。ずれていたのは本 docstring のみ（`grep -rn "8 件" tests/unit/test_configuration.py` → 0 件）。
+- 挙動に影響しない文書修正のため、テストの追加・変更はしていない（`tests/unit/test_configuration.py` は
+  **22 passed** のまま）。
+
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |
@@ -1118,7 +1132,7 @@ Task: "Implement hooks in src/trend_researcher/providers/youtube.py"
       T008 が要求した「正規表現は `get_provider(name).env_prefix` から動的に組み立てる」が成立する。暫定表を
       削除し、`env_prefix` を解決できない provider が現れた場合は走査側が明示的に失敗して規則 (b) の対象から
       黙って外れないようにする。削除後に走査テスト・`tests/unit/test_providers.py` が緑であることを確認する）
-- [ ] T074 `tests/unit/test_configuration.py` の件数の記述を実態に合わせる per FR-019 (partial)
+- [X] T074 `tests/unit/test_configuration.py` の件数の記述を実態に合わせる per FR-019 (partial)
       （実測: module docstring の「1. 宣言されたフィールドと既定値（`published_after` を含む **8 件**）」に対し、
       `DEFAULTS` は 7 キー（`use_trends` は T032 で削除済み）。挙動には影響しないが、内部構造の更新に追随して
       いない記述であり、`## 実装メモ` の「4. 更新・削除したテスト」に記録した更新内容（`DEFAULTS` から
