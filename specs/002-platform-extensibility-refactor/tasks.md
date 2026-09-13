@@ -453,7 +453,7 @@ US1 / US2 のテストは緑のまま。
 
 - [X] T063 [P] `README.md` を更新する。`--trends` の記載を削除し、環境変数を `TR_*`（共通）/
       `XTR_*`（X 固有）/ `YTR_*`（YouTube 固有）の 3 群で整理する。`--platform` の説明は変更しない
-- [ ] T064 [P] `specs/002-platform-extensibility-refactor/quickstart.md` の手順 1〜7 を通しで実行し、
+- [X] T064 [P] `specs/002-platform-extensibility-refactor/quickstart.md` の手順 1〜7 を通しで実行し、
       各手順の実測値を「実装メモ」節に記録する（とくに手順 2 の検出 2 行、手順 3 の完走、
       手順 4 の byte 一致、手順 7 の 3 ゲートと実行時間）
 - [ ] T065 憲法の文言を PATCH 改正する（research.md R-12 / plan.md の Constitution Check に
@@ -717,11 +717,47 @@ US1 / US2 のテストは緑のまま。
 - 移設の内訳: `test_rendering.py` 26 件（golden 6 ＋ 新規 2 ＋ 旧 `test_compile_report.py` から 18 件）／`test_compile_report.py` 20 件。
 - **T053 は実装前の赤（引数の無視）→ 実装後は緑**であることを同じテストで確認した（golden は変更していないため、`render_markdown` が provider を引数で受けるようになっても出力文字列は 1 文字も変わらないことが byte 比較で担保される）。
 
+#### T063: README の更新（実測）
+
+| 確認 | コマンド | 実測 |
+|---|---|---|
+| `--trends` の記載 | `grep -c -- '--trends' README.md` | **0**（削除対象の記載は README に元から存在しなかった。§4 の「`test_cli_contract.py` に該当節なし」と同じ状態） |
+| 環境変数の 3 群 | — | `TR_MODEL` / `TR_MAX_RESULTS` / `TR_TRANSCRIPT_LANG` / `TR_CACHE_DIR`（共通）、`XTR_ACCOUNTS_DB` / `XTR_SEARCH_POOL_SIZE` / `XTR_MAX_RETRIES`（X 固有）、`YTR_TRANSCRIPT_LANG`（YouTube 固有）、`OPENAI_API_KEY` / `OPENAI_BASE_URL`（LLM 接続）を表で追加。解決順序は `contracts/settings-contract.md` の SET-006 どおり **明示指定 > `TR_*` > `{env_prefix}_*` > 既定値** |
+| `--platform` の説明 | — | 変更なし（FR-021 / FR-027） |
+
+#### T064: quickstart 手順 1〜7 の通し実行（実測）
+
+| 手順 | コマンド | 実測 |
+|---|---|---|
+| 1 | `uv run pytest -q` | **598 passed / 96.63% / 49.15 秒**（基準 547 / 95.29% / 49.67 秒。SC-010 の 60 秒以内） |
+| 1 | `uv run pytest -q --no-cov --durations=15` | **598 passed / 49.20 秒**。最遅は `test_cli_contract.py::test_cli_002_07_output_matches_stdout_rendering` **1.78 秒**（上位 15 件はすべて `test_cli_contract.py`） |
+| 1 | `uv run ruff check .` | **All checks passed!** |
+| 1 | `uv run mypy src` | **Success: no issues found in 27 source files**（26 → **27**。`rendering.py` の追加ぶん。§2 の「mypy の対象ファイル数」に記録） |
+| 2 | `uv run pytest tests/unit/test_platform_scan.py -q` | **4 passed**。規則 (a)+(b) の検出は **2 行**（`providers/__init__.py` の `"x": XProvider,` / `"youtube": YouTubeProvider,`）で**違反 0 件**、規則 (c) / (d) / (e) は **0 件**（走査関数を直接呼んで計数） |
+| 3 | `uv run pytest tests/unit/test_platform_extension.py -q` | **4 passed**（コアを編集せず試験用プラットフォームが完走） |
+| 3 | `git diff --name-only -- <コア 6 パス>` | 実行の**前後で同一**（`nodes/{analyze_content,compile_report,extract_common,parse_instruction,plan_search}.py` の 5 件）。**新たな差分は 0**。この 5 件は T035 / T036 の未コミット変更（C1 により T065 と同一変更一式で入る）で、手順 3 が生んだものではない |
+| 4 | `uv run pytest tests/unit/test_rendering.py -q` | **26 passed**。golden 3 件は Markdown 完全一致 / JSON は 2 キー除外で一致。サブセット実行のため `FAIL Required test coverage of 90.0% not reached (43.37%)` の行が出る（判定は全体実行で行う） |
+| 5 | `uv run pytest tests/integration/test_cli_contract.py -q` | **54 passed**（`--help` の終了コード / 未登録 `--platform` / 7 行の進捗 / stdout と stderr の分離 / 削除した `--trends` の不受理を含む） |
+| 5 | `uv run python -m trend_researcher --help \| grep -c -- "--trends"` | **0** |
+| 5 | `uv run python -m trend_researcher --platform bogus > /dev/null; echo $?` | **exit=2**（stdout は空） |
+| 6-1 | `grep -rn "class Config\b\|def get_config\|Config\.load" src/ --include=*.py` | **OK: 0 件**（`--include=*.py` 必須。付けないと `__pycache__` の古い bytecode が `binary file matches` を返す） |
+| 6-2 | `uv run pytest tests/unit/test_platform_scan.py -q -k "nodes_do_not_read"` | **1 passed, 3 deselected** |
+| 6-3 | `uv run pytest tests/unit/test_config.py tests/unit/test_configuration.py -q` | **54 passed** |
+| 6 | `grep -rn "XTR_\|YTR_" src/ --include=*.py \| grep -v providers/ \| grep -v tools/` | **OK: 固有設定は provider / tools のみ** |
+| 7 | `uv run pytest -q` / `uv run ruff check .` / `uv run mypy src` | 上記 1 と同じ（598 / 96.63% / 49.15 秒、0 件、27 ファイルで 0 件） |
+| 7 | `git diff -- pyproject.toml` | **空**（`[project].dependencies` / `optional-dependencies` に差分なし。FR-024） |
+| 7 | `env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB uv run pytest -q --no-cov` | **598 passed / 47.68 秒**（認証情報なし・オフラインで完走。FR-023） |
+
+- 手順 2 の非空虚性（探針 → 赤 → 復元）は T024 で実施済み（§1 の `T024 変異探針（走査）` 行）。手順 4 の golden 採取は T006 で実施済み（§3）。
+- 表の「基準」は手順 1 の期待値（`quickstart.md` に記載の 2026-09-13 の値）。テスト件数は 547 → **598**、カバレッジは 95.29% → **96.63%**、実行時間は 49.67 秒 → **49.15 秒**。
+
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |
 |---|---|---|---|
 | `TR_MAX_RESULTS` の到達範囲（FR-015） | 「設定値の優先順位（明示指定 > 環境変数 > 指示本文の自然言語 > LLM の解釈）を維持 MUST」 | 変更前の `__main__.py` はグラフへ `max_results=args.max_results or 5` を渡しており、環境変数は `config.max_results`（stderr の「要求件数」表示のみ）に効いていた。変更後は `Configuration.load()` の解決値（環境変数を含む）が `configurable` に載るため、**`--max-results` 未指定かつ `TR_MAX_RESULTS` / `XTR_MAX_RESULTS` 設定時**は解析件数がその値になる | T047 で設定を `Configuration` の 1 経路に統一した結果。FR-015 が定める順序（環境変数 > 指示本文）へ**整列する方向**であり、CLI オプションを指定したときの結果・stdout / stderr の分離・終了コード・golden は不変（golden 採取時は `TR_*` / `XTR_*` / `YTR_*` を遮断している。T004 / T050） |
+| mypy の対象ファイル数 | plan.md / quickstart.md は `26 source files` | `rendering.py` の追加で **27 source files**（T064 実測） | 判定条件（0 件）は不変。数を固定している記述は spec ではなく実行時の出力であるため、ここに差分として記録する |
+| テスト件数・カバレッジ・実行時間（SC-010） | 基準 547 passed / 95.29% / 49.67 秒 | 598 passed / **96.63%** / **49.15 秒**（T064 実測。60 秒以内） | 追加 51 件（US1〜US4 の新規テスト）に対して増加は 1.34 ポイント、時間はむしろ短縮。判定は `uv run pytest -q`（カバレッジ込み）で行う |
 | プラットフォーム名の混入 | 15 箇所（文単位） | 走査で 16 行（`config.py` の引数既定値 1 件が集計外） | SC-002 の判定は終状態 2 行で行う（`plan.md` の「基準値のずれ」） |
 | 設定の重複項目 | 7 項目 | 3 フィールド（`max_results` / `transcript_language` / `cache_dir`）＋ 引数 `platform` 1 | SC-003 の判定は「同名項目の定義箇所が 1 つ」の終状態で行う |
 | レポート出力の一致（SC-006） | 「変更前と完全に一致」（Markdown と JSON の両方） | `render_json` は `report.model_dump_json` のため、FR-008 / FR-009 で削除する `use_trends` と `table_for` が JSON から消える | Markdown は byte 一致を維持。JSON は当該 2 キーのみ除外して比較し、**意図的な差分**として記録（RND-003 / REM-003 / REM-004） |
