@@ -109,7 +109,7 @@ description: "Task list for 002-platform-extensibility-refactor"
 
 > **NOTE: 実装より先に書き、赤になることを確認する。** ネットワーク・実認証情報を使わない。
 
-- [ ] T008 [P] [US1] `tests/unit/test_platform_scan.py` を作成する。AST 走査の検出器を実装し、
+- [X] T008 [P] [US1] `tests/unit/test_platform_scan.py` を作成する。AST 走査の検出器を実装し、
       **現行ツリーに対して 16 行を検出**しつつ、許容リスト（`providers/__init__.py` の登録辞書 2 行）
       との不一致で**赤**になることを確認する。仕様は `data-model.md` 4 節と
       `contracts/platform-extensibility-contract.md` の EXT-008 に従う:
@@ -550,9 +550,9 @@ US1 / US2 のテストは緑のまま。
 
 | 項目 | 記録内容 | 実測 |
 |---|---|---|
-| 走査テストの検出（変更前） | 規則 (a)+(b) の行数と内訳 | （未記入。基準: 16 行） |
+| 走査テストの検出（変更前） | 規則 (a)+(b) の行数と内訳 | **16 行**（`__main__.py` 1 / `config.py` 2 / `configuration.py` 1 / `models.py` 2 / `nodes/compile_report.py` 3 / `nodes/plan_search.py` 2 / `providers/__init__.py` 2 / `state.py` 2 / `tools/llm.py` 1）。許容リストは `_PROVIDERS` の登録 2 行 → **違反 14 行で赤**（T008 実測） |
 | 走査テストの検出（変更後） | 規則 (a)+(b) の行数と内訳 | （未記入。目標: 2 行） |
-| 走査テストの検出（変更前） | 規則 (d) `help=` / `description=` の名前列挙 | （未記入。基準: `__main__.py` の `--platform` ヘルプ 1 件） |
+| 走査テストの検出（変更前） | 規則 (d) `help=` / `description=` の名前列挙 | **1 件**（`__main__.py:32` の `--platform` ヘルプ）で赤。規則 (e) は 0 件（回帰ガード、緑） |
 | 走査テストの検出（変更後） | 規則 (d) / 規則 (e) | （未記入。目標: ともに 0 件） |
 | T024 変異探針（走査） | `graph.py` に `_PLATFORM_HINT = "x"` を追加 → 赤 / 復元 → 緑 | （未記入） |
 | T051 変異探針（ノードの env） | `nodes/search.py` に `os.getenv` を追加 → 赤 / 復元 → 緑 | （未記入） |
