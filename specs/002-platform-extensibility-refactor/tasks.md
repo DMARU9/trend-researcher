@@ -402,7 +402,7 @@ US1 / US2 のテストは緑のまま。
       出力の名詞・表題・注記が**渡された YouTube の provider** のものになることを断言する。
       現行実装は引数を無視して `report.instruction.platform` から解決し直すため、このテストは
       **実装前は赤**になる（= 欠陥を実際に検出するテストであることの確認を兼ねる）
-- [ ] T054 [P] [US4] `tests/unit/test_rendering.py` に
+- [X] T054 [P] [US4] `tests/unit/test_rendering.py` に
       `test_graph_does_not_reference_rendering` を追加する（FR-016）。`src/trend_researcher/graph.py` を
       AST 走査し、`rendering` の import・参照が 0 件であることと、
       `render_report` / `render_markdown` / `render_json` の名前が現れないことを確認する。

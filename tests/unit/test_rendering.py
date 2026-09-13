@@ -14,6 +14,7 @@ LLM・LangGraph・境界モックを使わない（RND-007）。
 
 from __future__ import annotations
 
+import ast
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -279,3 +280,32 @@ def test_markdown_uses_passed_provider() -> None:
     assert x_provider.candidates_section_title not in passed
     assert passed != resolved
 
+#: 骨格モジュール（描画を参照してはならない）。
+GRAPH_PATH = Path(__file__).resolve().parents[2] / "src" / "trend_researcher" / "graph.py"
+
+
+#: 骨格が参照してはならない描画の名前（FR-016）。
+RENDERING_NAMES = frozenset({"render_report", "render_markdown", "render_json"})
+
+
+def test_graph_does_not_reference_rendering() -> None:
+    """`graph.py` は描画を参照しない（FR-016）。
+
+    骨格（グラフ構築と実行エントリ）が描画を知ると、描画の変更が骨格に波及する。
+    AST で import と名前（属性アクセス・関数定義名を含む）を走査する。
+    """
+    tree = ast.parse(GRAPH_PATH.read_text(encoding="utf-8"))
+    referenced: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            referenced.update(alias.name.split(".")[-1] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            referenced.add((node.module or "").split(".")[-1])
+            referenced.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.Name):
+            referenced.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            referenced.add(node.attr)
+
+    assert "rendering" not in referenced
+    assert not (RENDERING_NAMES & referenced)
