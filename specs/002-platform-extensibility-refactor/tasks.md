@@ -364,7 +364,7 @@ US1 の機能（走査・拡張）と golden は赤くなっていない。
       `requested = report.instruction.max_results or config.max_results`（件数の表示）。
       `Config` の削除後に `config.` 参照が **0 件**になることを `grep -n 'config\.' src/trend_researcher/__main__.py`
       で確認する（`__main__.py` はカバレッジ 46% でテストの網が薄いため実測で確かめる）
-- [ ] T048 [P] [US3] `src/trend_researcher/__init__.py` の `Config` re-export を削除する
+- [X] T048 [P] [US3] `src/trend_researcher/__init__.py` の `Config` re-export を削除する
       （`__all__` の更新を含む）。`Configuration` と `render_report` の re-export は維持する
 - [ ] T049 [P] [US3] `src/trend_researcher/tools/llm.py` の環境変数解決を `resolve_env` に寄せる
       （`build_model(role, env_prefix)` の内部で `resolve_env("MODEL", default="openai:mimo-v2.5",
@@ -649,7 +649,16 @@ US1 / US2 のテストは緑のまま。
   併せて `tests/unit/test_configuration.py` に 3 件追加（`load()` が読むのは 3 項目のみ =
   `TR_SORT_BY` / `TR_PLATFORM` / `TR_OUTPUT_FORMAT` は無視される、`from_runnable_config` は
   環境変数を読まない、`load()` に明示指定を重ねると明示指定が残る）。
+#### T048: パッケージの公開面（実測）
 
+| 確認項目 | コマンド / テスト | 実測 |
+|---|---|---|
+| 公開面の現状 | `uv run python -c "import trend_researcher; print(hasattr(trend_researcher, 'Configuration'))"` | **False**。re-export されていたのは旧 `Config` **のみ**で、`Configuration` は `__init__.py` の公開面に存在しない（→ §2 の「基準値のずれ」に記録） |
+| 削除の赤 | `tests/unit/test_configuration.py::test_package_does_not_reexport_the_old_config_class` | `assert 'Config' not in __all__` で**赤** → `__init__.py` から `Config` の import と `__all__` の 1 行を削除して緑 |
+| 維持した公開面 | `test_package_keeps_the_graph_and_rendering_entry_points` | `trend_researcher`（グラフ）/ `render_report` / モデル群の re-export は不変 |
+| フルスイート | `uv run pytest -q` | **596 passed**、カバレッジ **96.55%**、**48.72 秒** |
+
+- `Configuration` を新たに `__init__.py` へ公開する変更は行わない（未公開のまま。設定の入口を広げる変更は本リファクタリングの範囲外であり、SC-003 の「同名項目の定義箇所が 1 つ」はモジュール単位で満たしている）。
 ### 2. 基準値のずれ（spec は変更しない）
 
 | 論点 | spec の記述 | 実測 | 対応 |
@@ -660,6 +669,7 @@ US1 / US2 のテストは緑のまま。
 | レポート出力の一致（SC-006） | 「変更前と完全に一致」（Markdown と JSON の両方） | `render_json` は `report.model_dump_json` のため、FR-008 / FR-009 で削除する `use_trends` と `table_for` が JSON から消える | Markdown は byte 一致を維持。JSON は当該 2 キーのみ除外して比較し、**意図的な差分**として記録（RND-003 / REM-003 / REM-004） |
 | `platform` の既定値（FR-007） | 既存フィールドの「型・**意味**」を変えてはならない MUST NOT | `ResearchInstruction.platform` / `Candidate.platform` の既定を `"x"` → `""` にする | FR-002 / SC-002 を満たすための必要な例外。空文字は登録の先頭（= `x`）として解決され**実行時の結果は同一**（`plan.md` の「設計上の解釈」）。golden は既定に依存させない（T004） |
 | 数値でない `TR_MAX_RESULTS`（SET-011） | 「既定値 5（例外にしない。現行と同じ）」 | 現行実装は `int()` で `ValueError: invalid literal for int()` になる（既存テスト `test_non_integer_numeric_setting_raises` が固定） | T039 の指示「期待値は変更前と同一」に従い**例外を維持**する（挙動を変えない）。SET-011 の記述を根拠に黙って既定へ落とすと既存テストと矛盾する |
+| パッケージの公開面（SET-012 / T048） | 「`Config` の re-export を削除（`__all__` から除く）」。T048 の指示は「`Configuration` と `render_report` の re-export は**維持**する」 | 実測では `Configuration` は `__init__.py` で re-export されておらず（`hasattr(trend_researcher, "Configuration")` が `False`）、公開されているのは旧 `Config` のみ | `Config` の削除のみを行い、`Configuration` の公開は**追加しない**（公開面を広げる変更は範囲外）。T048 の「維持」は「現状を変えない」と読む |
 
 ### 3. golden の決定論（T007）
 

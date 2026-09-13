@@ -279,3 +279,27 @@ def test_explicit_values_beat_environment_after_load(monkeypatch: pytest.MonkeyP
 
     assert config.max_results == 3
     assert "max_results" in config.model_fields_set
+
+
+# --- パッケージの公開面（SET-012）------------------------------------------
+
+
+def test_package_does_not_reexport_the_old_config_class():
+    """旧 `Config` の re-export を削除した（SET-012 / REM-007）。
+
+    実測では `Configuration` は `__init__.py` の公開面に存在せず、re-export されて
+    いたのは旧 `Config` だけだった。したがって公開面を**広げず**、削除のみを行う。
+    """
+    import trend_researcher
+
+    assert "Config" not in trend_researcher.__all__
+    assert not hasattr(trend_researcher, "Config")
+
+
+def test_package_keeps_the_graph_and_rendering_entry_points():
+    """`trend_researcher`（グラフ本体）と `render_report` の re-export は維持する。"""
+    import trend_researcher
+
+    assert {"trend_researcher", "render_report", "ResearchReport", "Candidate"} <= set(
+        trend_researcher.__all__
+    )
