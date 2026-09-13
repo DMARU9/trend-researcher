@@ -162,11 +162,6 @@ async def _fetch_context_async(tweet_id: str, accounts_db: str, max_replies: int
     return ctx
 
 
-def fetch_thread(tweet_id: str, accounts_db: str = "accounts.db", max_replies: int = 3) -> Context:
-    """同期ラッパ: ツイートのスレッド展開＋リプライを取得する。"""
-    return asyncio.run(_fetch_context_async(tweet_id, accounts_db, max_replies))
-
-
 async def _fetch_threads_async(candidates: list[Candidate], accounts_db: str) -> list[Context]:
     return await asyncio.gather(*[_fetch_context_async(c.id, accounts_db) for c in candidates])
 
