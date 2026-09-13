@@ -260,3 +260,22 @@ def test_render_json_matches_golden(name: str) -> None:
     report, _provider = build_golden_cases()[name]
 
     assert _normalize_json(render_json(report)) == _normalize_json(_golden_text(name, "json"))
+
+def test_markdown_uses_passed_provider() -> None:
+    """描画は**渡された** provider を使う（FR-017 / RND-007）。
+
+    X のレポートに YouTube の provider を渡す組で検証する。描画が引数を無視して
+    `report.instruction.platform` から解決し直すと、出力はレポート側の表現になる。
+    """
+    report, x_provider = build_golden_cases()["x_full"]
+    youtube_provider = get_provider("youtube")
+
+    passed = render_markdown(report, youtube_provider)
+    resolved = render_markdown(report, x_provider)
+
+    # 節見出し・共通テーマの列名は provider が文面を持つ（コアは文面を組み立てない）
+    assert youtube_provider.candidates_section_title in passed
+    assert youtube_provider.common_theme_supporting_label in passed
+    assert x_provider.candidates_section_title not in passed
+    assert passed != resolved
+

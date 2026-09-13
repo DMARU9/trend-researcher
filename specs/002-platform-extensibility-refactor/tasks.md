@@ -396,7 +396,7 @@ US1 / US2 のテストは緑のまま。
 - [X] T052 [P] [US4] `tests/unit/test_rendering.py` の import を
       `trend_researcher.nodes.compile_report` から `trend_researcher.rendering` へ切り替える。
       この時点で**赤**（モジュールが無い）になることを確認する。golden の比較内容は変更しない
-- [ ] T053 [P] [US4] `tests/unit/test_rendering.py` に
+- [X] T053 [P] [US4] `tests/unit/test_rendering.py` に
       `test_markdown_uses_passed_provider` を追加する（FR-017 / RND-007）。
       X の `ResearchReport` と **YouTube の provider** の組で `render_markdown(report, provider)` を呼び、
       出力の名詞・表題・注記が**渡された YouTube の provider** のものになることを断言する。
