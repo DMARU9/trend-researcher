@@ -70,7 +70,7 @@ description: "Task list for 002-platform-extensibility-refactor"
 
 **⚠️ CRITICAL**: このフェーズが完了するまで US1〜US4 のどの実装タスクも開始しない。
 
-- [ ] T004 `tests/unit/test_rendering.py` を作成し、golden の入力を作る関数
+- [X] T004 `tests/unit/test_rendering.py` を作成し、golden の入力を作る関数
       `build_golden_cases() -> dict[str, tuple[ResearchReport, Provider]]` のみを書く。
       キーは `x_full`（X・完全形）/ `youtube_full`（YouTube・完全形）/ `sparse`（文脈・分析・
       共通テーマが空）の 3 件。`ResearchReport` / `ResearchInstruction` / `Candidate` /
