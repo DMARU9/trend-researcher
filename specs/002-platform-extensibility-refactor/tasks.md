@@ -474,7 +474,7 @@ US1 / US2 のテストは緑のまま。
       **原則 I〜III・VI の文言は変更しない**。改正は US1〜US4 の実装完了後に行う（先に改正すると、
       残存分岐が実在する間は記述と実態が食い違う）。ただし T035 / T042 は**本タスクと同一の変更一式**
       として完了させる（憲法と実装を同時に green にし、片方だけを適用した状態を残さない）
-- [ ] T066 後方互換シムの不在を確認する（FR-020 / 憲法 原則 VI）。`grep -rn "deprecated\|後方互換\|alias\|別名" src/` と
+- [X] T066 後方互換シムの不在を確認する（FR-020 / 憲法 原則 VI）。`grep -rn "deprecated\|後方互換\|alias\|別名" src/` と
       `grep -rn "Config\b" src/ tests/` を実行し、旧名の別名・非推奨ラッパー・二重実装が 0 件で
       あることを確認する（`Configuration` は残ってよいが `Config` は 0 件）
 - [ ] T067 削除の証跡を確定する（SC-005 / SC-008）。`contracts/removal-rationale.md` の
@@ -763,6 +763,23 @@ US1 / US2 のテストは緑のまま。
 - 憲法と実装を**同時に** green にするため、T035（`progress.py` の単一定義化）/ T036（7 ノードの emit から数値引数を削除）/ T042（`Config` / `get_config` の削除）を**このコミットに同梱**した（C1 / C2）。片方だけを適用した状態は残していない。
 - 同梱したファイル: `src/trend_researcher/progress.py`、`src/trend_researcher/nodes/{parse_instruction,plan_search,analyze_content,extract_common,compile_report}.py`（`search.py` / `fetch.py` の emit 追随は T043〜T046 のコミットに含まれる）、`src/trend_researcher/config.py`、`src/trend_researcher/tools/x_search.py`（T042 の追随）、`tests/{conftest.py,unit/test_config.py,unit/test_fixtures.py}`（T042 の追随）、`.specify/memory/constitution.md`、`tasks.md`。
 - ゲート（このコミットの内容で実測）: `uv run pytest -q` → **598 passed / 96.63% / 49.15 秒**、`uv run ruff check .` → **All checks passed!**、`uv run mypy src` → **0 件（27 ファイル）**。
+
+#### T066: 後方互換シムの不在の確認（FR-020 / 原則 VI。実測）
+
+| 確認 | コマンド | 実測 |
+|---|---|---|
+| 非推奨の表明 | `grep -rn "deprecated\|後方互換\|alias\|別名" src/` | **OK: 0 件**（`src` 全体で 1 件も出ない） |
+| 旧名 `Config` | `grep -rnP '(?<![A-Za-z_])Config(?![A-Za-z_])' src/ tests/ --include=*.py` | ヒット 10 件。**すべてコメント・docstring・削除を主張するテスト**で、代入・再定義・再エクスポートは 0 件（下表） |
+| 旧名 `get_config` | `grep -rn "get_config" src/` | **0 件**（`tests/unit/test_config.py::test_old_config_class_is_removed` が `assert not hasattr(config_module, "get_config")` で固定） |
+| 非推奨警告 | `grep -rn "Deprecat\|deprecat\|warnings\.warn" src/ tests/ --include=*.py` | **OK: 0 件** |
+| 別名代入 | `grep -rnE "^[A-Za-z_]+ = (render_markdown\|render_report\|Configuration\|get_provider\|Config)$"` | **OK: 0 件** |
+| 実行時の旧名 | `uv run python -c "import trend_researcher as tr; ..."` | `hasattr(tr, "Config")` → **False**、`config` モジュールの残存メンバ → **[]** |
+| 公開面 | `grep -n "__all__" src/` + `tests/unit/test_configuration.py` | `__all__` の定義は `__init__.py:17` の 1 箇所のみ。`assert "Config" not in trend_researcher.__all__` と `assert not hasattr(trend_researcher, "Config")` が旧 re-export の不在を固定（SET-012 / REM-007） |
+| 二重実装 | `grep -rn "^def render_report\|^def render_markdown\|^def render_json" src/ --include=*.py` | 定義は `rendering.py:13 / :20 / :54` の 3 件のみ。`nodes/compile_report.py` は `render_markdown` を import して使うだけ（自前定義なし）、`graph.py` の `render` 参照は **0 件** |
+
+- 走査の落とし穴: 素の `grep -rn "Config\b"` は `RunnableConfig`（語末が `Config`）と `Configuration` を拾うため単独識別子の判定に使えない。PERL 風正規表現 `(?<![A-Za-z_])Config(?![A-Za-z_])` で前後を識別子文字から除外して初めて「実在する旧名」を数えられる。
+- 単独識別子 `Config` のヒット 10 件の内訳（すべて実装ではない）: `configuration.py:16`（削除済み `Config._env()` を語る docstring）／`test_configuration.py:288,291,295,296`（旧 re-export の削除と `__all__` の不在を固定）／`test_platform_scan.py:16,332,359`（規則 (c) の**検出対象文字列** `"Config.load"` とその説明）／`test_config.py:332,337`（`Configuration` 単一性を固定）／`test_llm.py:28`（既定モデル名の出所を語るコメント）。
+- 削除を固定しているテスト: `tests/unit/test_config.py::test_old_config_class_is_removed`（`Config` / `get_config` / `lru_cache` の不在）、`tests/unit/test_configuration.py::test_package_does_not_reexport_the_old_config_class`（`__all__` と `hasattr` の不在）、`tests/unit/test_platform_scan.py` の規則 (c)（ノードは `Config.load` を読まない）。3 ファイルの実行は **54 passed**。
 
 ### 2. 基準値のずれ（spec は変更しない）
 
