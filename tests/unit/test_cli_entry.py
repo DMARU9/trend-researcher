@@ -76,7 +76,7 @@ def graph(monkeypatch: pytest.MonkeyPatch) -> _FakeGraph:
     """グラフと描画を差し替え、`configurable` を観測できるようにする。"""
     fake = _FakeGraph()
     monkeypatch.setattr(cli, "trend_researcher", fake)
-    monkeypatch.setattr(cli, "render_report", lambda report: "REPORT")
+    monkeypatch.setattr(cli, "render_report", lambda report, provider: "REPORT")
     return fake
 
 

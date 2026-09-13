@@ -432,7 +432,7 @@ US1 / US2 のテストは緑のまま。
       `provider` は `main()` で 1 回だけ解決して再利用する（描画の内部で解決し直さない）
 - [X] T060 [P] [US4] `src/trend_researcher/__init__.py` の `render_report` の re-export 元を
       `rendering.py` へ変更する（`__all__` は維持）
-- [ ] T061 [US4] `tests/unit/test_compile_report.py` の描画の断言を `tests/unit/test_rendering.py` へ
+- [X] T061 [US4] `tests/unit/test_compile_report.py` の描画の断言を `tests/unit/test_rendering.py` へ
       移し、ノード側には「`report` が状態に入る」「`cache.write_json` が呼ばれる」「描画が
       呼ばれる（メッセージ本文にレポートが含まれる）」を残す。**観測可能な断言は削除しない**
       （移動である。REM-009 / SC-008）
@@ -747,6 +747,11 @@ T037 で `contracts/removal-rationale.md` の REM-001〜REM-009 と実測を突�
 | `tests/unit/test_parse_instruction.py` | `use_trends` と `transcript_language` の優先順位 | `transcript_language` のみを残して整理し、不在断言（`AgentInputState` / `AgentState`）を追加 | REM-003 |
 | `tests/unit/test_models.py` | 既定値の宣言 | 該当なし（`table_for` を固定していた節は存在しなかった）。不在断言 2 件を追加 | REM-004 |
 | `tests/unit/test_compile_report.py` | レポート本文 | T021 の移設後も**無修正で 45 passed**（出力不変の証跡）。US4 で `test_rendering.py` へ移動 | REM-009 |
+| `tests/unit/test_compile_report.py` | 描画の断言 16 件 | **T061 で `tests/unit/test_rendering.py` へ移動**（断言は 1 件も削除せず、必要なヘルパ `_candidate` / `_analysis` / `_render_report` / `_markdown` も同伴。`_instruction` は golden 用ヘルパと衝突するため `_render_instruction` に改名）。ノード側に残した 3 件は「`report` が状態に入る」「`cache.write_json` が呼ばれる（`test_report_is_persisted_when_cache_dir_is_set`）」「描画が呼ばれる（`test_progress_messages_end_with_summary_and_rendered_markdown`）」。移動後 `test_rendering.py` 26 件 ＋ `test_compile_report.py` 20 件が緑 | REM-009 / SC-008 |
+| `tests/unit/test_compile_report.py` | `test_render_markdown_resolves_provider_from_report_not_argument` | **削除**（FR-017 により引数の provider が使われるようになった。旧挙動＝欠陥を固定していた断言で、T053 が同箇所を逆方向に固定する。他の描画断言は上記のとおり移動） | REM-009 |
+| `tests/integration/test_full_flow.py` | `render_report(report)` の 4 箇所 | 描画の入口が `render_report(report, provider)` になったため、テスト側に `_render(report)`（`report.instruction.platform` から provider を解決）を追加して置換（描画の断言内容は不変） | REM-006 / REM-007 |
+| `tests/unit/test_platform_extension.py` | `from trend_researcher.graph import render_report` | import 元を `trend_researcher.rendering` へ変更し、既存の `provider = get_provider(dummy_platform)` をそのまま引数に渡す | REM-006 |
+| `tests/unit/test_cli_entry.py` | `cli.render_report` のスタブ | 1 引数の lambda を 2 引数（`report, provider`）へ変更（呼び出し契約が変わったため） | REM-006 |
 | `tests/integration/test_cli_contract.py` | `--trends` の受理 | **該当節は存在しなかった**（`grep -rn -- "--trends" tests/` が 0 件）。T032 の記載とのずれとしてここに記録し、ファイルは無修正 | REM-003 |
 | `tests/integration/test_full_flow.py` | 進行・7 行・件数 | `Config` 依存のみ追随（`env_prefix=` へ）。進捗 7 行の断言は**維持したまま緑** | REM-006 / REM-007 |
 

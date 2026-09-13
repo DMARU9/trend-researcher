@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import HumanMessage
 
-from trend_researcher.graph import build_graph, render_report
+from trend_researcher.graph import build_graph
 from trend_researcher.models import Candidate, Context, ResearchReport
 from trend_researcher.progress import NODE_ORDER
 from trend_researcher.prompts import (
@@ -30,6 +30,7 @@ from trend_researcher.prompts import (
     X_PLAN_SEARCH_PROMPT,
 )
 from trend_researcher.providers import _PROVIDERS, get_provider, register_provider
+from trend_researcher.rendering import render_report
 
 #: 試験用プラットフォーム名。既存の登録（x / youtube）と衝突しないことだけが要件。
 DUMMY_NAME = "dummy"
@@ -228,7 +229,7 @@ def test_registered_platform_drives_the_reported_text(
 
     report = result["report"]
     provider = get_provider(dummy_platform)
-    markdown = render_report(report)
+    markdown = render_report(report, provider)
 
     assert provider.candidates_section_title in markdown
     # 選定基準の注記は provider の文面がそのまま載る（コアは文面を組み立てない）

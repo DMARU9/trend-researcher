@@ -309,3 +309,244 @@ def test_graph_does_not_reference_rendering() -> None:
 
     assert "rendering" not in referenced
     assert not (RENDERING_NAMES & referenced)
+
+# ---------------------------------------------------------------------------
+# 単体の描画契約（旧 `tests/unit/test_compile_report.py` から移設。REM-009 / SC-008）
+# ---------------------------------------------------------------------------
+
+
+def _candidate(idx: int = 1, platform: str = "x", **overrides: Any) -> Candidate:
+    """テスト用候補。counts は idx から決定的に導出する。"""
+    base: dict[str, Any] = {
+        "platform": platform,
+        "id": f"t{idx}" if platform == "x" else f"v{idx}",
+        "url": f"https://example.test/{idx}",
+        "relevance_rank": idx,
+    }
+    if platform == "x":
+        base.update(
+            {
+                "text": f"本文{idx}",
+                "author_handle": f"user{idx}",
+                "author_name": f"ユーザー{idx}",
+                "author_followers": 100 * idx,
+                "like_count": 10 * idx,
+                "retweet_count": 2 * idx,
+                "quote_count": idx,
+                "published_at": datetime(2026, 1, idx, 9, 0, tzinfo=UTC),
+            }
+        )
+    else:
+        base.update(
+            {
+                "title": f"動画{idx}",
+                "author_name": f"チャンネル{idx}",
+                "view_count": 100 * idx,
+                "published_at": datetime(2026, 1, idx, 9, 0, tzinfo=UTC),
+            }
+        )
+    base.update(overrides)
+    return Candidate(**base)
+
+
+def _analysis(cid: str, **overrides: Any) -> AnalysisFinding:
+    base: dict[str, Any] = {"id": cid, "summary": f"要約{cid}"}
+    base.update(overrides)
+    return AnalysisFinding(**base)
+
+
+def _render_instruction(platform: str = "x", **overrides: Any) -> ResearchInstruction:
+    base: dict[str, Any] = {
+        "raw_text": "AI の最新動向を調べて",
+        "platform": platform,
+        "topic": "AI 動向",
+    }
+    base.update(overrides)
+    return ResearchInstruction(**base)
+
+def _report(platform: str = "x", **overrides: Any) -> ResearchReport:
+    base: dict[str, Any] = {
+        "instruction": _render_instruction(platform),
+        "candidates": [_candidate(1, platform)],
+        "analyses": [_analysis(_candidate(1, platform).id)],
+        "common_themes": [],
+        "sources": ["https://example.test/1"],
+        "notes": [],
+    }
+    base.update(overrides)
+    return ResearchReport(**base)
+
+
+def _markdown(report: ResearchReport) -> str:
+    return render_markdown(report, get_provider(report.instruction.platform))
+
+
+def test_render_markdown_uses_topic_as_title() -> None:
+    report = _report()
+
+    assert _markdown(report).startswith("# リサーチレポート: AI 動向\n")
+
+
+def test_render_markdown_truncates_raw_text_to_40_chars_when_topic_is_empty() -> None:
+    instruction = _render_instruction().model_copy(update={"topic": "", "raw_text": "あ" * 50})
+    report = _report(instruction=instruction)
+
+    assert f"# リサーチレポート: {'あ' * 40}\n" in _markdown(report)
+
+
+@pytest.mark.parametrize(
+    ("platform", "title_line", "header"),
+    [
+        ("x", "## 選定ツイートリスト（上位 N 件）", "| # | 本文抜粋 | 投稿者 | いいね | RT | 引用 | URL |"),
+        (
+            "youtube",
+            "## 選定動画リスト（関連度順上位 N 件）",
+            "| # | タイトル | チャンネル | 再生数 | URL |",
+        ),
+    ],
+)
+def test_render_markdown_candidates_table_differs_by_platform(
+    platform: str, title_line: str, header: str
+) -> None:
+    report = _report(platform)
+
+    body = _markdown(report)
+
+    assert title_line in body
+    assert header in body
+
+
+def test_render_markdown_flattens_newlines_in_snippet_and_angles() -> None:
+    candidate = _candidate(1, text="1行目\n2行目")
+    analysis = _analysis(
+        "t1",
+        angles=[BlogAngle(angle="切り口\n改行", value="価値\n改行", key_phrase="フレーズ\n改行")],
+    )
+    report = _report(candidates=[candidate], analyses=[analysis])
+
+    body = _markdown(report)
+
+    assert "| 切り口 改行 | 価値 改行 | フレーズ 改行 |" in body
+    # 表の 1 行目（本文抜粋）は改行を潰して表を分断しない
+    row = next(line for line in body.splitlines() if line.startswith("| 1 |"))
+    assert "| 1 | 1行目 2行目 |" in row
+    # 本文ブロックは原文のまま（改行を保持）
+    assert "\n1行目\n2行目\n" in body
+
+
+def test_render_markdown_renders_evidence_as_list() -> None:
+    report = _report(analyses=[_analysis("t1", evidence=["引用A", "引用B"])])
+
+    body = _markdown(report)
+
+    assert "**そのまま使える引用**" in body
+    assert "- 引用A\n- 引用B\n" in body
+
+
+def test_render_markdown_places_missing_analysis_placeholder() -> None:
+    """解析結果のない候補は「（解析なし）」で穴を埋め、他の候補の描画は続ける。"""
+    c1, c2 = _candidate(1), _candidate(2)
+    report = _report(candidates=[c1, c2], analyses=[_analysis("t1", summary="要約t1あり")])
+
+    body = _markdown(report)
+
+    assert "- 要約: （解析なし）" in body
+    assert "要約t1あり" in body
+    # プレースホルダ候補のブロックには概要表題を出さない
+    without_analysis = body.split("### 2.")[1].split("## 共通ネタ")[0]
+    assert "**概要**" not in without_analysis
+    assert "**ブログの活用アイデア**" not in without_analysis
+
+
+def test_render_markdown_youtube_block_has_no_body_section() -> None:
+    report = _report("youtube")
+
+    body = _markdown(report)
+
+    assert "### 1. 動画1" in body
+    assert "**本文**" not in body
+
+
+def test_render_markdown_omits_meta_block_when_all_fields_are_empty() -> None:
+    candidate = Candidate(platform="youtube", id="v1", title="", url="", relevance_rank=1)
+    report = _report(
+        "youtube", candidates=[candidate], analyses=[], sources=[], common_themes=[]
+    )
+
+    body = _markdown(report)
+
+    assert "### 1. " in body
+    assert not any(line.startswith("> ") for line in body.splitlines())
+
+
+def test_render_markdown_renders_meta_line_for_x() -> None:
+    report = _report()
+
+    body = _markdown(report)
+
+    assert "> 投稿者: ユーザー1 ｜ フォロワー: 100 ｜ いいね: 10 ｜ RT: 2 ｜ 公開日: 2026-01-01" in body
+
+
+def test_render_common_themes_table_rows_use_platform_label() -> None:
+    themes = [
+        CommonTheme(theme="テーマA", description="説明A", supporting_ids=["t1"], example_quotes=["引用A"]),
+        CommonTheme(theme="テーマB", description="説明B"),
+    ]
+    report = _report(common_themes=themes)
+
+    body = _markdown(report)
+
+    assert "| テーマ | 説明 | 該当ツイート | 代表抜粋 |" in body
+    assert "| テーマA | 説明A | t1 | 引用A |" in body
+    # 空リストは "-" で埋める（列がずれない）
+    assert "| テーマB | 説明B | - | - |" in body
+
+
+def test_render_common_themes_table_uses_youtube_label() -> None:
+    report = _report("youtube", common_themes=[CommonTheme(theme="A", description="B")])
+
+    assert "| テーマ | 説明 | 該当動画 | 代表抜粋 |" in _markdown(report)
+
+
+def test_render_markdown_marks_when_no_common_themes() -> None:
+    report = _report(common_themes=[])
+
+    assert "（特筆すべき共通点なし）" in _markdown(report)
+
+
+def test_render_markdown_omits_notes_section_when_notes_are_empty() -> None:
+    report = _report(notes=[])
+
+    assert "## 備考" not in _markdown(report)
+
+
+def test_render_markdown_includes_notes_and_sources_sections() -> None:
+    report = _report(sources=["https://a.test", "https://b.test"], notes=["メモ1", "メモ2"])
+
+    body = _markdown(report)
+
+    assert "## 出典" in body
+    assert "- https://a.test\n- https://b.test\n" in body
+    assert "## 備考" in body
+    assert "- メモ1\n- メモ2\n" in body
+
+
+def test_render_json_excludes_none_fields() -> None:
+    candidate = _candidate(1, retweet_count=None, quote_count=None, author_followers=None)
+    report = _report(candidates=[candidate], analyses=[_analysis("t1")])
+
+    parsed = json.loads(render_json(report))
+
+    assert parsed["candidates"][0]["id"] == "t1"
+    assert all(v is not None for v in parsed["candidates"][0].values())
+    assert "retweet_count" not in parsed["candidates"][0]
+
+
+def test_render_json_round_trips_report_payload() -> None:
+    report = _report(notes=["メモ"], sources=["https://example.test/1"])
+
+    parsed = json.loads(render_json(report))
+
+    assert parsed == json.loads(report.model_dump_json(indent=2, exclude_none=True))
+    assert parsed["notes"] == ["メモ"]
+    assert parsed["sources"] == ["https://example.test/1"]

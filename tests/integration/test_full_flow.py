@@ -27,8 +27,18 @@ from langchain_core.messages import HumanMessage
 from trend_researcher import __main__ as main_module
 from trend_researcher import config as config_module
 from trend_researcher.configuration import Configuration
-from trend_researcher.graph import render_report, trend_researcher
+from trend_researcher.graph import trend_researcher
 from trend_researcher.models import Candidate, Context, OutputFormat, ResearchReport
+from trend_researcher.providers import get_provider
+from trend_researcher.rendering import render_report
+
+
+def _render(report: ResearchReport) -> str:
+    """レポートのプラットフォームに対応する provider で描画する（FR-017）。
+
+    描画は provider を引数で受け取る（描画の内部で解決し直さない）。
+    """
+    return render_report(report, get_provider(report.instruction.platform))
 
 # --- ノード単位の LLM 応答（プロンプト本文に依存しない） ---------------------------------
 
@@ -278,7 +288,7 @@ def test_x_flow_produces_full_report(fake_model_factory, x_flow) -> None:
     assert report.sources == [c.url for c in report.candidates]
     assert any("選定基準: 検索結果からいいね数の少ない順" in n for n in report.notes)
 
-    md = render_report(report)
+    md = _render(report)
     assert "選定ツイートリスト" in md
     assert "**概要**" in md
     assert "| 切り口 | 読者への価値 | 拾えるキーフレーズ |" in md
@@ -347,7 +357,7 @@ def test_youtube_flow_renders_markdown_table(fake_model_factory, youtube_flow) -
     report = result["report"]
     assert report.instruction.platform == "youtube"
     assert len(report.candidates) == 5
-    md = render_report(report)
+    md = _render(report)
     assert "選定動画リスト" in md
     assert "チャンネル" in md
     assert "再生数" in md
@@ -367,7 +377,7 @@ def test_youtube_flow_renders_json_when_requested(fake_model_factory, youtube_fl
     assert report.instruction.output.format == OutputFormat.JSON
     assert len(report.candidates) == 10
 
-    parsed = json.loads(render_report(report))
+    parsed = json.loads(_render(report))
     assert len(parsed["candidates"]) == 10
     assert parsed["instruction"]["platform"] == "youtube"
     assert parsed["common_themes"][0]["theme"] == "自動化"
@@ -480,7 +490,7 @@ def test_llm_empty_response_degrades_without_crashing(fake_model_factory, x_flow
     assert report.instruction.topic == "オタクの困りごとを調査したい"
     assert report.candidates == []  # クエリが空 → 検索 0 件 → ルーティング skip
     assert report.common_themes == []
-    assert "（特筆すべき共通点なし）" in render_report(report)
+    assert "（特筆すべき共通点なし）" in _render(report)
 
 
 def test_llm_unstructured_responses_fall_back_to_defaults(fake_model_factory, x_flow) -> None:
