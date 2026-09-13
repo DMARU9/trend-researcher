@@ -170,7 +170,7 @@ description: "Task list for 002-platform-extensibility-refactor"
 - [X] T017 [US1] `src/trend_researcher/configuration.py` の `platform` の既定を `"x"` から `""` へ変更し、
       `description` を「対象プラットフォーム（未指定時は既定のプラットフォーム）」に更新する
       （FR-002。フィールドの追加・削除はしない）
-- [ ] T018 [US1] `src/trend_researcher/config.py` の `Config.load()` の引数 `platform: str = "x"` を
+- [X] T018 [US1] `src/trend_researcher/config.py` の `Config.load()` の引数 `platform: str = "x"` を
       `env_prefix: str | None = None` に置き換え、`prefix = "XTR" if platform == "x" else "YTR"` の行を
       **削除**して `env_prefix` をそのまま使う（`env_prefix` が `None` のときは `TR_*` のみを見る）。
       併せて呼び出し側（`src/trend_researcher/__main__.py`、`src/trend_researcher/nodes/search.py`、

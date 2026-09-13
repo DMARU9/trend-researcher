@@ -20,7 +20,7 @@ def fetch_node(state: AgentState, config: RunnableConfig) -> dict:
 
     platform = state.get("platform") or configurable.platform
     provider = get_provider(platform)
-    cfg = Config.load(platform=platform)
+    cfg = Config.load(env_prefix=provider.env_prefix)
     candidates = state.get("candidates", [])
     instruction = state.get("instruction")
     sort_by = (instruction.sort_by if instruction else None) or "relevance"

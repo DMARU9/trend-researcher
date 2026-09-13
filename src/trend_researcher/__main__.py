@@ -16,7 +16,7 @@ from trend_researcher.config import Config
 from trend_researcher.configuration import Configuration
 from trend_researcher.graph import EXECUTION_TIMEOUT, render_report, trend_researcher
 from trend_researcher.models import OutputFormat
-from trend_researcher.providers import available_platforms
+from trend_researcher.providers import available_platforms, get_provider
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -116,7 +116,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     platform = args.platform
-    config = Config.load(platform=platform, cache_dir=args.cache_dir, max_results=args.max_results)
+    # 登録済みプラットフォームの解決は引数検証直後に 1 回だけ行う（差は provider が持つ）
+    provider = get_provider(platform)
+    config = Config.load(
+        env_prefix=provider.env_prefix,
+        cache_dir=args.cache_dir,
+        max_results=args.max_results,
+    )
 
     if args.since:
         try:

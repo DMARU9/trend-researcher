@@ -54,24 +54,28 @@ class Config(BaseModel):
     def load(
         cls,
         *,
-        platform: str = "x",
+        env_prefix: str | None = None,
         cache_dir: str | None = None,
         max_results: int | None = None,
     ) -> Config:
         """環境変数／.env から設定を読み込む。
 
         Args:
-            platform: "x" | "youtube"。環境変数プレフィックス（XTR_/YTR_）の解決に使用。
+            env_prefix: プラットフォーム固有の環境変数接頭辞（例: `XTR` / `YTR`）。
+                provider が渡す（`get_provider(platform).env_prefix`）。`None` のときは
+                `TR_*` のみを見る。
             cache_dir: CLI 等からの上書き（任意）。
             max_results: CLI 等からの上書き（任意）。
         """
         _load_env_once()
-        # プラットフォーム固有プレフィックス。.env / tools/llm.py の表記に合わせる
-        # （"x" -> "XTR", "youtube" -> "YTR"）。
-        prefix = "XTR" if platform == "x" else "YTR"
+        # プラットフォーム固有接頭辞は provider が決める（コアはプラットフォーム名を
+        # 解釈しない）。未指定（None）なら一般名の TR_* のみを見る。
+        prefix = env_prefix
 
         def _env(name: str, default: str) -> str:
-            # 一般 TR_* を優先し、なければプラットフォーム固有（XTR_/YTR_）を見る
+            # 一般 TR_* を優先し、なければプラットフォーム固有（{prefix}_*）を見る
+            if prefix is None:
+                return os.getenv(f"TR_{name}") or default
             return os.getenv(f"TR_{name}") or os.getenv(f"{prefix}_{name}") or default
 
         config = cls(
@@ -94,5 +98,5 @@ class Config(BaseModel):
 
 @lru_cache(maxsize=1)
 def get_config() -> Config:
-    """プロセス内で共有する Config を取得（既定: x）。"""
+    """プロセス内で共有する Config を取得（`TR_*` のみ。プラットフォーム固有は provider が渡す）。"""
     return Config.load()
