@@ -481,7 +481,7 @@ US1 / US2 のテストは緑のまま。
       REM-001〜REM-009 と実際の変更を突き合わせ、各項目の (a) 実行時の参照件数、(b) 削除理由、
       (c) 同一変更で更新した参照、(d) 更新／削除したテストが固定していた内容、を実測値で確定する。
       未記載の参照や未更新のテストがあればこのタスクで直す
-- [ ] T068 一時ファイル・探針の後始末をする。`git status --short` で意図しないファイル
+- [X] T068 一時ファイル・探針の後始末をする。`git status --short` で意図しないファイル
       （探針用の一時変更、`/tmp` 以外に残った作業ファイル、`tests/unit/golden_support.py` のような
       追加ヘルパ）が無いことを確認する。`tests/unit/golden/` の golden 6 ファイルだけが新規データとして残る
 - [ ] T069 最終ゲートを通す。`uv run pytest -q`（カバレッジ `fail_under = 90` 以上。**実行時間
@@ -800,6 +800,19 @@ US1 / US2 のテストは緑のまま。
 - 契約文書に「## 実測による確定（T067 / SC-005 / SC-008）」節を追加し、9 項目すべての (a) 参照件数 / (c) 参照の更新状態 / (d) テストが固定していた内容と固定先を実測値で確定した。「位置」欄は**削除前の座標**であることを明記した。
 - 結論: 未更新の参照・未更新のテストは 0 件。ずれは REM-003 の (c) に記載した 2 ファイルが元から対象外だった 1 点のみで、文書側を訂正した。
 - REM-005 の 1 件取得ケースの移設先: `tests/unit/test_x_search.py:409` の `_threads()`（「1 件だけの `fetch_threads` 呼び出し（旧 `fetch_thread` と同一の経路）」）を `test_fetch_threads_*` 13 件が通す。
+
+#### T068: 一時ファイル・探針の後始末（実測）
+
+| 確認 | コマンド | 実測 |
+|---|---|---|
+| 作業ツリー | `git status --short --untracked-files=all` | **出力なし**（未コミットの変更・未追跡ファイルが 0 件） |
+| golden | `git ls-files tests/unit/golden/ \| wc -l` | **6**（`x_full.md/json`、`youtube_full.md/json`、`sparse.md/json`）。導入は `28578f5`（T006）。**新規データとして残るのはこの 6 ファイルのみ** |
+| 追加ヘルパ | `find . -name "golden_support*"` | **0 件** |
+| 探針の残骸（ソース） | `find . -name "*probe*" -not -path "./.venv/*"` | **0 件**（探針は `/tmp` の `.bak` と python の in-place 置換のみで行い、リポジトリ内にスクラッチを作らない） |
+| 探針の残骸（バイトコード） | 上記に加え `find . -name "*probe*" -not -name "*.pyc"` | ソースは 0 件だが `__pycache__` に**孤立した pyc 2 件**が残っていた（`tests/unit/__pycache__/test_t006_probe.cpython-311-pytest-9.1.1.pyc`、`tests/integration/__pycache__/test_t009_probe.cpython-311-pytest-9.1.1.pyc`）。**削除した**（`.gitignore` 対象で追跡外のため git の差分は出ない） |
+| バックアップの残骸 | `find . -name "*.bak" -o -name "*.orig" -o -name "*.rej"` | **0 件** |
+| スクラッチ領域 | `.gitignore` | `/tmp/` が無視対象として宣言済み（`# Scratch space (temporary scripts and generated files)`） |
+| 後始末後の全件 | `uv run pytest -q` | **598 passed / 96.63% / 49.57 秒**（pyc 削除の影響なし＝テストはソースから再生成される） |
 
 ### 2. 基準値のずれ（spec は変更しない）
 
