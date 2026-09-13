@@ -14,7 +14,12 @@ LLM・LangGraph・境界モックを使わない（RND-007）。
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import pytest
 
 from trend_researcher.models import (
     AnalysisFinding,
@@ -26,6 +31,7 @@ from trend_researcher.models import (
     ResearchInstruction,
     ResearchReport,
 )
+from trend_researcher.nodes.compile_report import render_json, render_markdown
 from trend_researcher.providers import get_provider
 from trend_researcher.providers.base import Provider
 
@@ -34,6 +40,17 @@ GOLDEN_CASE_NAMES = ("x_full", "youtube_full", "sparse")
 
 #: 決定論のため固定する生成時刻（`ResearchReport.generated_at` の既定は `datetime.now`）。
 FIXED_GENERATED_AT = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+
+#: golden ファイルの置き場所。
+GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
+
+#: JSON 比較で両側から除去するキー（RND-003）。
+#:
+#: `render_json` は `report.model_dump_json(indent=2, exclude_none=True)` を返すため、
+#: FR-009 で削除する `ResearchInstruction.use_trends` と FR-008 で削除する
+#: `OutputSpec.table_for` が JSON から消える。これは削除要件に必然的に伴う
+#: **意図的な差分**であり、当該 2 キーだけを比較対象から外す。
+JSON_EXCLUDED_KEYS = frozenset({"use_trends", "table_for"})
 
 
 def build_golden_cases() -> dict[str, tuple[ResearchReport, Provider]]:
@@ -67,8 +84,8 @@ def _instruction(platform: str, topic: str, *, sort_by: str = "relevance", max_r
     )
 
 
-def _x_candidate(idx: int, **overrides: object) -> Candidate:
-    base: dict[str, object] = {
+def _x_candidate(idx: int, **overrides: Any) -> Candidate:
+    base: dict[str, Any] = {
         "platform": "x",
         "id": f"t{idx}",
         "text": f"本文{idx}です。2行目のテキスト。",
@@ -83,11 +100,11 @@ def _x_candidate(idx: int, **overrides: object) -> Candidate:
         "relevance_rank": idx,
     }
     base.update(overrides)
-    return Candidate(**base)  # type: ignore[arg-type]
+    return Candidate(**base)
 
 
-def _youtube_candidate(idx: int, **overrides: object) -> Candidate:
-    base: dict[str, object] = {
+def _youtube_candidate(idx: int, **overrides: Any) -> Candidate:
+    base: dict[str, Any] = {
         "platform": "youtube",
         "id": f"v{idx}",
         "title": f"動画{idx}のタイトル",
@@ -99,7 +116,7 @@ def _youtube_candidate(idx: int, **overrides: object) -> Candidate:
         "relevance_rank": idx,
     }
     base.update(overrides)
-    return Candidate(**base)  # type: ignore[arg-type]
+    return Candidate(**base)
 
 
 def _x_full_case() -> tuple[ResearchReport, Provider]:
@@ -191,3 +208,55 @@ def _sparse_case() -> tuple[ResearchReport, Provider]:
         notes=[],
     )
     return report, get_provider("x")
+
+
+# ---------------------------------------------------------------------------
+# golden 比較（SC-006 / FR-018）
+# ---------------------------------------------------------------------------
+
+
+def test_golden_case_names_match_build_cases() -> None:
+    """`GOLDEN_CASE_NAMES` と実際に生成されるケースが一致する（golden の取り違え防止）。"""
+    assert tuple(build_golden_cases()) == GOLDEN_CASE_NAMES
+
+
+def _normalize_json(raw: str) -> str:
+    """JSON を辞書へ読み戻し、除外キーを除いてから比較用の文字列にする。
+
+    両側を同じ手順で正規化するため、キー順と値の差だけが残る（RND-003）。
+    """
+    return json.dumps(_drop_excluded_keys(json.loads(raw)), indent=2, ensure_ascii=False)
+
+
+def _drop_excluded_keys(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _drop_excluded_keys(v) for k, v in value.items() if k not in JSON_EXCLUDED_KEYS}
+    if isinstance(value, list):
+        return [_drop_excluded_keys(v) for v in value]
+    return value
+
+
+def _golden_text(name: str, suffix: str) -> str:
+    path = GOLDEN_DIR / f"{name}.{suffix}"
+    if not path.exists():
+        pytest.fail(
+            f"golden が未採取です: {path}\n"
+            "quickstart.md の手順 4-1（変更前のツリーでの採取）を実行してください。"
+        )
+    return path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", GOLDEN_CASE_NAMES)
+def test_render_markdown_matches_golden(name: str) -> None:
+    """Markdown は分離前後で byte 一致する（末尾の改行を含む）。"""
+    report, provider = build_golden_cases()[name]
+
+    assert render_markdown(report, provider) == _golden_text(name, "md")
+
+
+@pytest.mark.parametrize("name", GOLDEN_CASE_NAMES)
+def test_render_json_matches_golden(name: str) -> None:
+    """JSON は削除対象 2 キー（use_trends / table_for）を除いて byte 一致する。"""
+    report, _provider = build_golden_cases()[name]
+
+    assert _normalize_json(render_json(report)) == _normalize_json(_golden_text(name, "json"))

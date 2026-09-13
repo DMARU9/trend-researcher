@@ -78,7 +78,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       **3 件すべてで既定値に依存する値を明示する**（`platform` / `output.format` など。
       US1 で `platform` の既定が `"x"` → `""` に変わるため、既定に依存すると golden が
       意図せず変化する）。この時点では描画関数を import しない（`_render_*` の対象が見えないようにするため）
-- [ ] T005 `tests/unit/test_rendering.py` に、golden ファイルと byte 比較する検証を追加する。
+- [X] T005 `tests/unit/test_rendering.py` に、golden ファイルと byte 比較する検証を追加する。
       比較対象は `tests/unit/golden/{x_full,youtube_full,sparse}.{md,json}`。
       **変更前の所在である `from trend_researcher.nodes.compile_report import render_json, render_markdown`
       を import する**（US4 の T052 で `trend_researcher.rendering` へ切り替える）。
