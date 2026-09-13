@@ -313,10 +313,10 @@ def no_retry_sleep() -> Iterator[SleepSpy]:
 
 @pytest.fixture
 def tmp_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """一時ディレクトリを返し、`Config.load()` の既定 cache 先をそこへ向ける。
+    """一時ディレクトリを返し、`Configuration.load()` の既定 cache 先をそこへ向ける。
 
     実リポジトリの `cache/` を汚さない（LAYOUT-003-4）。`TR_CACHE_DIR` を
-    上書きするため、`cache_dir` を明示しない `Config.load()` でも隔離される。
+    上書きするため、`cache_dir` を明示しない `Configuration.load()` でも隔離される。
     """
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)

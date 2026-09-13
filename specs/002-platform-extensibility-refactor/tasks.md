@@ -275,7 +275,7 @@ description: "Task list for 002-platform-extensibility-refactor"
 - [X] T034 [US2] `src/trend_researcher/tools/x_search.py` から `fetch_thread` を削除する（REM-005）。
       **失われる網羅を補う**: `fetch_threads` のテストに「1 件だけ返る場合」のケースを追加し、
       本文の連結が同じ経路で検証されるようにする
-- [ ] T035 [US2] `src/trend_researcher/progress.py` を単一の定義へ変更する（FR-012 / REM-008）。
+- [X] T035 [US2] `src/trend_researcher/progress.py` を単一の定義へ変更する（FR-012 / REM-008）。
       `emit(self, node_name: str, phase: str, detail: str = "")` にし、
       `index = NODE_ORDER.index(node_name) + 1` を計算して行を組み立てる。総数は `self.total`
       （`ProgressEmitter.__init__` の既定値）を使い、既定値の算出元を `len(NODE_ORDER)` にする。
@@ -283,7 +283,7 @@ description: "Task list for 002-platform-extensibility-refactor"
       **進捗行の文字列は 1 文字も変えない**。
       **注意**: 憲法 原則 V が `ProgressEmitter.TOTAL` の維持を MUST としているため、T065 と
       **同一の変更一式**として完了させる（片方だけを適用した状態は憲法違反になる。C1）
-- [ ] T036 [US2] 7 ノードの `emitter.emit(...)` 呼び出しから数値の番号引数を削除する
+- [X] T036 [US2] 7 ノードの `emitter.emit(...)` 呼び出しから数値の番号引数を削除する
       （`nodes/parse_instruction.py` / `nodes/plan_search.py` / `nodes/search.py` /
       `nodes/fetch.py` / `nodes/analyze_content.py` / `nodes/extract_common.py` /
       `nodes/compile_report.py`）
@@ -331,7 +331,7 @@ US1 の機能（走査・拡張）と golden は赤くなっていない。
       既定。空文字は未設定扱い）と `Configuration.load(env_prefix: str | None = None) -> Configuration`
       を追加する。`.env` の読み込み（`load_dotenv`）とパス解決（`config.py` の `_REPO_ROOT` /
       `_resolve_path` を再利用）もこの経路で 1 回だけ行う。`Configuration` に**フィールドを追加しない**
-- [ ] T042 [US3] `src/trend_researcher/config.py` から `Config` クラスと `get_config()` を削除する
+- [X] T042 [US3] `src/trend_researcher/config.py` から `Config` クラスと `get_config()` を削除する
       （REM-006 / REM-007）。残すのは `_REPO_ROOT` / `_resolve_path` / `_load_env_once`（または
       `configuration.py` へ移したうえでモジュールごと削除）。`lru_cache` の使用をやめる。
       **`src/` から `Config` / `get_config` の参照を 0 にする**。
@@ -456,7 +456,7 @@ US1 / US2 のテストは緑のまま。
 - [X] T064 [P] `specs/002-platform-extensibility-refactor/quickstart.md` の手順 1〜7 を通しで実行し、
       各手順の実測値を「実装メモ」節に記録する（とくに手順 2 の検出 2 行、手順 3 の完走、
       手順 4 の byte 一致、手順 7 の 3 ゲートと実行時間）
-- [ ] T065 憲法の文言を PATCH 改正する（research.md R-12 / plan.md の Constitution Check に
+- [X] T065 憲法の文言を PATCH 改正する（research.md R-12 / plan.md の Constitution Check に
       記録した改正対象 3 点）。`.specify/memory/constitution.md` に対して次を行う。
       1. **原則 IV**: 「既存のプラットフォーム分岐（`nodes/compile_report.py` などに残存）は、
          そのファイルを変更する際に provider のフックへ寄せる SHOULD」を「コアにプラットフォーム名の
@@ -750,6 +750,19 @@ US1 / US2 のテストは緑のまま。
 
 - 手順 2 の非空虚性（探針 → 赤 → 復元）は T024 で実施済み（§1 の `T024 変異探針（走査）` 行）。手順 4 の golden 採取は T006 で実施済み（§3）。
 - 表の「基準」は手順 1 の期待値（`quickstart.md` に記載の 2026-09-13 の値）。テスト件数は 547 → **598**、カバレッジは 95.29% → **96.63%**、実行時間は 49.67 秒 → **49.15 秒**。
+
+#### T065: 憲法の PATCH 改正（実測。T035 / T036 / T042 と同一変更一式）
+
+| 改正点 | 改正前 → 改正後 | 改正後の実測（同一コミットに含めた実装） |
+|---|---|---|
+| 原則 IV（プラットフォーム抽象） | 「既存の分岐はファイルを変更する際に provider へ寄せる **SHOULD**」→「コアに**プラットフォーム名の列挙・比較を残してはならない MUST NOT**（許容は `providers/__init__.py` の登録辞書のみ、機械走査で 0 件を保つ）」 | 走査規則 (a)+(b) の検出は **2 行**（`providers/__init__.py` の `"x"` / `"youtube"` のみ）／違反 **0 件**、規則 (d) / (e) も 0 件（T064 手順 2 実測） |
+| 原則 V（CLI 出力契約と観測可能性） | 「`NODE_ORDER`・**`ProgressEmitter.TOTAL`**・グラフのノード数の一致」→「`NODE_ORDER` とグラフのノード数を一致させ、**総数と表示番号は単一の定義（`NODE_ORDER`）から導出する MUST（手書きの定数を置かない）**」 | `assert not hasattr(ProgressEmitter, "TOTAL")`（`tests/unit/test_progress.py`）、`progress.py` の `total = len(NODE_ORDER)`／`node_index = NODE_ORDER.index(node_name) + 1`、7 ノードの `emitter.emit` は 14 箇所すべて `(NODE_X, phase, detail=...)` の 2〜3 引数（数値引数 0 件） |
+| 技術制約と品質基準 | 「実行条件は `.env` と **`Config`** から供給」→「`.env` と **`Configuration`（唯一の実行時設定型）** から供給」。環境変数の 3 群（`TR_*` / `XTR_*` / `YTR_*`）とハードコード禁止 MUST NOT は不変 | `grep -rn "class Config\b\|def get_config\|Config\.load" src/ --include=*.py` → **OK: 0 件**（T064 手順 6-1 実測）。`Config` / `get_config` / `lru_cache` の削除を `tests/unit/test_config.py` の `test_old_config_class_is_removed` が固定 |
+| バージョン・記録 | `Version` 1.2.0 → **1.2.1**（PATCH）、Sync Impact Report の Modified principles / Changed sections / History / Follow-up TODOs を追記。**原則 I〜III・VI の文言は変更しない** | `grep -n "^### \|^**Version**" .specify/memory/constitution.md` で原則 I〜VI の見出しが 6 件のまま（欠落・追加なし）を確認 |
+
+- 憲法と実装を**同時に** green にするため、T035（`progress.py` の単一定義化）/ T036（7 ノードの emit から数値引数を削除）/ T042（`Config` / `get_config` の削除）を**このコミットに同梱**した（C1 / C2）。片方だけを適用した状態は残していない。
+- 同梱したファイル: `src/trend_researcher/progress.py`、`src/trend_researcher/nodes/{parse_instruction,plan_search,analyze_content,extract_common,compile_report}.py`（`search.py` / `fetch.py` の emit 追随は T043〜T046 のコミットに含まれる）、`src/trend_researcher/config.py`、`src/trend_researcher/tools/x_search.py`（T042 の追随）、`tests/{conftest.py,unit/test_config.py,unit/test_fixtures.py}`（T042 の追随）、`.specify/memory/constitution.md`、`tasks.md`。
+- ゲート（このコミットの内容で実測）: `uv run pytest -q` → **598 passed / 96.63% / 49.15 秒**、`uv run ruff check .` → **All checks passed!**、`uv run mypy src` → **0 件（27 ファイル）**。
 
 ### 2. 基準値のずれ（spec は変更しない）
 

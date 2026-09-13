@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 import pytest
 
 from trend_researcher import nodes, providers
-from trend_researcher.config import Config
+from trend_researcher.configuration import Configuration
 from trend_researcher.models import Candidate
 from trend_researcher.tools import x_search, youtube_search
 from trend_researcher.tools.transcript import Transcript, fetch_transcript
@@ -180,5 +180,5 @@ def test_tmp_cache_dir_isolates_repository_cache(tmp_cache_dir):
 
     assert tmp_cache_dir.is_dir()
     assert _REPO_ROOT / "cache" != tmp_cache_dir
-    assert Config.load().cache_dir == tmp_cache_dir
-    assert Config.load(env_prefix="YTR").cache_dir == tmp_cache_dir
+    assert Configuration.load().cache_dir == str(tmp_cache_dir)
+    assert Configuration.load(env_prefix="YTR").cache_dir == str(tmp_cache_dir)

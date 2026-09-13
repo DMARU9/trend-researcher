@@ -43,7 +43,7 @@ def plan_search(state: AgentState, config: RunnableConfig) -> dict:
     platform: str = state.get("platform") or configurable.platform
     provider = get_provider(platform)
     emitter = make_emitter()
-    emitter.emit(2, NODE_PLAN_SEARCH, "開始", detail="LLM が検索クエリを生成中")
+    emitter.emit(NODE_PLAN_SEARCH, "開始", detail="LLM が検索クエリを生成中")
     progress_messages = emitter.get_messages()
 
     instruction = state["instruction"]
@@ -77,7 +77,7 @@ def plan_search(state: AgentState, config: RunnableConfig) -> dict:
     if limit is not None and len(queries) > limit:
         queries = queries[:limit]
 
-    emitter.emit(2, NODE_PLAN_SEARCH, "完了", detail=f'クエリ {len(queries)} 件: {", ".join(queries)}')
+    emitter.emit(NODE_PLAN_SEARCH, "完了", detail=f'クエリ {len(queries)} 件: {", ".join(queries)}')
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
     return {"search_queries": queries, "messages": progress_messages}

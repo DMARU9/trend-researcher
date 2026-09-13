@@ -135,7 +135,7 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     platform: str = state.get("platform") or configurable.platform
     provider = get_provider(platform)
     emitter = make_emitter()
-    emitter.emit(1, NODE_PARSE_INSTRUCTION, "開始")
+    emitter.emit(NODE_PARSE_INSTRUCTION, "開始")
     progress_messages = emitter.get_messages()
 
     # instruction_raw: ユーザーの最新メッセージから抽出
@@ -192,7 +192,7 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
         transcript_language=str(configurable.transcript_language) if configurable.transcript_language != "ja" else str(state.get("transcript_language", "ja") or "ja"),
     )
 
-    emitter.emit(1, NODE_PARSE_INSTRUCTION, "完了", detail=f'トピック: "{topic}" / 件数: {max_results}')
+    emitter.emit(NODE_PARSE_INSTRUCTION, "完了", detail=f'トピック: "{topic}" / 件数: {max_results}')
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
     return {"instruction": instruction, "messages": progress_messages}

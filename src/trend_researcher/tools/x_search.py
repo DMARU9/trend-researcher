@@ -1,7 +1,8 @@
 """twscrape を用いた検索・コンテキスト取得（単一クエリ・関連度順上位 N 件）。
 
 twscrape は非同期 API のため、本モジュールは asyncio でラップする。
-アカウント DB（クッキー保存先）は Config.accounts_db を使用。
+アカウント DB（クッキー保存先）は呼び出し元（`providers/x.py` の `XSettings.accounts_db`）
+から引数で受け取る。
 統一モデル Candidate / Context を返す。
 """
 

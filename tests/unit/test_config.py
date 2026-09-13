@@ -323,3 +323,17 @@ def test_config_load_invokes_env_loading(tmp_path: Path, monkeypatch: pytest.Mon
     Configuration.load()
 
     assert loads == [1]
+
+
+# --- 旧設定型の削除（SC-003 / REM-006 / REM-007）--------------------------
+
+
+def test_old_config_class_is_removed() -> None:
+    """実行時設定の型は `Configuration` の 1 つだけ（旧 `Config` と `get_config` は無い）。
+
+    `config.py` に残るのはパス解決と `.env` 読み込みのヘルパのみで、設定値の宣言
+    （同名フィールド）は持たない（SC-003）。
+    """
+    assert not hasattr(config_module, "Config")
+    assert not hasattr(config_module, "get_config")
+    assert not hasattr(config_module, "lru_cache")

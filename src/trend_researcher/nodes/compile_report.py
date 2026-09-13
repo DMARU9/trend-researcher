@@ -19,7 +19,7 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
     """選定コンテンツ・要約・共通ネタをまとめた ResearchReport を組み立てる。"""
     configurable = Configuration.from_runnable_config(config)
     emitter = make_emitter()
-    emitter.emit(7, NODE_COMPILE_REPORT, "開始")
+    emitter.emit(NODE_COMPILE_REPORT, "開始")
     progress_messages = emitter.get_messages()
 
     platform = state.get("platform") or configurable.platform
@@ -54,7 +54,7 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
         notes=notes,
     )
 
-    emitter.emit(7, NODE_COMPILE_REPORT, "完了")
+    emitter.emit(NODE_COMPILE_REPORT, "完了")
 
     # 永続化先は Configuration（CLI --cache-dir / TR_CACHE_DIR）から渡る。
     # state は Studio 入力や将来の途中再開による上書き用。
@@ -63,7 +63,7 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
         try:
             write_json(Path(cache_dir), "report", report.model_dump(mode="json"))
         except Exception as exc:  # noqa: BLE001
-            emitter.emit(7, NODE_COMPILE_REPORT, f"キャッシュ書き込み失敗: {exc}")
+            emitter.emit(NODE_COMPILE_REPORT, f"キャッシュ書き込み失敗: {exc}")
 
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()

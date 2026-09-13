@@ -32,7 +32,7 @@ def extract_common(state: AgentState, config: RunnableConfig) -> dict:
     platform = state.get("platform") or configurable.platform
     provider = get_provider(platform)
     emitter = make_emitter()
-    emitter.emit(6, NODE_EXTRACT_COMMON, "開始")
+    emitter.emit(NODE_EXTRACT_COMMON, "開始")
     progress_messages = emitter.get_messages()
 
     analyses = state.get("analyses", [])
@@ -43,7 +43,7 @@ def extract_common(state: AgentState, config: RunnableConfig) -> dict:
 
     themes = _parse_themes(text, [a.id for a in analyses])
 
-    emitter.emit(6, NODE_EXTRACT_COMMON, "完了", detail=f"{len(themes)} 件の共通テーマ")
+    emitter.emit(NODE_EXTRACT_COMMON, "完了", detail=f"{len(themes)} 件の共通テーマ")
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
     return {"common_themes": themes, "messages": progress_messages}
