@@ -313,7 +313,7 @@ US1 の機能（走査・拡張）と golden は赤くなっていない。
       を AST 走査し、`os.getenv` / `os.environ` / `load_dotenv` / `Config.load` の呼び出しが
       **0 件**であることを確認する。実装前は 2 件（`nodes/search.py` / `nodes/fetch.py`）で**赤**
       になることを確認する
-- [ ] T039 [P] [US3] `tests/unit/test_config.py` を `Configuration.load()` /
+- [X] T039 [P] [US3] `tests/unit/test_config.py` を `Configuration.load()` /
       `resolve_env(..., env_prefix=...)` の経路へ移行する。**期待値（どの変数がどの値になるか）は
       変更前と同一に保つ**。追加する検証: `Configuration.load(env_prefix="XTR")` が
       `TR_MAX_RESULTS` > `XTR_MAX_RESULTS` > 既定 5 の順で解決すること、
@@ -322,7 +322,7 @@ US1 の機能（走査・拡張）と golden は赤くなっていない。
       **T025 で `env_prefix=` に移した箇所を、本タスクで `Configuration.load()` の経路へ再度移す**
       （期待値は変えない。2 段階に分かれるのは US1 では `Config` がまだ存在するため）。
       実装前は import エラーで**赤**になることを確認する
-- [ ] T040 [US3] T038 / T039 が期待どおり赤であることを確認し、「実装メモ」節に記録する
+- [X] T040 [US3] T038 / T039 が期待どおり赤であることを確認し、「実装メモ」節に記録する
 
 ### Implementation for User Story 3
 
