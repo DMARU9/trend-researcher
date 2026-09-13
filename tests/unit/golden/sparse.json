@@ -1,0 +1,38 @@
+{
+  "instruction": {
+    "raw_text": "欠落ケース について調べて",
+    "platform": "x",
+    "topic": "欠落ケース",
+    "max_results": 1,
+    "output": {
+      "format": "markdown",
+      "table_for": [
+        "common_points"
+      ]
+    },
+    "use_trends": false,
+    "sort_by": "relevance",
+    "transcript_language": "ja"
+  },
+  "generated_at": "2026-01-01T00:00:00Z",
+  "candidates": [
+    {
+      "platform": "x",
+      "id": "t1",
+      "title": "",
+      "text": "",
+      "url": "",
+      "author_handle": "user1",
+      "author_name": "ユーザー1",
+      "channel_id": "",
+      "published_at": "2026-01-01T09:00:00Z",
+      "retweet_count": 2,
+      "quote_count": 1,
+      "relevance_rank": 1
+    }
+  ],
+  "analyses": [],
+  "common_themes": [],
+  "sources": [],
+  "notes": []
+}

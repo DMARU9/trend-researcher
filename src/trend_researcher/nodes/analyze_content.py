@@ -59,7 +59,7 @@ def _build_source_text(candidate: Candidate, context: Context | None) -> str:
 async def _analyze_one(
     candidate: Candidate, source_text: str, provider: Provider
 ) -> AnalysisFinding:
-    model = build_model("research")
+    model = build_model("research", provider.env_prefix)
     prompt = provider.analyze_content_prompt.format(
         title=candidate.author_handle or candidate.title or candidate.url,
         transcript=source_text[:20000] or "（本文なし・メタデータのみ）",
@@ -114,7 +114,7 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
     """各コンテンツを「ブログ執筆の参考」として要約する（並列上限 2）。"""
     configurable = Configuration.from_runnable_config(config)
     emitter = make_emitter()
-    emitter.emit(5, NODE_ANALYZE_CONTENT, "開始", detail="並列上限 2")
+    emitter.emit(NODE_ANALYZE_CONTENT, "開始", detail="並列上限 2")
     progress_messages = emitter.get_messages()
 
     platform = state.get("platform") or configurable.platform
@@ -123,7 +123,7 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
     contexts_by_id = {c.id: c for c in state.get("contexts", [])}
     analyses = asyncio.run(_analyze_all(candidates, contexts_by_id, provider))
 
-    emitter.emit(5, NODE_ANALYZE_CONTENT, "完了", detail=f"{len(analyses)} 件を要約")
+    emitter.emit(NODE_ANALYZE_CONTENT, "完了", detail=f"{len(analyses)} 件を要約")
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
     return {"analyses": analyses, "messages": progress_messages}

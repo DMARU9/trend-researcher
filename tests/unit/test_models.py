@@ -11,9 +11,24 @@ from trend_researcher.models import (
     Candidate,
     CommonTheme,
     OutputFormat,
+    OutputSpec,
     ResearchInstruction,
     ResearchReport,
 )
+
+
+def test_output_spec_has_no_table_for():
+    """`table_for` は宣言されていない（FR-008 / REM-004）。
+
+    実行時に誰も読まないフィールドを残すと「どちらが正か」が読めなくなる。
+    プラットフォームの型名は `provider.name` が担う。
+    """
+    assert "table_for" not in OutputSpec.model_fields
+
+
+def test_research_instruction_has_no_use_trends():
+    """`use_trends` は宣言されていない（FR-009 / REM-003）。"""
+    assert "use_trends" not in ResearchInstruction.model_fields
 
 
 def test_candidate_defaults():

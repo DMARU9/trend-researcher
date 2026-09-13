@@ -230,3 +230,6 @@ artifacts/
 
 # OS / editor noise
 .DS_Store
+
+# Scratch space (temporary scripts and generated files)
+/tmp/

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
-from trend_researcher.config import Config
+from trend_researcher.config import _REPO_ROOT, _resolve_path
+from trend_researcher.configuration import Configuration, resolve_env
 from trend_researcher.models import Candidate, Context
 from trend_researcher.prompts import (
     X_ANALYZE_CONTENT_PROMPT,
@@ -13,6 +16,46 @@ from trend_researcher.prompts import (
     X_PLAN_SEARCH_PROMPT,
 )
 from trend_researcher.tools.x_search import fetch_threads, search_tweets
+
+#: X 固有設定の既定値（名称は環境変数の `{name}` と一致させる）。
+_DEFAULT_ACCOUNTS_DB = "accounts.db"
+_DEFAULT_SEARCH_POOL_SIZE = "50"
+_DEFAULT_MAX_RETRIES = "3"
+
+
+@dataclass(frozen=True)
+class XSettings:
+    """X の実行に必要な固有設定（環境変数から解決済みの値）。
+
+    解決の実装は `configuration.resolve_env` の 1 か所であり、この型はその結果を
+    運ぶだけである（SET-003）。X 以外の実行では参照されない（例外にもしない）。
+    """
+
+    accounts_db: Path
+    search_pool_size: int
+    max_retries: int
+
+
+def _explicit_setting(configuration: Configuration, name: str) -> str | None:
+    """同名フィールドが明示指定されていればその値（無ければ `None`）。
+
+    環境変数が「同じ名前の設定」を二重定義しないための規則。X 固有の 3 項目は
+    `Configuration` に同名フィールドを持たない（持たせると同名項目の定義が 2 箇所に
+    なる。SET-001 / SET-005）が、将来 provider 固有項目が共通設定へ昇格したときに
+    「明示指定 > 環境変数」が崩れないようにここで一括して見る（SET-006）。
+    """
+    field = name.lower()
+    if field not in configuration.model_fields_set:
+        return None
+    return str(getattr(configuration, field))
+
+
+def _setting_value(configuration: Configuration, name: str, default: str) -> str:
+    """X 固有設定 1 項目の解決（明示指定 > `TR_{name}` > `XTR_{name}` > 既定）。"""
+    explicit = _explicit_setting(configuration, name)
+    if explicit is not None:
+        return explicit
+    return resolve_env(name, default=default, env_prefix=XProvider.env_prefix)
 
 
 def _sort_by_likes(candidates: list[Candidate]) -> list[Candidate]:
@@ -41,14 +84,45 @@ def _dedupe(candidates: list[Candidate]) -> list[Candidate]:
 class XProvider:
     name = "x"
 
+    # --- コアへ渡す差の表現（コアは値を解釈しない） ---
+    env_prefix = "XTR"
+    #: 検索クエリ数のハード上限（LLM が 5 件を守らなくても安全に切り詰める）
+    #: 注: Protocol の可変属性は mypy では不変（invariant）のため、`int | None` を
+    #: 明示しないと `int` 推論になって適合しない。
+    max_search_queries: int | None = 8
+    content_noun = "ツイート"
+    candidates_section_title = "## 選定ツイートリスト（上位 N 件）"
+
+    def selection_note(self, sort_by: str) -> str:
+        """選定基準の注記。relevance は fetch 後の「いいね昇順」並べ替えに合わせる。"""
+        label = "いいね数の多い順" if sort_by == "likes" else "いいね数の少ない順"
+        return f"選定基準: 検索結果から{label}に上位 N 件を採用"
+
+    def settings(self, configuration: Configuration) -> XSettings:
+        """X 固有設定を解決する（明示指定 > `TR_*` > `XTR_*` > 既定）。
+
+        解決はこのメソッドの中だけであり、ノードは呼ばない（SET-003 / SET-004）。
+        """
+        accounts_db = _resolve_path(
+            _setting_value(configuration, "ACCOUNTS_DB", str(_REPO_ROOT / _DEFAULT_ACCOUNTS_DB))
+        )
+        return XSettings(
+            accounts_db=accounts_db,
+            search_pool_size=int(
+                _setting_value(configuration, "SEARCH_POOL_SIZE", _DEFAULT_SEARCH_POOL_SIZE)
+            ),
+            max_retries=int(_setting_value(configuration, "MAX_RETRIES", _DEFAULT_MAX_RETRIES)),
+        )
+
     def search(
         self,
         queries: list[str],
         max_results: int,
         published_after: datetime | None,
         sort_by: str,
-        config: Config,
+        configuration: Configuration,
     ) -> list[Candidate]:
+        settings = self.settings(configuration)
         # X 検索は --since をネイティブサポートするため、各クエリに since: を付与する
         if published_after is not None:
             since = published_after.date().isoformat()
@@ -59,9 +133,11 @@ class XProvider:
         pool: list[Candidate] = []
 
         if sort_by == "likes":
-            pool_size = max(config.search_pool_size, max_results)
+            pool_size = max(settings.search_pool_size, max_results)
             for q in queries:
-                pool.extend(search_tweets(q, max_results=pool_size, accounts_db=str(config.accounts_db)))
+                pool.extend(
+                    search_tweets(q, max_results=pool_size, accounts_db=str(settings.accounts_db))
+                )
             # 重複を除去してからいいね降順に並べる（除去しないと同一ツイートが複数枠を占める。FR-024）
             ordered = _sort_by_likes(_dedupe(pool))
             candidates = ordered[:max_results]
@@ -75,8 +151,8 @@ class XProvider:
                     search_tweets(
                         q,
                         max_results=pool_size,
-                        accounts_db=str(config.accounts_db),
-                        max_retries=config.max_retries,
+                        accounts_db=str(settings.accounts_db),
+                        max_retries=settings.max_retries,
                     )
                 )
             # 重複（id）を除去し、取得順（関連度順）を維持
@@ -101,12 +177,15 @@ class XProvider:
             c.relevance_rank = rank
         return ordered
 
-    def fetch_contexts(self, candidates: list[Candidate], config: Config) -> tuple[list[Context], list[str]]:
+    def fetch_contexts(
+        self, candidates: list[Candidate], configuration: Configuration
+    ) -> tuple[list[Context], list[str]]:
         notes: list[str] = []
         if not candidates:
             return [], notes
+        settings = self.settings(configuration)
         try:
-            contexts = fetch_threads(candidates, accounts_db=str(config.accounts_db))
+            contexts = fetch_threads(candidates, accounts_db=str(settings.accounts_db))
             # 検索結果（SearchTimeline）では like_count 等が 0 で埋まることがあるため、
             # tweet_details で取得した正確なカウントで候補を上書きする
             by_id = {c.id: c for c in candidates}

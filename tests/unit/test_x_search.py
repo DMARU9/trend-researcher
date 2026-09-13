@@ -25,16 +25,38 @@ import pytest
 from twscrape import HttpError, NoAccountError, Tweet, User
 from twscrape.queue_client import HandledError
 
-from trend_researcher.config import Config
+from trend_researcher.config import _REPO_ROOT
+from trend_researcher.configuration import Configuration
 from trend_researcher.models import Candidate, Context
-from trend_researcher.providers.x import XProvider, _sort_by_likes
+from trend_researcher.providers.x import XProvider, XSettings, _sort_by_likes
+from trend_researcher.tools import x_search
 from trend_researcher.tools.x_search import (
     _to_datetime,
     _tweet_to_candidate,
-    fetch_thread,
     fetch_threads,
     search_tweets,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_x_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """X 固有設定の環境変数を消し、既定（`accounts.db` / 50 / 3）で検証する。
+
+    実環境の `TR_*` / `XTR_*` がテスト結果を変えないようにする（SET-003）。
+    """
+    for name in ("ACCOUNTS_DB", "SEARCH_POOL_SIZE", "MAX_RETRIES"):
+        for prefix in ("TR", "XTR", "YTR"):
+            monkeypatch.delenv(f"{prefix}_{name}", raising=False)
+
+
+def test_fetch_thread_is_removed():
+    """単数版のスレッド取得は削除された（FR-010 / REM-005）。
+
+    `fetch_threads`（複数形）は常にリストを返すため、単数版は実行時の参照が 0。
+    1 件だけ返る場合は同じ経路で検証する（`test_fetch_threads_*` 参照）。
+    """
+    assert not hasattr(x_search, "fetch_thread")
+    assert hasattr(x_search, "fetch_threads")
 
 
 def _fake_user(tid: int) -> User:
@@ -248,8 +270,8 @@ def test_x_provider_search_relevance_dedupes_keeps_order():
 
     with mock.patch("trend_researcher.providers.x.search_tweets", _fake_search):
         provider = XProvider()
-        cfg = Config()
-        cands = provider.search(["q1", "q2"], max_results=10, published_after=None, sort_by="relevance", config=cfg)
+        cfg = Configuration()
+        cands = provider.search(["q1", "q2"], max_results=10, published_after=None, sort_by="relevance", configuration=cfg)
     ids = [c.id for c in cands]
     # search は重複排除＋取得順（関連度順）で截断するのみ。本文除外・いいね昇順は resort の責務
     assert len(cands) == 10
@@ -291,8 +313,8 @@ def test_x_provider_likes_sort_top_n():
 
     with mock.patch("trend_researcher.providers.x.search_tweets", _fake_search):
         provider = XProvider()
-        cfg = Config(search_pool_size=50)
-        cands = provider.search(["python"], max_results=10, published_after=None, sort_by="likes", config=cfg)
+        cfg = Configuration()
+        cands = provider.search(["python"], max_results=10, published_after=None, sort_by="likes", configuration=cfg)
     assert len(cands) == 10
     likes = [c.like_count for c in cands]
     assert likes == sorted(likes, reverse=True)
@@ -378,10 +400,19 @@ def test_search_tweets_with_zero_retries_returns_empty():
     assert constructed == ["accounts.db"]
 
 
-# --- スレッド取得の縮退（tools/x_search.py） ------------------------------
+# --- スレッド取得の縮退（tools/x_search.py・fetch_threads 経由） -------------
+#
+# 旧 `fetch_thread`（単数）は FR-010 で削除したため、同じ経路を 1 件の
+# `fetch_threads` で通す。複数件の経路は test_fetch_threads_gathers_each_candidate。
 
 
-def test_fetch_thread_reads_main_parent_and_replies():
+def _threads(tweet_id: str = "100") -> Context:
+    """1 件だけの `fetch_threads` 呼び出し（旧 `fetch_thread` と同一の経路）。"""
+    cands = [Candidate(platform="x", id=tweet_id)]
+    return fetch_threads(cands, accounts_db=":memory:")[0]
+
+
+def test_fetch_threads_reads_main_parent_and_replies():
     main = _fake_tweet(
         100,
         raw_content="メインの本文",
@@ -396,7 +427,7 @@ def test_fetch_thread_reads_main_parent_and_replies():
         replies=[_fake_tweet(101, raw_content="リプライ1"), _fake_tweet(102, raw_content="")],
     )
     with _install_thread_api(api), mock.patch("trend_researcher.tools.x_search.gather", _gather):
-        ctx = fetch_thread("100", accounts_db=":memory:", max_replies=5)
+        ctx = _threads()
 
     assert ctx.id == "100"
     assert ctx.text == "メインの本文"
@@ -405,20 +436,20 @@ def test_fetch_thread_reads_main_parent_and_replies():
     assert ctx.replies == ["リプライ1"]
     assert ctx.counts == {"like_count": 11, "retweet_count": 2, "reply_count": 1, "quote_count": 0}
     assert api.detail_ids == [100, 99]
-    assert api.reply_calls == [(100, 5)]
+    assert api.reply_calls == [(100, 3)]
 
 
-def test_fetch_thread_without_parent_keeps_thread_text_none():
+def test_fetch_threads_without_parent_keeps_thread_text_none():
     api = _ThreadAPI(details={100: _fake_tweet(100, raw_content="単独の本文")})
     with _install_thread_api(api), mock.patch("trend_researcher.tools.x_search.gather", _gather):
-        ctx = fetch_thread("100")
+        ctx = _threads()
     assert ctx.text == "単独の本文"
     # 親が無い場合は thread_text を埋めない（Context の既定は空文字）
     assert ctx.thread_text == ""
     assert api.detail_ids == [100]
 
 
-def test_fetch_thread_keeps_whitespace_only_reply_as_empty_string():
+def test_fetch_threads_keeps_whitespace_only_reply_as_empty_string():
     """空白のみのリプライは「本文あり」と判定され、空文字として残る（現状の挙動）。
 
     除外判定は `rawContent` の真偽のみを見ており、`strip` 後の空文字は除外しない。
@@ -429,54 +460,54 @@ def test_fetch_thread_keeps_whitespace_only_reply_as_empty_string():
         replies=[_fake_tweet(101, raw_content="  \n ")],
     )
     with _install_thread_api(api), mock.patch("trend_researcher.tools.x_search.gather", _gather):
-        ctx = fetch_thread("100")
+        ctx = _threads()
     assert ctx.replies == [""]
 
 
-def test_fetch_thread_degrades_when_details_raise():
+def test_fetch_threads_degrades_when_details_raise():
     """元ツイート取得の例外は握りつぶし、空の Context を返す（呼び出し元は本文のみで解析）。"""
     api = _ThreadAPI(errors={100: RuntimeError("404")})
     with _install_thread_api(api), mock.patch("trend_researcher.tools.x_search.gather", _gather):
-        ctx = fetch_thread("100")
+        ctx = _threads()
     assert ctx.id == "100"
     assert ctx.text == ""
     assert ctx.counts is None
     assert ctx.replies == []
 
 
-def test_fetch_thread_degrades_when_details_return_none():
+def test_fetch_threads_degrades_when_details_return_none():
     api = _ThreadAPI(details={100: None})
     with _install_thread_api(api), mock.patch("trend_researcher.tools.x_search.gather", _gather):
-        ctx = fetch_thread("100")
+        ctx = _threads()
     assert ctx.text == ""
     assert ctx.counts is None
 
 
-def test_fetch_thread_degrades_when_parent_lookup_fails():
+def test_fetch_threads_degrades_when_parent_lookup_fails():
     """親ツイートだけ取得できなくても、元ツイート本文は保持する。"""
     api = _ThreadAPI(
         details={100: _fake_tweet(100, raw_content="元ツイート", in_reply_to=99)},
         errors={99: RuntimeError("親が削除済み")},
     )
     with _install_thread_api(api), mock.patch("trend_researcher.tools.x_search.gather", _gather):
-        ctx = fetch_thread("100")
+        ctx = _threads()
     assert ctx.text == "元ツイート"
     assert ctx.thread_text == ""
     assert api.detail_ids == [100, 99]
 
 
-def test_fetch_thread_degrades_when_replies_raise():
+def test_fetch_threads_degrades_when_replies_raise():
     api = _ThreadAPI(
         details={100: _fake_tweet(100, raw_content="元ツイート")},
         replies_error=RuntimeError("replies unavailable"),
     )
     with _install_thread_api(api), mock.patch("trend_researcher.tools.x_search.gather", _gather):
-        ctx = fetch_thread("100")
+        ctx = _threads()
     assert ctx.text == "元ツイート"
     assert ctx.replies == []
 
 
-def test_fetch_thread_logs_and_degrades_on_http_error(caplog):
+def test_fetch_threads_logs_and_degrades_on_http_error(caplog):
     """twscrape の通信系（`HttpError`）は縮退し、握り潰さず WARNING に残す（#47）。
 
     捕まえる型から `HttpError` を外すと例外が伝播して失敗し、ログ出力を `pass`
@@ -488,7 +519,7 @@ def test_fetch_thread_logs_and_degrades_on_http_error(caplog):
         _install_thread_api(api),
         mock.patch("trend_researcher.tools.x_search.gather", _gather),
     ):
-        ctx = fetch_thread("100")
+        ctx = _threads()
 
     assert ctx.id == "100"
     assert ctx.text == ""
@@ -497,7 +528,7 @@ def test_fetch_thread_logs_and_degrades_on_http_error(caplog):
     assert "tweet_id=100" in caplog.text
 
 
-def test_fetch_thread_logs_and_degrades_on_parent_lookup_error(caplog):
+def test_fetch_threads_logs_and_degrades_on_parent_lookup_error(caplog):
     """親ツイートの取得失敗（`HandledError`）も縮退し、WARNING に残す（#47）。
 
     元ツイート本文は保持したまま `thread_text` だけを諦める。
@@ -511,7 +542,7 @@ def test_fetch_thread_logs_and_degrades_on_parent_lookup_error(caplog):
         _install_thread_api(api),
         mock.patch("trend_researcher.tools.x_search.gather", _gather),
     ):
-        ctx = fetch_thread("100")
+        ctx = _threads()
 
     assert ctx.text == "元ツイート"
     assert ctx.thread_text == ""
@@ -520,7 +551,7 @@ def test_fetch_thread_logs_and_degrades_on_parent_lookup_error(caplog):
     assert "tweet_id=99" in caplog.text
 
 
-def test_fetch_thread_degrades_on_no_account_error_for_replies(caplog):
+def test_fetch_threads_degrades_on_no_account_error_for_replies(caplog):
     """アカウント枯渇（`NoAccountError`）でもリプライだけ諦めて本文は保持する（#47）。"""
     api = _ThreadAPI(
         details={100: _fake_tweet(100, raw_content="元ツイート")},
@@ -531,14 +562,14 @@ def test_fetch_thread_degrades_on_no_account_error_for_replies(caplog):
         _install_thread_api(api),
         mock.patch("trend_researcher.tools.x_search.gather", _gather),
     ):
-        ctx = fetch_thread("100")
+        ctx = _threads()
 
     assert ctx.text == "元ツイート"
     assert ctx.replies == []
     assert "リプライの取得に失敗" in caplog.text
 
 
-def test_fetch_thread_propagates_error_types_outside_the_degradation_list():
+def test_fetch_threads_propagates_error_types_outside_the_degradation_list():
     """列挙した型の外は縮退させない（実装バグを握り潰さない・#47）。
 
     素の `except Exception` へ戻すと本テストは失敗する（`KeyError` が吸われる）。
@@ -552,7 +583,7 @@ def test_fetch_thread_propagates_error_types_outside_the_degradation_list():
         mock.patch("trend_researcher.tools.x_search.gather", _gather),
         pytest.raises(KeyError),
     ):
-        fetch_thread("100")
+        _threads()
 
 
 def test_fetch_threads_returns_empty_for_no_candidates():
@@ -590,17 +621,21 @@ def test_x_provider_appends_since_to_every_query():
             max_results=5,
             published_after=datetime(2026, 1, 2, 6, 30, tzinfo=UTC),
             sort_by="relevance",
-            config=Config(),
+            configuration=Configuration(),
         )
     assert queries == ["q1 since:2026-01-02", "q2 since:2026-01-02"]
 
 
-def test_x_provider_relevance_pool_size_and_retries_come_from_config():
+def test_x_provider_relevance_pool_size_and_retries_come_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[tuple[str, int, int]] = []
 
     def _fake_search(query, max_results=5, accounts_db="accounts.db", max_retries=3):  # type: ignore[no-untyped-def]
         calls.append((query, max_results, max_retries))
         return []
+
+    monkeypatch.setenv("XTR_MAX_RETRIES", "2")
 
     with mock.patch("trend_researcher.providers.x.search_tweets", _fake_search):
         XProvider().search(
@@ -608,7 +643,7 @@ def test_x_provider_relevance_pool_size_and_retries_come_from_config():
             max_results=5,
             published_after=None,
             sort_by="relevance",
-            config=Config(search_pool_size=50, max_retries=2),
+            configuration=Configuration(),
         )
     # likes 用の search_pool_size(50) は使わず、relevance は小さめのバッファに留める
     assert calls == [("q1", max(5 * 3, 5 + 20), 2)]
@@ -627,7 +662,7 @@ def test_x_provider_likes_pool_size_is_at_least_max_results():
             max_results=80,
             published_after=None,
             sort_by="likes",
-            config=Config(search_pool_size=50),
+            configuration=Configuration(),
         )
     assert calls == [("q1", 80), ("q2", 80)]
 
@@ -642,7 +677,7 @@ def test_x_provider_relevance_dedupe_keeps_first_occurrence():
 
     with mock.patch("trend_researcher.providers.x.search_tweets", _fake_search):
         cands = XProvider().search(
-            ["q1", "q2"], max_results=5, published_after=None, sort_by="relevance", config=Config()
+            ["q1", "q2"], max_results=5, published_after=None, sort_by="relevance", configuration=Configuration()
         )
     assert [c.text for c in cands] == ["先に取得した本文"]
     assert [c.like_count for c in cands] == [1]
@@ -663,7 +698,7 @@ def test_x_provider_relevance_truncates_after_dedupe():
 
     with mock.patch("trend_researcher.providers.x.search_tweets", _fake_search):
         cands = XProvider().search(
-            ["q1"], max_results=4, published_after=None, sort_by="relevance", config=Config()
+            ["q1"], max_results=4, published_after=None, sort_by="relevance", configuration=Configuration()
         )
     assert [c.id for c in cands] == ["a1", "a2", "a3", "a4"]
 
@@ -687,7 +722,7 @@ def test_x_provider_likes_dedupes_pool_before_sorting():
 
     with mock.patch("trend_researcher.providers.x.search_tweets", _fake_search):
         cands = XProvider().search(
-            ["q1", "q2"], max_results=10, published_after=None, sort_by="likes", config=Config()
+            ["q1", "q2"], max_results=10, published_after=None, sort_by="likes", configuration=Configuration()
         )
     ids = [c.id for c in cands]
     # 重複が除去され、いいね降順（b1=30, a1=10, a2=8）
@@ -711,7 +746,7 @@ def test_resort_relevance_keeps_rank_order_on_tie():
 
 
 def test_x_provider_fetch_contexts_returns_empty_without_candidates():
-    assert XProvider().fetch_contexts([], Config()) == ([], [])
+    assert XProvider().fetch_contexts([], Configuration()) == ([], [])
 
 
 def test_x_provider_fetch_contexts_overwrites_counts_from_details():
@@ -725,7 +760,7 @@ def test_x_provider_fetch_contexts_overwrites_counts_from_details():
         )
     ]
     with mock.patch("trend_researcher.providers.x.fetch_threads", return_value=contexts):
-        out, notes = XProvider().fetch_contexts(cands, Config())
+        out, notes = XProvider().fetch_contexts(cands, Configuration())
 
     assert notes == []
     assert out is contexts
@@ -741,7 +776,7 @@ def test_x_provider_fetch_contexts_degrades_to_candidate_text():
     with mock.patch(
         "trend_researcher.providers.x.fetch_threads", side_effect=RuntimeError("threads down")
     ):
-        contexts, notes = XProvider().fetch_contexts(cands, Config())
+        contexts, notes = XProvider().fetch_contexts(cands, Configuration())
 
     assert len(contexts) == 1
     assert contexts[0].id == "1"
@@ -836,3 +871,69 @@ def test_x_provider_exposes_prompts_and_supporting_label():
     assert provider.extract_common_prompt == X_EXTRACT_COMMON_PROMPT
     assert provider.common_theme_supporting_label == "該当ツイート"
     assert provider.parse_instruction_prompt
+
+
+# --- X 固有設定の解決（providers/x.py, SET-003） -------------------------
+
+
+def test_x_settings_defaults_use_repository_root() -> None:
+    settings = XProvider().settings(Configuration())
+
+    assert isinstance(settings, XSettings)
+    assert settings.accounts_db == (_REPO_ROOT / "accounts.db").resolve()
+    assert settings.search_pool_size == 50
+    assert settings.max_retries == 3
+
+
+def test_x_settings_use_platform_prefix_and_repo_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`XTR_*` は X でだけ読まれ、相対パスはリポジトリ直下基準で解決される。"""
+    monkeypatch.setenv("XTR_ACCOUNTS_DB", "data/accounts.db")
+    monkeypatch.setenv("XTR_SEARCH_POOL_SIZE", "80")
+    monkeypatch.setenv("XTR_MAX_RETRIES", "1")
+
+    settings = XProvider().settings(Configuration())
+
+    assert settings.accounts_db == (_REPO_ROOT / "data/accounts.db").resolve()
+    assert settings.search_pool_size == 80
+    assert settings.max_retries == 1
+
+
+def test_x_settings_prefer_generic_over_platform_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TR_SEARCH_POOL_SIZE", "70")
+    monkeypatch.setenv("XTR_SEARCH_POOL_SIZE", "80")
+
+    assert XProvider().settings(Configuration()).search_pool_size == 70
+
+
+def test_x_settings_ignore_youtube_variables(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YTR_ACCOUNTS_DB", "youtube.db")
+
+    settings = XProvider().settings(Configuration())
+
+    assert settings.accounts_db == (_REPO_ROOT / "accounts.db").resolve()
+
+
+def test_x_settings_ignore_empty_variables(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XTR_SEARCH_POOL_SIZE", "")
+
+    assert XProvider().settings(Configuration()).search_pool_size == 50
+
+
+def test_x_settings_prefer_explicit_configuration_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同名フィールドが明示指定されていれば環境変数より優先する（SET-006）。
+
+    現行の `Configuration` は X 固有の 3 項目を持たない（同名項目の定義を 2 箇所に
+    しない。SET-001 / SET-005）ため、同名フィールドを持つ派生型で規則を固定する。
+    """
+
+    class _WithPoolSize(Configuration):
+        search_pool_size: int = 0
+
+    monkeypatch.setenv("XTR_SEARCH_POOL_SIZE", "80")
+
+    explicit = _WithPoolSize(search_pool_size=60)
+
+    assert "search_pool_size" in explicit.model_fields_set
+    assert XProvider().settings(explicit).search_pool_size == 60

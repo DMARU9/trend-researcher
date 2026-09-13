@@ -125,7 +125,6 @@
 | `--output` | パス | 標準出力 |
 | `--since` | `YYYY-MM-DD` | なし |
 | `--sort` | `relevance` \| `likes` | `relevance` |
-| `--trends` | フラグ | なし |
 | `--cache-dir` | パス | `cache/` |
 
 **注意**: 列挙値は大文字小文字を**区別する**。`--platform X` / `--format JSON` / `--sort Relevance` はいずれも未知の値として引数エラー（`2`）になる（正規化しない）。`INSTRUCTION` は空文字・空白のみを受理しない（CLI-001-17）。

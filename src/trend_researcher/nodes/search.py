@@ -5,7 +5,6 @@ from __future__ import annotations
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 
-from trend_researcher.config import Config
 from trend_researcher.configuration import Configuration
 from trend_researcher.progress import NODE_SEARCH, make_emitter
 from trend_researcher.providers import get_provider
@@ -16,14 +15,13 @@ def search_node(state: AgentState, config: RunnableConfig) -> dict:
     """provider.search を呼び出し、上位 N 件の候補を選定する。"""
     configurable = Configuration.from_runnable_config(config)
     emitter = make_emitter()
-    emitter.emit(3, NODE_SEARCH, "開始")
+    emitter.emit(NODE_SEARCH, "開始")
     progress_messages = emitter.get_messages()
 
     platform = state.get("platform") or configurable.platform
     provider = get_provider(platform)
     instruction = state["instruction"]
     queries = state.get("search_queries") or []
-    cfg = Config.load(platform=platform)
     # 件数は parse_instruction が FR-011 の優先順位（state > Configuration > 自然言語 > LLM）
     # で解決済みの値を使う。ここで Configuration を再参照して `!= 5` のセンチネルで
     # 分岐すると、state と Configuration が食い違う入力で優先順位が逆転し、
@@ -37,10 +35,10 @@ def search_node(state: AgentState, config: RunnableConfig) -> dict:
         max_results=max_results,
         published_after=instruction.published_after,
         sort_by=instruction.sort_by or "relevance",
-        config=cfg,
+        configuration=configurable,
     )
 
-    emitter.emit(3, NODE_SEARCH, "完了", detail=f"{len(candidates)} 件を選定")
+    emitter.emit(NODE_SEARCH, "完了", detail=f"{len(candidates)} 件を選定")
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
     # 検索クエリをユーザーに表示

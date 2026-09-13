@@ -165,11 +165,34 @@ uv run python -m trend_researcher \
 | `--output PATH` | 標準出力 | レポート書き込み先ファイル |
 | `--since YYYY-MM-DD` | なし | 投稿日下限 |
 | `--sort {relevance,likes}` | `relevance` | 選定基準（X 用） |
-| `--trends` | なし | トレンドワード探索モード（X 用・予約） |
 | `--cache-dir PATH` | `cache/` | 中間成果物の永続化先 |
 
 列挙値（`--platform` / `--format` / `--sort`）は**大文字小文字を区別**します。
 `--platform X`、`--format JSON`、`--sort Relevance` はいずれも未知の値として引数エラー（終了コード 2）になります。
+
+### 環境変数
+
+実行時設定は `.env`（または環境変数）から供給します。名前は **共通の `TR_*`**、**X 固有の `XTR_*`**、
+**YouTube 固有の `YTR_*`** の 3 群です。共通の項目は `TR_*` に置けば両プラットフォームで使われ、
+片方だけ変えたいときは `XTR_*` / `YTR_*` で上書きします。
+
+| 群 | 変数 | 既定値 | 説明 |
+|---|---|---|---|
+| 共通 | `TR_MODEL` | `openai:mimo-v2.5` | LLM のモデル名 |
+| 共通 | `TR_MAX_RESULTS` | `5` | 解析対象の件数 |
+| 共通 | `TR_TRANSCRIPT_LANG` | `ja` | 字幕取得の優先言語 |
+| 共通 | `TR_CACHE_DIR` | `cache` | 中間成果物の永続化先（相対パスはリポジトリ直下基準） |
+| X 固有 | `XTR_ACCOUNTS_DB` | `accounts.db` | `twscrape` のアカウント DB（クッキー保存先） |
+| X 固有 | `XTR_SEARCH_POOL_SIZE` | `50` | いいね順ソート用の検索プールサイズ |
+| X 固有 | `XTR_MAX_RETRIES` | `3` | X 境界の最大リトライ回数 |
+| YouTube 固有 | `YTR_TRANSCRIPT_LANG` | `ja` | 字幕取得の優先言語（YouTube で変えたいとき） |
+| LLM 接続 | `OPENAI_API_KEY` / `OPENAI_BASE_URL` | — / `https://opencode.ai/zen/go/v1` | OpenAI 互換 API の接続情報 |
+
+解決の順序は **明示指定（CLI オプション） > 環境変数（`TR_*` → `XTR_*` / `YTR_*`） > 既定値**です。
+たとえば `--max-results 10` は `TR_MAX_RESULTS` より優先され、`TR_MAX_RESULTS` は
+`XTR_MAX_RESULTS`（`--platform x` のとき）より優先されます。
+設定の入口は `Configuration`（実行時設定の唯一の型）で、ノードは環境変数を直接読みません。
+実際の値の一覧は `.env.example` を参照してください。
 
 ### 出力チャネル
 

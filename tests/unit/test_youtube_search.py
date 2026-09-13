@@ -16,7 +16,7 @@ from unittest import mock
 
 import pytest
 
-from trend_researcher.config import Config
+from trend_researcher.configuration import Configuration
 from trend_researcher.models import Candidate
 from trend_researcher.providers.youtube import YouTubeProvider
 from trend_researcher.tools.transcript import Transcript
@@ -233,7 +233,7 @@ def test_youtube_provider_searches_only_the_first_query():
 
     with mock.patch("trend_researcher.providers.youtube.search_videos", _fake_search):
         YouTubeProvider().search(
-            ["q1", "q2"], max_results=7, published_after=None, sort_by="relevance", config=Config()
+            ["q1", "q2"], max_results=7, published_after=None, sort_by="relevance", configuration=Configuration()
         )
     assert calls == [("q1", 7)]
 
@@ -247,7 +247,7 @@ def test_youtube_provider_searches_empty_query_when_no_queries():
 
     with mock.patch("trend_researcher.providers.youtube.search_videos", _fake_search):
         YouTubeProvider().search(
-            [], max_results=5, published_after=None, sort_by="relevance", config=Config()
+            [], max_results=5, published_after=None, sort_by="relevance", configuration=Configuration()
         )
     assert queries == [""]
 
@@ -263,7 +263,7 @@ def test_youtube_provider_passes_published_after():
     bound = datetime(2025, 6, 1, tzinfo=UTC)
     with mock.patch("trend_researcher.providers.youtube.search_videos", _fake_search):
         YouTubeProvider().search(
-            ["q1"], max_results=5, published_after=bound, sort_by="relevance", config=Config()
+            ["q1"], max_results=5, published_after=bound, sort_by="relevance", configuration=Configuration()
         )
     assert seen == [bound]
 
@@ -285,14 +285,14 @@ def test_youtube_provider_fetch_contexts_notes_missing_transcript():
     cands = [Candidate(platform="youtube", id="v1", title="タイトル1")]
     transcript = Transcript(video_id="v1", language="ja", text="   ")
     with mock.patch("trend_researcher.providers.youtube.fetch_transcript", return_value=transcript):
-        contexts, notes = YouTubeProvider().fetch_contexts(cands, Config())
+        contexts, notes = YouTubeProvider().fetch_contexts(cands, Configuration())
 
     assert [c.id for c in contexts] == ["v1"]
     assert contexts[0].text == "   "
     assert notes == ["字幕取得不可: タイトル1 (v1) - メタデータのみで解析"]
 
 
-def test_youtube_provider_fetch_contexts_uses_transcript_language_from_config():
+def test_youtube_provider_fetch_contexts_uses_transcript_language_from_configuration():
     langs: list[str] = []
 
     def _fake_transcript(video_id, language="ja"):  # type: ignore[no-untyped-def]
@@ -302,7 +302,7 @@ def test_youtube_provider_fetch_contexts_uses_transcript_language_from_config():
     cands = [Candidate(platform="youtube", id="v1", title="タイトル1")]
     with mock.patch("trend_researcher.providers.youtube.fetch_transcript", _fake_transcript):
         contexts, notes = YouTubeProvider().fetch_contexts(
-            cands, Config(transcript_language="en")
+            cands, Configuration(transcript_language="en")
         )
 
     assert langs == ["en"]

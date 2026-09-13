@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 
-from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
+
+from trend_researcher.config import load_env
+from trend_researcher.configuration import resolve_env
 
 Role = str
 
@@ -18,14 +20,24 @@ _ROLE_MAX_TOKENS: dict[str, int] = {
 }
 
 
-def build_model(role: Role = "research"):
+def build_model(role: Role = "research", env_prefix: str | None = None):
     """指示された役割で LLM を構築する。
 
     OpenDeepResearch 同様 `openai:mimo-v2.5` を OpenAI 互換エンドポイントで利用。
     `configurable_fields` で実行時上書き（model/max_tokens/api_key）を許容。
+
+    Args:
+        role: 役割（`_ROLE_MAX_TOKENS` のキー）。
+        env_prefix: プラットフォーム固有の環境変数接頭辞（例: `XTR` / `YTR`）。
+            provider が渡す。解決順は `TR_MODEL` → `{env_prefix}_MODEL` → 既定。
     """
-    load_dotenv()
-    model = os.getenv("TR_MODEL", os.getenv("XTR_MODEL", os.getenv("YTR_MODEL", "openai:mimo-v2.5")))
+    # `.env` の読み込みは `config.load_env()` の 1 経路に集約する（FR-013 / SET-002）。
+    # Studio のような `Configuration.load()` を通らない実行でも、ここで境界として
+    # `OPENAI_API_KEY` / `OPENAI_BASE_URL` の出所を確保する（SET-009）。
+    load_env()
+    # 解決規則は `resolve_env` に一本化する（SET-009。`TR_MODEL` → `{env_prefix}_MODEL`
+    # → 既定。接頭辞は provider が引数で渡す）
+    model = resolve_env("MODEL", default="openai:mimo-v2.5", env_prefix=env_prefix)
     api_key = os.getenv("OPENAI_API_KEY", "")
     base_url = os.getenv("OPENAI_BASE_URL", "https://opencode.ai/zen/go/v1")
     max_tokens = _ROLE_MAX_TOKENS.get(role, 10000)

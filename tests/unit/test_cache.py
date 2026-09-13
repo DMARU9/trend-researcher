@@ -6,8 +6,7 @@
 - 書き込み: UTF-8 の生バイトで保存し、非 ASCII をエスケープしない
 - 書き込み: JSON 化できない値は `default=str` で文字列化して落ちない
 - 書き込み: 既存ファイルは上書きする（追記でも連結でもない）
-- 読み戻し: ファイルが無ければ例外ではなく `None`
-- 読み戻し: 壊れた JSON は握りつぶさず例外にする（耐性は「欠落」のみ）
+- 読み戻し API を持たない（`read_json` は REM-001 で削除。実行時の参照が 0 だった）
 
 一時ディレクトリ（`tmp_path`）だけを使い、実リポジトリの `cache/` を汚さない
 （LAYOUT-003-4）。
@@ -20,7 +19,18 @@ from pathlib import Path
 
 import pytest
 
-from trend_researcher.cache import read_json, write_json
+from trend_researcher import cache
+from trend_researcher.cache import write_json
+
+
+def test_read_json_is_removed():
+    """読み戻し API は存在しない（FR-010 / REM-001）。
+
+    実行時の参照が 0 のまま残すと「使えるが使われていない API」として
+    `TOTAL` と同じ二重定義の温床になる。書き込み（`write_json`）は残す。
+    """
+    assert not hasattr(cache, "read_json")
+    assert hasattr(cache, "write_json")
 
 
 def test_write_json_creates_parent_directory_and_returns_path(tmp_path: Path) -> None:
@@ -78,33 +88,3 @@ def test_write_json_accepts_any_json_serializable_value(tmp_path: Path, data: ob
     path = write_json(tmp_path, "payload", data)
 
     assert json.loads(path.read_text(encoding="utf-8")) == data
-
-
-def test_read_json_returns_none_when_file_is_missing(tmp_path: Path) -> None:
-    """欠落は例外ではなく `None`（呼び出し側が存在確認なしで扱える）。"""
-    assert read_json(tmp_path, "report") is None
-
-
-def test_read_json_returns_none_when_directory_is_missing(tmp_path: Path) -> None:
-    assert read_json(tmp_path / "not-created-yet", "report") is None
-
-
-def test_read_json_round_trips_written_data(tmp_path: Path) -> None:
-    original = {"topic": "日本語", "items": [1, 2, 3], "nested": {"ok": True}}
-    write_json(tmp_path, "report", original)
-
-    assert read_json(tmp_path, "report") == original
-
-
-def test_read_json_reads_externally_written_file(tmp_path: Path) -> None:
-    (tmp_path / "external.json").write_text('{"k": "値"}', encoding="utf-8")
-
-    assert read_json(tmp_path, "external") == {"k": "値"}
-
-
-def test_read_json_does_not_swallow_broken_json(tmp_path: Path) -> None:
-    """壊れた JSON は `None` にせず例外にする（耐性は「欠落」だけに限定する）。"""
-    (tmp_path / "broken.json").write_text("{壊れている", encoding="utf-8")
-
-    with pytest.raises(json.JSONDecodeError):
-        read_json(tmp_path, "broken")

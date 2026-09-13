@@ -22,29 +22,35 @@ class OutputSpec(BaseModel):
     """出力指定。"""
 
     format: OutputFormat = OutputFormat.MARKDOWN
-    table_for: list[str] = Field(default_factory=lambda: ["common_points"])
 
 
 class ResearchInstruction(BaseModel):
-    """ユーザー指示を構造化したもの（parse_instruction で抽出）。"""
+    """ユーザー指示を構造化したもの（parse_instruction で抽出）。
+
+    `platform` の空文字は「未指定」を意味し、登録済みプラットフォームの先頭
+    （`providers.get_provider("")` の解決先）として扱われる（FR-002）。
+    """
 
     raw_text: str
-    platform: str = "x"  # "x" | "youtube"
+    platform: str = ""
     topic: str = ""
     max_results: int = 5
     output: OutputSpec = Field(default_factory=OutputSpec)
     published_after: datetime | None = None
-    # X 特有（--trends / --sort）
-    use_trends: bool = False
+    # 選定基準（--sort）
     sort_by: str = "relevance"  # "relevance" | "likes"
     # YouTube 特有（--lang）
     transcript_language: str = "ja"
 
 
 class Candidate(BaseModel):
-    """検索で選定された 1 件（ツイートまたは動画）。プラットフォーム共通。"""
+    """検索で選定された 1 件（ツイートまたは動画）。プラットフォーム共通。
 
-    platform: str = "x"
+    `platform` の空文字は「未指定」を意味し、登録済みプラットフォームの先頭と
+    して扱われる（`ResearchInstruction` と同じ扱い）。
+    """
+
+    platform: str = ""
     id: str  # tweet_id または video_id
     title: str = ""  # 動画タイトル（YouTube）/ ツイートは空
     text: str = ""  # ツイート本文（X）/ 動画は空

@@ -12,11 +12,11 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from trend_researcher.config import Config
 from trend_researcher.configuration import Configuration
-from trend_researcher.graph import EXECUTION_TIMEOUT, render_report, trend_researcher
+from trend_researcher.graph import EXECUTION_TIMEOUT, trend_researcher
 from trend_researcher.models import OutputFormat
-from trend_researcher.providers import available_platforms
+from trend_researcher.providers import available_platforms, get_provider
+from trend_researcher.rendering import render_report
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -29,7 +29,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--platform",
         choices=available_platforms(),
         required=True,
-        help="対象プラットフォーム（x=X/Twitter、youtube=YouTube）",
+        help="対象プラットフォーム（利用可能な値は choices の一覧）",
     )
     parser.add_argument("--output", help="レポート書き込み先ファイル（省略時は stdout）")
     parser.add_argument(
@@ -47,11 +47,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--cache-dir", default=None, help="中間成果物の永続化先（既定: cache/）")
     parser.add_argument(
-        "--trends",
-        action="store_true",
-        help="トレンドワード探索モード（X 用。予約。現在は通常検索と同じ）",
-    )
-    parser.add_argument(
         "--sort",
         choices=["relevance", "likes"],
         default="relevance",
@@ -60,26 +55,28 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-async def _run_async(args: argparse.Namespace, config: Config) -> dict:
-    """非同期でリサーチを実行し、結果辞書を返す。"""
+async def _run_async(args: argparse.Namespace, settings: Configuration) -> dict:
+    """非同期でリサーチを実行し、結果辞書を返す。
+
+    `settings` は `Configuration.load()` で解決済みの実行時設定（明示指定 >
+    環境変数 > 既定）。グラフへは**この値**を `RunnableConfig` で渡す（SET-006）。
+    """
     platform = args.platform
-    lang = args.lang or config.transcript_language
     output_format = OutputFormat.JSON if args.format == "json" else OutputFormat.MARKDOWN
 
     since: datetime | None = None
     if args.since:
         since = datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=UTC)
 
-    # Configuration に設定値を反映
-    configuration = Configuration(
-        platform=platform,
-        output_format=output_format.value,
-        max_results=args.max_results or 5,
-        sort_by=args.sort,
-        transcript_language=lang,
-        use_trends=args.trends,
-        cache_dir=str(config.cache_dir),
-        published_after=since.isoformat() if since else None,
+    # CLI が決める値（プラットフォーム・出力形式・選定基準・投稿日下限）を載せて
+    # グラフへ渡す。設定の解決（環境変数・既定値）は Settings 側で完了している。
+    configuration = settings.model_copy(
+        update={
+            "platform": platform,
+            "output_format": output_format.value,
+            "sort_by": args.sort,
+            "published_after": since.isoformat() if since else None,
+        }
     )
 
     runnable_config: RunnableConfig = {
@@ -116,7 +113,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     platform = args.platform
-    config = Config.load(platform=platform, cache_dir=args.cache_dir, max_results=args.max_results)
+    # 登録済みプラットフォームの解決は引数検証直後に 1 回だけ行う（差は provider が持つ）
+    provider = get_provider(platform)
+    # 実行時設定は単一の型で解決する（FR-013 / SET-002）。明示指定（CLI）は
+    # `model_copy(update=...)` で与え、`model_fields_set` に載せて環境変数より
+    # 優先させる（SET-006 / SET-007）。
+    settings = Configuration.load(env_prefix=provider.env_prefix)
+    overrides: dict[str, Any] = {}
+    if args.max_results is not None:
+        overrides["max_results"] = args.max_results
+    if args.lang is not None:
+        overrides["transcript_language"] = args.lang
+    if args.cache_dir is not None:
+        # 明示指定のパスは実行時の CWD 基準で解決する（現行の `--cache-dir` と同じ）
+        overrides["cache_dir"] = str(Path(args.cache_dir).expanduser().resolve())
+    if overrides:
+        settings = settings.model_copy(update=overrides)
 
     if args.since:
         try:
@@ -126,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     try:
-        result = asyncio.run(_run_async(args, config))
+        result = asyncio.run(_run_async(args, settings))
     except TimeoutError:
         print(
             f"[警告] リサーチが時間上限（{int(EXECUTION_TIMEOUT.total_seconds() / 60)}分）に達しました。途中結果を返します。",
@@ -145,11 +157,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if not report.candidates:
-        subject = "ツイート" if platform == "x" else "動画"
-        print(f"該当なし: 指定された指示に一致する{subject}が見つかりませんでした。", file=sys.stderr, flush=True)
-        rendered = render_report(report)
+        print(
+            f"該当なし: 指定された指示に一致する{provider.content_noun}が見つかりませんでした。",
+            file=sys.stderr,
+            flush=True,
+        )
+        rendered = render_report(report, provider)
     else:
-        requested = report.instruction.max_results or config.max_results
+        requested = report.instruction.max_results or settings.max_results
         if len(report.candidates) < requested:
             print(
                 f"[情報] 要求件数 {requested} 件に対し、実際に見つかったのは "
@@ -157,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
                 flush=True,
             )
-        rendered = render_report(report)
+        rendered = render_report(report, provider)
 
     if args.output:
         try:

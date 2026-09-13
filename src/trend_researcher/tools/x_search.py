@@ -1,7 +1,8 @@
 """twscrape を用いた検索・コンテキスト取得（単一クエリ・関連度順上位 N 件）。
 
 twscrape は非同期 API のため、本モジュールは asyncio でラップする。
-アカウント DB（クッキー保存先）は Config.accounts_db を使用。
+アカウント DB（クッキー保存先）は呼び出し元（`providers/x.py` の `XSettings.accounts_db`）
+から引数で受け取る。
 統一モデル Candidate / Context を返す。
 """
 
@@ -160,11 +161,6 @@ async def _fetch_context_async(tweet_id: str, accounts_db: str, max_replies: int
         )
 
     return ctx
-
-
-def fetch_thread(tweet_id: str, accounts_db: str = "accounts.db", max_replies: int = 3) -> Context:
-    """同期ラッパ: ツイートのスレッド展開＋リプライを取得する。"""
-    return asyncio.run(_fetch_context_async(tweet_id, accounts_db, max_replies))
 
 
 async def _fetch_threads_async(candidates: list[Candidate], accounts_db: str) -> list[Context]:

@@ -1,25 +1,32 @@
 <!--
 Sync Impact Report
 ==================
-Version change: 1.1.0 → 1.2.0
-Rationale: MINOR（品質ゲートの実質的な拡張）。移行措置を終了し、ゲートの適用範囲を
-  「変更したファイル」から「リポジトリ全体」へ広げた。Core Principles の削除・再定義は
-  行っていない（I〜VI は変更なし）。
+Version change: 1.2.0 → 1.2.1
+Rationale: PATCH（文言修正・明確化）。spec 002（プラットフォーム拡張性リファクタリング）の
+  完了に伴い、実装と食い違っていた 3 箇所の文言を実態に合わせて改める。原則の追加・削除・
+  再定義は行っていない（I〜III・VI は変更なし）。改正は実装の完了後に行い、実装と憲法を
+  同一の変更一式として green にした（T035 / T036 / T042 の実装は本改正と同時に適用）。
 
-Modified principles: なし（Core Principles は変更なし）
+Modified principles:
+  - 原則 IV（プラットフォーム抽象）: 「既存のプラットフォーム分岐は、そのファイルを変更する
+    際に provider のフックへ寄せる SHOULD」→「コアにプラットフォーム名の列挙・比較を
+    残してはならない MUST NOT」（段階的な推奨から禁止へ明確化。残存分岐は本改正で 0 件）
+  - 原則 V（CLI 出力契約と観測可能性）: 「`NODE_ORDER`・`ProgressEmitter.TOTAL`・グラフの
+    ノード数の一致」→「`NODE_ORDER` とグラフのノード数を一致させ、総数と表示番号は
+    単一の定義（`NODE_ORDER`）から導出する MUST（手書きの定数を置かない）」。
+    `ProgressEmitter.TOTAL` は削除され、総数・番号は `NODE_ORDER` のみを出所とする
 Changed sections:
-  - 「開発ワークフローと品質ゲート」: 「既存違反のベースライン（移行措置）」節を削除し、
-    「リポジトリ全体の green（移行措置の終了）」節に置き換え。`ruff check .` / `mypy src` は
-    0 件を維持する MUST、抑制（`# noqa`・設定での除外）を根拠なく追加しない MUST NOT を明記
-  - DoD から「（移行期間中は変更ファイル分の green）」の暫定記述を削除
-Removed sections: なし（「既存違反のベースライン（移行措置）」は小節単位で終了）
+  - 「技術制約と品質基準」: 「実行条件は `.env` と `Config` から供給し」を「`.env` と
+    `Configuration`（唯一の実行時設定型）から供給し」へ読み替え（`Config` / `get_config` は
+    削除済み）。環境変数の一覧（`TR_*` / `XTR_*` / `YTR_*`）と「ハードコード禁止 MUST NOT」は不変
+Removed sections: なし
 
 Templates requiring updates:
-  ✅ .specify/templates/（変更不要。品質ゲートは plan の Constitution Check 経由で参照）
-  ✅ .github/copilot-instructions.md（変更不要。憲法を参照するのみ）
-  ✅ README.md（「テスト・Lint・型チェック（品質ゲート）」を 0 件維持へ更新）
-  ✅ specs/001-test-suite-hardening/（変更不要。burndown を本機能の完了条件外とし、
-    追跡タスク #47 へ分離した計画時の判断は履歴として維持する）
+  ✅ .specify/templates/（変更不要。原則の参照のみで、文言の転記なし）
+  ✅ .github/copilot-instructions.md（変更不要）
+  ✅ README.md（T063 で環境変数の 3 群をへ更新。本改正の内容と一致）
+  ✅ specs/002-platform-extensibility-refactor/（plan.md の Constitution Check に改正対象 3 点、
+    research.md R-12 に対応関係を記載済み。spec の凍結された数値・文言は変更しない）
 
 History:
   - v1.0.0（2026-09-12）: 初期テンプレートから初版採択。原則 I〜V、技術制約と品質基準、
@@ -27,12 +34,16 @@ History:
   - v1.1.0（2026-09-12）: 原則 VI（リファクタリングは後方互換を要求しない）を追加。
   - v1.2.0（2026-09-13）: 移行措置を終了。`ruff` / `mypy` の既存違反を全件解消し、
     ゲートをリポジトリ全体へ拡張（追跡タスク #47 の完了を受けた改正）。
+  - v1.2.1（2026-09-13）: spec 002 の完了を受けた PATCH。原則 IV を「コアにプラットフォーム名の
+    列挙・比較を残さない MUST NOT」へ、原則 V を「総数・番号は `NODE_ORDER` から導出する MUST」
+    へ改め、技術制約の `Config` を`Configuration` へ読み替えた。
 
 Follow-up TODOs: なし
   - 解消済み（2026-09-13）: BASELINE-BURNDOWN。採択時の実測値はテスト 61 passed /
     ruff 40 errors / mypy 37 errors だった。テスト 547 passed（行カバレッジ 90% 以上）/
     ruff 0 errors / mypy 0 errors まで解消し、抑制（`# noqa`・`pyproject.toml` の除外）を
     使わずに 0 を達成した。
+  - 解消済み（2026-09-13）: 原則 IV / V と実装の食い違い（本改正）。
 -->
 
 # Trend Researcher Constitution
@@ -108,8 +119,11 @@ X と YouTube の差（検索・ソース取得・プロンプト・レンダリ
 - 新プラットフォームは「`Provider` プロトコルの実装」＋「`providers/__init__.py` への
   登録」＋「provider 単体テスト」で追加できる MUST。ノードやグラフに
   `platform == "..."` の新しい分岐を追加してはならない（MUST NOT）。
-- 既存のプラットフォーム分岐（`nodes/compile_report.py` などに残存）は、そのファイルを
-  変更する際に provider のフックへ寄せる SHOULD。
+- コア（`graph.py` / `nodes/` / `models.py` / `configuration.py` / `state.py` / `__main__.py` /
+  `rendering.py` / `prompts.py`）にプラットフォーム名の列挙・比較を残してはならない
+  MUST NOT。プラットフォーム名のリテラルが現れてよいのは `providers/__init__.py` の
+  登録辞書（拡張点そのもの）のみであり、機械的に走査して 0 件を保つ MUST
+  （`tests/unit/test_platform_scan.py` の規則 (a)+(b)）。
 - 表ヘッダ・ラベル・件名など出力の差分は provider のメソッド／プロパティで表現する MUST。
 - プラットフォームを追加・変更する際は、既存プラットフォームのテストが緑のままである
   ことを確認する MUST（片方の変更がもう片方を壊していないこと）。
@@ -126,8 +140,8 @@ CLI の出力契約を維持する MUST。新規の出力・終了経路は次�
 - **終了コード**は 0 = 成功、1 = 実行時エラー、2 = 引数エラー。契約を変える場合は
   README とテストを同時に更新する MUST。
 - 各ノードは `ProgressEmitter` を通じて開始／完了を必ず出力し、中間状態を空にしない
-  MUST。`NODE_ORDER`・`ProgressEmitter.TOTAL`・グラフのノード数の一致を保つ MUST
-  （変更時はテストで固定）。
+  MUST。`NODE_ORDER` とグラフのノード数を一致させ、**総数と表示番号は単一の定義
+  （`NODE_ORDER`）から導出する** MUST（手書きの定数を置かない。変更時はテストで固定）。
 - 中間成果物は `cache/` 配下に JSON（UTF-8 / `ensure_ascii=False`）で永続化する MUST
   （FR-012）。
 - エラーは握りつぶさず stderr へ出力し、終了コードに反映する MUST。秘密情報（API
@@ -177,8 +191,10 @@ stdout / stderr / 終了コードはテストで固定できる契約である�
 （YAGNI）。
 
 **外部接続**: LLM は OpenAI 互換 API（`OPENAI_BASE_URL` / `OPENAI_API_KEY`）。モデル名・
-件数・キャッシュ先などの実行条件は `.env` と `Config` から供給し、コードに
-ハードコードしてはならない（MUST NOT）。
+件数・キャッシュ先などの実行条件は `.env` と `Configuration`（唯一の実行時設定型。
+`load()` / `from_runnable_config()` の 1 経路）から供給し、コードに
+ハードコードしてはならない（MUST NOT）。環境変数の名前は `TR_*`（共通）/ `XTR_*`（X 固有）/
+`YTR_*`（YouTube 固有）の 3 群を維持する MUST（利用者が直接依存する契約）。
 
 **静的品質**: `ruff`（line-length 100 / target py311）と `mypy`（`src` 対象）を
 `pyproject.toml` の設定のまま維持する MUST。設定変更は根拠を伴う場合のみ行う。
@@ -242,4 +258,4 @@ stdout / stderr / 終了コードはテストで固定できる契約である�
   固定するテストを残す MUST。
 - 実行時の開発ガイダンスは `README.md` と `.github/copilot-instructions.md` を参照する。
 
-**Version**: 1.2.0 | **Ratified**: 2026-09-12 | **Last Amended**: 2026-09-13
+**Version**: 1.2.1 | **Ratified**: 2026-09-12 | **Last Amended**: 2026-09-13

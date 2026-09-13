@@ -135,7 +135,7 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     platform: str = state.get("platform") or configurable.platform
     provider = get_provider(platform)
     emitter = make_emitter()
-    emitter.emit(1, NODE_PARSE_INSTRUCTION, "開始")
+    emitter.emit(NODE_PARSE_INSTRUCTION, "開始")
     progress_messages = emitter.get_messages()
 
     # instruction_raw: ユーザーの最新メッセージから抽出
@@ -144,7 +144,7 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     # `content` は本文ブロックのリストにもなりうる（LangChain の標準形式）。
     # 以降は文字列前提の解析（正規表現・`ResearchInstruction.raw_text`）なので文字列化する。
     raw = content if isinstance(content, str) else str(content)
-    model = build_model("research")
+    model = build_model("research", provider.env_prefix)
     prompt = provider.parse_instruction_prompt.format(instruction=raw)
     result = model.invoke(prompt)
     text = result.content if hasattr(result, "content") else str(result)
@@ -188,12 +188,11 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
         max_results=max_results,
         output=OutputSpec(format=output_format),
         published_after=published_after,
-        use_trends=bool(configurable.use_trends) if configurable.use_trends else bool(state.get("use_trends", False)),
         sort_by=str(configurable.sort_by) if configurable.sort_by != "relevance" else str(state.get("sort_by", "relevance")),
         transcript_language=str(configurable.transcript_language) if configurable.transcript_language != "ja" else str(state.get("transcript_language", "ja") or "ja"),
     )
 
-    emitter.emit(1, NODE_PARSE_INSTRUCTION, "完了", detail=f'トピック: "{topic}" / 件数: {max_results}')
+    emitter.emit(NODE_PARSE_INSTRUCTION, "完了", detail=f'トピック: "{topic}" / 件数: {max_results}')
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
     return {"instruction": instruction, "messages": progress_messages}

@@ -171,7 +171,3 @@ YOUTUBE_EXTRACT_COMMON_PROMPT = """\
 各動画の要約:
 {analyses}
 """
-
-COMPILE_REPORT_PROMPT = """\
-提供された構造化データをもとに、最終レポートを整えてください。この指示はフォーマット済みデータの確認用です。
-"""

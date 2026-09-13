@@ -43,7 +43,7 @@ def plan_search(state: AgentState, config: RunnableConfig) -> dict:
     platform: str = state.get("platform") or configurable.platform
     provider = get_provider(platform)
     emitter = make_emitter()
-    emitter.emit(2, NODE_PLAN_SEARCH, "開始", detail="LLM が検索クエリを生成中")
+    emitter.emit(NODE_PLAN_SEARCH, "開始", detail="LLM が検索クエリを生成中")
     progress_messages = emitter.get_messages()
 
     instruction = state["instruction"]
@@ -59,7 +59,7 @@ def plan_search(state: AgentState, config: RunnableConfig) -> dict:
     else:
         date_hint = ""
 
-    model = build_model("research")
+    model = build_model("research", provider.env_prefix)
     prompt = provider.plan_search_prompt.format(topic=search_topic, date_hint=date_hint)
     result = model.invoke(prompt)
     raw = result.content if hasattr(result, "content") else str(result)
@@ -70,13 +70,14 @@ def plan_search(state: AgentState, config: RunnableConfig) -> dict:
         if q:
             queries.append(q)
 
-    # クエリ数のハード上限（X のみ適用）。LLM が 5 件を守らなくても安全に切り詰める。
-    # YouTube は「単一クエリ」設計（呼び出し元で先頭1件のみ使用）のため制限しない。
-    platform = (instruction.platform or "x").lower()
-    if platform == "x" and len(queries) > 8:
-        queries = queries[:8]
+    # クエリ数のハード上限（上限を持つプラットフォームにのみ適用）。LLM が 5 件を
+    # 守らなくても安全に切り詰める。上限が `None` のプラットフォームは「単一クエリ」
+    # 設計（呼び出し元で先頭1件のみ使用）を含め制限しない。上限値は provider が持つ。
+    limit = provider.max_search_queries
+    if limit is not None and len(queries) > limit:
+        queries = queries[:limit]
 
-    emitter.emit(2, NODE_PLAN_SEARCH, "完了", detail=f'クエリ {len(queries)} 件: {", ".join(queries)}')
+    emitter.emit(NODE_PLAN_SEARCH, "完了", detail=f'クエリ {len(queries)} 件: {", ".join(queries)}')
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
     return {"search_queries": queries, "messages": progress_messages}

@@ -26,9 +26,19 @@ from langchain_core.messages import HumanMessage
 
 from trend_researcher import __main__ as main_module
 from trend_researcher import config as config_module
-from trend_researcher.config import Config, get_config
-from trend_researcher.graph import render_report, trend_researcher
+from trend_researcher.configuration import Configuration
+from trend_researcher.graph import trend_researcher
 from trend_researcher.models import Candidate, Context, OutputFormat, ResearchReport
+from trend_researcher.providers import get_provider
+from trend_researcher.rendering import render_report
+
+
+def _render(report: ResearchReport) -> str:
+    """レポートのプラットフォームに対応する provider で描画する（FR-017）。
+
+    描画は provider を引数で受け取る（描画の内部で解決し直さない）。
+    """
+    return render_report(report, get_provider(report.instruction.platform))
 
 # --- ノード単位の LLM 応答（プロンプト本文に依存しない） ---------------------------------
 
@@ -82,15 +92,16 @@ _YOUTUBE_RESPONSES: dict[str, str] = {
 
 
 @pytest.fixture(autouse=True)
-def _isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """実 `.env` と `TR_*` 環境変数を遮断する（FR-021: 実行環境に依存しない）。"""
+def _isolated_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """実 `.env` と `TR_*` 環境変数を遮断する（FR-021: 実行環境に依存しない）。
+
+    設定の解決は `Configuration.load()` に集約され、プロセス内キャッシュを持たない
+    （SET-010）ため、旧 `get_config.cache_clear()` は不要になった。
+    """
     monkeypatch.setattr(config_module, "load_dotenv", lambda *a, **k: None)
     for key in list(os.environ):
         if key.startswith(("TR_", "XTR_", "YTR_")):
             monkeypatch.delenv(key, raising=False)
-    get_config.cache_clear()
-    yield
-    get_config.cache_clear()
 
 
 def _candidates(platform: str, count: int) -> list[Candidate]:
@@ -231,6 +242,34 @@ def test_node_responses_are_recorded_per_node(fake_model_factory, x_flow) -> Non
     assert len(fake_model_factory.prompts_for("extract_common")) == 1
 
 
+@pytest.mark.parametrize(
+    ("platform", "flow_fixture", "prefix"),
+    [("x", "x_flow", "XTR"), ("youtube", "youtube_flow", "YTR")],
+)
+def test_llm_nodes_receive_the_platform_env_prefix(
+    request: pytest.FixtureRequest,
+    fake_model_factory,
+    platform: str,
+    flow_fixture: str,
+    prefix: str,
+) -> None:
+    """LLM ノードは provider の接頭辞を渡す（コアが接頭辞を組み立てない・FR-007）。
+
+    接頭辞が渡らなくなると `TR_MODEL` しか見えなくなり、プラットフォーム別の
+    モデル設定（`XTR_MODEL` / `YTR_MODEL`）が黙って無視される。
+    """
+    request.getfixturevalue(flow_fixture)
+    responses = _X_RESPONSES if platform == "x" else _YOUTUBE_RESPONSES
+
+    with fake_model_factory.install(responses):
+        _run_graph("困りごとを調査したい", platform=platform)
+
+    for node in ("parse_instruction", "plan_search", "analyze_content", "extract_common"):
+        prefixes = fake_model_factory.env_prefixes_for(node)
+        assert prefixes, f"{node} が build_model を呼んでいない"
+        assert set(prefixes) == {prefix}, node
+
+
 # --- X: 正常系 ----------------------------------------------------------------
 
 
@@ -249,7 +288,7 @@ def test_x_flow_produces_full_report(fake_model_factory, x_flow) -> None:
     assert report.sources == [c.url for c in report.candidates]
     assert any("選定基準: 検索結果からいいね数の少ない順" in n for n in report.notes)
 
-    md = render_report(report)
+    md = _render(report)
     assert "選定ツイートリスト" in md
     assert "**概要**" in md
     assert "| 切り口 | 読者への価値 | 拾えるキーフレーズ |" in md
@@ -318,7 +357,7 @@ def test_youtube_flow_renders_markdown_table(fake_model_factory, youtube_flow) -
     report = result["report"]
     assert report.instruction.platform == "youtube"
     assert len(report.candidates) == 5
-    md = render_report(report)
+    md = _render(report)
     assert "選定動画リスト" in md
     assert "チャンネル" in md
     assert "再生数" in md
@@ -338,7 +377,7 @@ def test_youtube_flow_renders_json_when_requested(fake_model_factory, youtube_fl
     assert report.instruction.output.format == OutputFormat.JSON
     assert len(report.candidates) == 10
 
-    parsed = json.loads(render_report(report))
+    parsed = json.loads(_render(report))
     assert len(parsed["candidates"]) == 10
     assert parsed["instruction"]["platform"] == "youtube"
     assert parsed["common_themes"][0]["theme"] == "自動化"
@@ -451,7 +490,7 @@ def test_llm_empty_response_degrades_without_crashing(fake_model_factory, x_flow
     assert report.instruction.topic == "オタクの困りごとを調査したい"
     assert report.candidates == []  # クエリが空 → 検索 0 件 → ルーティング skip
     assert report.common_themes == []
-    assert "（特筆すべき共通点なし）" in render_report(report)
+    assert "（特筆すべき共通点なし）" in _render(report)
 
 
 def test_llm_unstructured_responses_fall_back_to_defaults(fake_model_factory, x_flow) -> None:
@@ -506,7 +545,7 @@ def test_unwritable_cache_dir_is_recorded_and_the_run_succeeds(
 
 
 def _capture_cli_invocation(
-    monkeypatch: pytest.MonkeyPatch, argv: list[str], config: Config
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], settings: Configuration
 ) -> dict[str, Any]:
     """`_run_async` がグラフへ渡した state / config を記録する（グラフだけ差し替える）。"""
     captured: dict[str, Any] = {}
@@ -519,15 +558,21 @@ def _capture_cli_invocation(
 
     monkeypatch.setattr(main_module, "trend_researcher", _Recorder())
     args = main_module._parse_args(argv)
-    asyncio.run(main_module._run_async(args, config))
+    asyncio.run(main_module._run_async(args, settings))
     return captured
+
+
+def _settings_with_cache_dir(cache_dir: Path) -> Configuration:
+    """`--cache-dir` を明示指定したのと同じ設定を作る（SET-006 の「明示指定」）。"""
+    return Configuration.load(env_prefix="XTR").model_copy(update={"cache_dir": str(cache_dir)})
 
 
 def test_cli_wires_cache_dir_into_the_runnable_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`--cache-dir` が Configuration まで届く（`_run_async` の配線）。"""
-    config = Config.load(platform="x", cache_dir=str(tmp_path))
     captured = _capture_cli_invocation(
-        monkeypatch, ["オタクの困りごと", "--platform", "x", "--cache-dir", str(tmp_path)], config
+        monkeypatch,
+        ["オタクの困りごと", "--platform", "x", "--cache-dir", str(tmp_path)],
+        _settings_with_cache_dir(tmp_path),
     )
 
     assert captured["config"]["configurable"]["cache_dir"] == str(tmp_path)
@@ -542,7 +587,7 @@ def test_cli_omits_max_results_from_state_when_not_given(
     常に 5 を載せると、ノード側で「明示指定」と区別できず本文の自然言語
     （「20件」）が無視される（FR-011）。
     """
-    config = Config.load(platform="x", cache_dir=str(tmp_path))
+    config = _settings_with_cache_dir(tmp_path)
     captured = _capture_cli_invocation(monkeypatch, ["20件の動画を調べて", "--platform", "x"], config)
 
     assert "max_results" not in captured["state"]
@@ -552,7 +597,7 @@ def test_cli_passes_explicit_max_results_even_when_it_is_the_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """明示指定は既定値と同じ 5 でも state に載せる（FR-011: 明示指定が最優先）。"""
-    config = Config.load(platform="x", cache_dir=str(tmp_path))
+    config = _settings_with_cache_dir(tmp_path)
     captured = _capture_cli_invocation(
         monkeypatch, ["20件の動画を調べて", "--platform", "x", "--max-results", "5"], config
     )

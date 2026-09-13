@@ -20,6 +20,18 @@ from trend_researcher.nodes.parse_instruction import (
     _parse_date_from_text,
     parse_instruction,
 )
+from trend_researcher.state import AgentInputState, AgentState
+
+
+def test_use_trends_is_not_in_the_state_declarations():
+    """ステートの宣言に `use_trends` が無い（FR-009 / REM-003）。
+
+    入力ステートは CLI が組み立て、実行ステートはノードが読み書きする。
+    どちらも実行時の参照が 0 になった項目は残さない（値が「宣言されているのに
+    誰も読まない」状態を許さない）。
+    """
+    assert "use_trends" not in AgentInputState.__annotations__
+    assert "use_trends" not in AgentState.__annotations__
 
 #: LLM が構造化ブロックを返すときの応答（既定値とは別の値にして優先順位を判定する）。
 LLM_JSON = (
@@ -362,19 +374,18 @@ def test_configurable_sort_by_beats_state(fake_model_factory: Any) -> None:
 
 
 def test_configurable_use_trends_and_transcript_language(fake_model_factory: Any) -> None:
+    """`--trends` を削除した後は `transcript_language` だけを固定する（REM-003）。"""
     out = _run(
         fake_model_factory,
         "機械学習の動画を調べて",
-        config=_config(use_trends=True, transcript_language="en"),
+        config=_config(transcript_language="en"),
     )
-    assert out["instruction"].use_trends is True
     assert out["instruction"].transcript_language == "en"
 
 
-def test_defaults_for_trends_language_and_sort(fake_model_factory: Any) -> None:
+def test_defaults_for_language_and_sort(fake_model_factory: Any) -> None:
     out = _run(fake_model_factory, "機械学習の動画を調べて")
     instruction = out["instruction"]
-    assert instruction.use_trends is False
     assert instruction.transcript_language == "ja"
     assert instruction.sort_by == "relevance"
     assert instruction.raw_text == "機械学習の動画を調べて"

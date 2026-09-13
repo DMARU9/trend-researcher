@@ -142,9 +142,13 @@ class FakeModelFactory:
         #: （例: analyze_content は候補ごとに呼ぶ）でも全件残すため、
         #: インスタンスごとのリストではなくノード単位で共有する。
         self.prompt_log: dict[str, list[str]] = {}
+        #: ノードごとの `env_prefix` 記録。各ノードが provider の接頭辞を渡して
+        #: いるか（コアが接頭辞を組み立てていないか）を観測できる。
+        self.env_prefix_log: dict[str, list[str | None]] = {}
 
     def _build_model(self, node: str, content: str | None) -> Callable[..., _FakeLLM]:
-        def _build(role: str = "research") -> _FakeLLM:
+        def _build(role: str = "research", env_prefix: str | None = None) -> _FakeLLM:
+            self.env_prefix_log.setdefault(node, []).append(env_prefix)
             if content is None:
                 raise AssertionError(
                     f"fake_model_factory: ノード {node} の応答が指定されていません。"
@@ -165,6 +169,7 @@ class FakeModelFactory:
 
         self.models = {}
         self.prompt_log = {}
+        self.env_prefix_log = {}
         with ExitStack() as stack:
             for node in LLM_NODES:
                 content = responses.get(node)
@@ -180,6 +185,10 @@ class FakeModelFactory:
         """指定ノードの `build_model` に渡されたプロンプトの一覧（全インスタンス分）。"""
         instance = self.models.get(node)
         return list(instance.prompts) if instance else []
+
+    def env_prefixes_for(self, node: str) -> list[str | None]:
+        """指定ノードが `build_model` に渡した `env_prefix` の一覧（呼び出し順）。"""
+        return list(self.env_prefix_log.get(node, []))
 
 
 # --- 境界モックフィクスチャ 5 種（data-model 1.2 / LAYOUT-003-3） ----------
@@ -304,10 +313,10 @@ def no_retry_sleep() -> Iterator[SleepSpy]:
 
 @pytest.fixture
 def tmp_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """一時ディレクトリを返し、`Config.load()` の既定 cache 先をそこへ向ける。
+    """一時ディレクトリを返し、`Configuration.load()` の既定 cache 先をそこへ向ける。
 
     実リポジトリの `cache/` を汚さない（LAYOUT-003-4）。`TR_CACHE_DIR` を
-    上書きするため、`cache_dir` を明示しない `Config.load()` でも隔離される。
+    上書きするため、`cache_dir` を明示しない `Configuration.load()` でも隔離される。
     """
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
