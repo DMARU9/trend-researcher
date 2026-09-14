@@ -211,20 +211,20 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 ### Tests for User Story 6（憲法 原則 I により必須）⚠️
 
-- [ ] T036 [P] [US6] 採点ロジックのテストを作成する: 5 観点以上を採点する / 1〜5 を 0〜1 に正規化する / **値域検査をしない**（`7` をそのまま記録）/ 型違い・欠落は取得失敗にしてその観点を未採点にする / 総合品質が 6 観点の平均（`None` は除外）/ 1 観点の失敗で全体が落ちない / `correctness` が対象外として記録されている。`tests/unit/test_evaluation.py`（新規）
-- [ ] T037 [P] [US6] 記録のテストを作成する: ファイル名が `{dataset}__{config_name}__{commit}__{model_slug}.jsonl` / データセットの指紋が記録される / 既定で追記され `--overwrite` でのみ上書き / JSONL 1 行 1 レコード / `ensure_ascii=False` / 保存先が既定で `artifacts/eval/` / 2 つの結果を**名前で指定**して比較でき、生成を繰り返さない。`tests/unit/test_evaluation_records.py`（新規）
-- [ ] T038 [P] [US6] 実走入口の契約テストを作成する（`script/evaluate.py` を `importlib.util.spec_from_file_location` で読み込む）: (a) `pyproject.toml` の `testpaths` が `["tests"]` のまま、(b) argparse のオプション集合が期待どおり、(c) `subprocess` を import していない、(d) `trend_researcher` と `render_report` を参照している、(e) 初期状態に入れるキーが `messages` / `platform` / `max_results` のみ（AST で走査）。`tests/unit/test_evaluation_entrypoint.py`（新規）
-- [ ] T039 [P] [US6] 対応表の整合テストを作成する: 観点が 5 以上 / `correctness` が対象外と記録 / 各行が実在する観点と実在する `prompts.py` の制約を指す（制約側の存在は US7 の T068 が追加する節と一致させる）。`tests/unit/test_evaluation.py`（T036 と同じファイルに追記）
+- [X] T036 [P] [US6] 採点ロジックのテストを作成する: 5 観点以上を採点する / 1〜5 を 0〜1 に正規化する / **値域検査をしない**（`7` をそのまま記録）/ 型違い・欠落は取得失敗にしてその観点を未採点にする / 総合品質が 6 観点の平均（`None` は除外）/ 1 観点の失敗で全体が落ちない / `correctness` が対象外として記録されている。`tests/unit/test_evaluation.py`（新規）
+- [X] T037 [P] [US6] 記録のテストを作成する: ファイル名が `{dataset}__{config_name}__{commit}__{model_slug}.jsonl` / データセットの指紋が記録される / 既定で追記され `--overwrite` でのみ上書き / JSONL 1 行 1 レコード / `ensure_ascii=False` / 保存先が既定で `artifacts/eval/` / 2 つの結果を**名前で指定**して比較でき、生成を繰り返さない。`tests/unit/test_evaluation_records.py`（新規）
+- [X] T038 [P] [US6] 実走入口の契約テストを作成する（`script/evaluate.py` を `importlib.util.spec_from_file_location` で読み込む）: (a) `pyproject.toml` の `testpaths` が `["tests"]` のまま、(b) argparse のオプション集合が期待どおり、(c) `subprocess` を import していない、(d) `trend_researcher` と `render_report` を参照している、(e) 初期状態に入れるキーが `messages` / `platform` / `max_results` のみ（AST で走査）。`tests/unit/test_evaluation_entrypoint.py`（新規）
+- [X] T039 [P] [US6] 対応表の整合テストを作成する: 観点が 5 以上 / `correctness` が対象外と記録 / 各行が実在する観点と実在する `prompts.py` の制約を指す（制約側の存在は US7 の T068 が追加する節と一致させる）。`tests/unit/test_evaluation.py`（T036 と同じファイルに追記）
 
 ### Implementation for User Story 6
 
-- [ ] T040 [US6] `tests/eval/schemas.py` を作成する: 採点の受け取りスキーマ（`axis` / `score` / `reason`。`ge` / `le` を付けない = FR-067）と `AxisScore` への変換
-- [ ] T041 [US6] `tests/eval/evaluators.py` を作成する: 観点ごとの判定（LLM 呼び出しは**注入された呼び出し可能オブジェクト**経由。`tools/llm.py` の経路を使う）、正規化、総合品質の集約、提示順のランダム化、1 観点の失敗の隔離（FR-039 / FR-040 / FR-041 / FR-068）
-- [ ] T042 [US6] `tests/eval/judge_prompts.py` を作成する: 観点ごとの専用判定プロンプト（生成側の制約を反映。FR-040）
-- [ ] T043 [US6] `tests/eval/datasets.py` と `tests/eval/fixtures/tr-basic.json` を作成する: 名前付きデータセットの解決（既定は同ディレクトリの `fixtures/`）、指紋の計算、`DatasetEntry` の検証（FR-070 / FR-071 / FR-073）
-- [ ] T044 [US6] `tests/eval/axes.md` を作成する: 観点一覧・対応する `prompts.py` の制約（FR-048）・参照実装の 6 評価との対応（採用 / 対象外と理由）・**参照実装の実測済み欠陥 6 件とその扱い**（FR-074 / research §R-21）を 1 つの対応表に記録する
-- [ ] T045 [US6] `script/evaluate.py` を作成する: `--dataset` / `--platform` / `--config`（複数） / `--config-name` / `--judge-model` / `--out` / `--overwrite` / `--judge-only`。生成は公開 API を in-process で呼び、初期状態は 3 項目のみ（FR-065）。`subprocess` を import しない。判定モデルは `resolve_env("EVAL_MODEL", default=...)`（T006 の実測値）で解決し、生成と同一なら `judge_model_is_generator: true` を記録する（FR-069）
-- [ ] T046 [US6] 変異探針を実行する: (a) 採点に `ge=1` を付ける → T036 が落ちる、(b) 総合品質を `mean` から `sum` に変える → T036 が落ちる、(c) `script/evaluate.py` に `subprocess` を import する → T038 が落ちる、(d) 初期状態に 4 番目のキーを足す → T038 が落ちる、(e) 無条件に上書きする → T037 が落ちる、(f) 観点を 4 つに減らす → T036 が落ちる
+- [X] T040 [US6] `tests/eval/schemas.py` を作成する: 採点の受け取りスキーマ（`axis` / `score` / `reason`。`ge` / `le` を付けない = FR-067）と `AxisScore` への変換
+- [X] T041 [US6] `tests/eval/evaluators.py` を作成する: 観点ごとの判定（LLM 呼び出しは**注入された呼び出し可能オブジェクト**経由。`tools/llm.py` の経路を使う）、正規化、総合品質の集約、提示順のランダム化、1 観点の失敗の隔離（FR-039 / FR-040 / FR-041 / FR-068）
+- [X] T042 [US6] `tests/eval/judge_prompts.py` を作成する: 観点ごとの専用判定プロンプト（生成側の制約を反映。FR-040）
+- [X] T043 [US6] `tests/eval/datasets.py` と `tests/eval/fixtures/tr-basic.json` を作成する: 名前付きデータセットの解決（既定は同ディレクトリの `fixtures/`）、指紋の計算、`DatasetEntry` の検証（FR-070 / FR-071 / FR-073）
+- [X] T044 [US6] `tests/eval/axes.md` を作成する: 観点一覧・対応する `prompts.py` の制約（FR-048）・参照実装の 6 評価との対応（採用 / 対象外と理由）・**参照実装の実測済み欠陥 6 件とその扱い**（FR-074 / research §R-21）を 1 つの対応表に記録する
+- [X] T045 [US6] `script/evaluate.py` を作成する: `--dataset` / `--platform` / `--config`（複数） / `--config-name` / `--judge-model` / `--out` / `--overwrite` / `--judge-only`。生成は公開 API を in-process で呼び、初期状態は 3 項目のみ（FR-065）。`subprocess` を import しない。判定モデルは `resolve_env("EVAL_MODEL", default=...)`（T006 の実測値）で解決し、生成と同一なら `judge_model_is_generator: true` を記録する（FR-069）
+- [X] T046 [US6] 変異探針を実行する: (a) 採点に `ge=1` を付ける → T036 が落ちる、(b) 総合品質を `mean` から `sum` に変える → T036 が落ちる、(c) `script/evaluate.py` に `subprocess` を import する → T038 が落ちる、(d) 初期状態に 4 番目のキーを足す → T038 が落ちる、(e) 無条件に上書きする → T037 が落ちる、(f) 観点を 4 つに減らす → T036 が落ちる
 
 **Checkpoint**: US6 が単体で機能。`uv run pytest -q` に実走が含まれず、ネットワークなしで完走する。
 
@@ -508,6 +508,24 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 復元後: フルスイート **713 passed / 97.57% / 386.54 秒** で green に戻ることを確認済み
 （`ruff check .` → `All checks passed!` / `mypy src` → `Success: no issues found in 28 source files`）。
 
+**実装中に回した探針（US6 / T046。各 1 回で復元）**
+
+対象: `tests/eval/schemas.py` / `tests/eval/evaluators.py` / `tests/eval/records.py` /
+`script/evaluate.py`。探針は `/tmp/t046_probe.py`（各変異の前後で `sha256` を比較し、
+復元後にフルスイートを 1 回再実行する）。
+
+| 変異 | 落ちたテスト | 復元確認 |
+|---|---|---|
+| (a) 採点の受け取りスキーマに `ge=1` を付ける（`AxisScore.score`） | `test_out_of_range_scores_are_recorded_without_checks[7-1.5\|0--0.25\|-1--0.5]` と `test_the_schemas_declare_no_range_limits`（3 failed / 36 passed） | sha256 一致 |
+| (b) 総合品質を平均から合計へ（`statistics.fmean` → `sum`） | `test_overall_quality_is_the_mean_of_the_sub_criteria` ほか（3 failed / 36 passed） | sha256 一致 |
+| (c) `script/evaluate.py` に `subprocess` を import する | `test_the_entrypoint_does_not_use_subprocess`（1 failed / 7 passed） | sha256 一致 |
+| (d) 初期状態に 4 番目のキー（`state["unexpected"]`）を足す | `test_the_initial_state_has_only_the_three_allowed_keys`（1 failed / 7 passed） | sha256 一致 |
+| (e) 常に上書き（`"w" if overwrite or not path.exists() else "a"` → `"w"`） | `test_two_runs_are_kept_by_default`（1 failed / 18 passed） | sha256 一致 |
+| (f) 採点する観点を 6 → 4 に減らす（`completeness` / `output_language` の行を削る） | `test_axes_cover_at_least_five_scored_axes` ほか（3 failed / 36 passed） | sha256 一致 |
+
+復元後: フルスイート **779 passed / 97.57% / 386.65 秒** で green に戻ることを確認済み
+（`script/evaluate.py` と `tests/eval/` を含む。US6 の追加は既存テストの期待値を変えずに +66 件）。
+
 ### 4. 最終ゲート（T095）
 
 - `uv run pytest -q`: （記入）
@@ -532,6 +550,12 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 | T031「`build_model(role, env_prefix).with_structured_output(Model, method=…)`」 | 実装は境界関数に**任意の `model=` 引数**を足し、省略時のみ内部で `build_model` を呼ぶ | ノードが `trend_researcher.nodes.<node>.build_model` を patch する既存の差し替え点を残すため（フィクスチャはノード側の名前を patch する。境界側で無条件に構築するとテストのフェイクが効かない）。既定の入力では `model=None` なので挙動は同じ |
 | T033「`extract_common` を構造化出力へ」 | 構造化出力のルートは**オブジェクト**でなければならないため `models.py` に `CommonThemes`（`themes: list[CommonTheme]`）を追加した | リストをルートにすると `with_structured_output` が使えない（契約 §2）。`CommonTheme` 自体は既存のまま |
 | `with_structured_output` の戻り値 | `Any`（`Runnable[..., Any]`） | 上限を `cast("_ModelT", …)` で取り出す。`schema` に Pydantic モデルを渡している以上、実行時の値はそのインスタンス（`mypy` の `no-any-return` をここだけ明示的に落とす） |
+| T040〜T044 が挙げる `tests/eval/` のファイル（`schemas.py` / `evaluators.py` / `judge_prompts.py` / `datasets.py` / `axes.md`） | 記録の補助として `tests/eval/records.py` を**追加**した（6 ファイル） | T037（記録のテスト）には対応する実装タスクが無い。ファイル名の組み立て・指紋・追記/上書き・JSONL の形・保存済み結果の比較は「採点」とは別の関心事なので `records.py` に分けた（`schemas.py` / `evaluators.py` に混ぜない） |
+| ゲート `uv run mypy src` | `tests/eval` を単体で mypy に渡すと `Source file found twice under different module names: 'judge_prompts' and 'tests.eval.judge_prompts'` で失敗する（`tests/` が名前空間パッケージのため） | ゲートは `mypy src`（28 ファイル）のまま。`tests/eval` は実行時に pytest が担保する。mypy の設定に `tests` を足す変更はしない（既存のゲートを広げない） |
+| T045 のオプション一覧（contracts §4。8 個） | `--commit` を足して 9 個（`--dataset` / `--platform` / `--config`×n / `--config-name`×n / `--judge-model` / `--out` / `--overwrite` / `--judge-only` / `--commit`） | `resolve_commit` の「引数 → `TR_EVAL_COMMIT` → `.git` の読み取り」を実現するため。契約 §4 の列挙は「最低限これを備える」として読む。既定では `subprocess` を使わず `.git` を直接読み、解決できない場合だけ `unknown` を記録する |
+| T038(e)「初期状態に入れるキーが `messages` / `platform` / `max_results` のみ（AST で走査）」 | 実装は辞書リテラルで初期状態を組み立てる（`{"messages": …, "platform": …}` ＋ 明示指定時のみ `state["max_results"] = …`） | 走査を「辞書リテラルの文字列キー」と「`state[...] =` の文字列キー」の両方を拾う形にした（spec の指示は後者の想定）。意図（3 項目のみ）は不変で、4 番目のキーを足す変異で落ちることは T046(d) で確認済み |
+| T039「対応表の整合テスト」 | `tests/eval/axes.md` の**本文（表）**を読む走査テストも足した（`test_the_axes_table_documents_axes_constraints_and_defects`） | FR-074 は「1 つの対応表に記録する MUST」と定めるが、表は文章なので実装側へ観点・制約を足したときに黙って古くなる。観点と制約の識別子が表に現れること、実測済み欠陥が 6 件並んでいることを固定した |
+| R-21 の実測済み欠陥 6 件の「固定する方法」 | `tests/eval/axes.md` の §3 に、担当する US（US3 / US4）と固定するテストの内容を並べた。US6 の時点では #1〜#3・#6 の**実装**はまだ無い | 欠陥の一覧を 1 箇所に置くのが FR-074 / R-21 の要求で、移植しない判断は US3 / US4 の実装タスクでテストとして固定する（本フェーズでは「列挙と担当の明示」まで） |
 
 ### 6. 更新または削除したテスト（FR-035 / SC-008）
 
@@ -583,6 +607,39 @@ T016 の指示は「追加 11 項目の宣言」であるため既存 7 項目�
 | `tests/unit/test_fixtures.py::test_fake_model_factory_structured_calls_are_recorded` | 期待を「構造化プロンプトは `structured_prompts_for()` に、テキストは `prompts_for()` に別々に記録される」に書き換え | T028〜T034 で 1 ノードが「構造化 1 回＋フォールバックでテキスト 1 回」を呼ぶようになり、`_FakeStructuredRunnable` が同じログに記録すると**凍結契約**（`tests/integration/test_frozen_contracts.py::test_default_text_call_counts_are_unchanged` / `test_full_flow.py`）の「既定の入力での LLM 呼び出し回数」が構造化の再試行で膨らむ。ログを分け、`prompts_for()` は「テキスト呼び出し」の意味に保った（元のテストの docstring もそう読める） |
 | `tests/unit/test_analyze_content.py::test_progress_note_reports_how_many_were_compressed` / `test_no_note_when_nothing_was_compressed` | 断言を**圧縮の補足行に限定**（`"[補足] 長文素材 1 件を圧縮（成功 1/1" in err` / `"長文素材" not in err`）。docstring に「US2 のフォールバック補足行とは別の契約」と明記 | US2 で既定の入力（フェイクは構造化出力に失敗する）でも `note()` が 1 行出るため、「`note()` が 0 行」を固定する旧断言は維持できない。**消したのは「この既定入力では常に 0 行」という前提だけ**で、圧縮が起きないときに出ない性質は新しい断言で固定し直した |
 | `tests/unit/test_llm.py` の `pytest.raises(BaseException)` | `# noqa: PT011` を削除（コメントは本文へ） | `PT011` は有効でないため `RUF100`（未使用の noqa）になる。抑制は増やさない（ゲート「`# noqa` 0 件」に合わせる） |
+
+**更新・削除（US6）**: なし。US6 は `tests/eval/` と `script/evaluate.py` の**新規のみ**で、
+既存テストの期待値・名前・`testpaths` を変えていない（`tests/unit/test_evaluation_entrypoint.py`
+の `test_the_entrypoint_stays_outside_the_test_paths` が `testpaths = ["tests"]` を固定する）。
+
+**新規（採点の契約。`tests/unit/test_evaluation.py`、39 件）**
+
+| 関心 | テスト |
+|---|---|
+| 観点の数と対象外 | `test_axes_cover_at_least_five_scored_axes` / `test_correctness_is_recorded_as_out_of_scope` |
+| 正規化と値域 | `test_scores_are_normalized_to_zero_one` / `test_out_of_range_scores_are_recorded_without_checks` / `test_the_schemas_declare_no_range_limits` |
+| 型違い・欠落 | `test_type_mismatch_and_missing_fields_become_unscored`（7 ケース） |
+| 総合品質 | `test_overall_quality_is_the_mean_of_the_sub_criteria` / `test_overall_quality_axis_records_the_sub_criteria` / `test_overall_quality_keeps_raw_scores_when_the_judge_is_extreme` |
+| 記録ごとの集約 | `test_aggregating_records_averages_each_axis` / `test_aggregating_records_excludes_unscored_and_out_of_scope` |
+| 失敗の隔離と再試行 | `test_one_axis_failure_does_not_stop_the_others` / `test_the_retry_rule_is_the_same_for_every_axis` |
+| 非同期経路 | `test_the_async_path_uses_the_same_contract` / `test_the_sync_path_refuses_an_async_judge` |
+| 提示順 | `test_axis_order_can_be_randomized_and_is_recorded` / `test_an_incomplete_order_is_rejected` |
+| 判定プロンプトと制約 | `test_every_scored_axis_has_a_dedicated_prompt` / `test_the_judge_prompts_include_the_generation_constraints` / `test_every_declared_constraint_is_measured_by_an_axis` / `test_the_axes_table_documents_axes_constraints_and_defects` |
+| 比較 | `test_comparison_uses_only_the_saved_scores` / `test_comparison_of_equal_scores_is_a_tie` / `test_comparison_flips_when_the_sides_are_swapped` / `test_comparison_records_the_presentation_order` / `test_comparison_refuses_two_different_datasets` / `test_comparison_refuses_a_changed_dataset_fingerprint` / `test_comparison_with_an_empty_report_is_not_comparable` / `test_comparison_without_scores_is_not_comparable` |
+
+**新規（記録の契約。`tests/unit/test_evaluation_records.py`、19 件）**:
+ファイル名の契約と `model_slug` / 既定の保存先と `TR_EVAL_OUT_DIR` と引数の優先 / 指紋の記録と
+内容変更での変化 / 実行の文脈（設定の中身・識別子・コミット・プラットフォーム・生成モデル・
+判定モデル・同一判定の表明・使用量）/ レコードごとの採点の `id` による結合 / 使用量が不明な
+場合の記録 / JSONL 1 行 1 レコードで 3 項目のみ / `ensure_ascii=False` / 壊れたレコードの拒否 /
+既定での追記と `--overwrite` / 名前での比較と比較の署名（生成を繰り返さない）/ 不在の結果・
+到達不能なデータセット・壊れたデータセットの拒否。
+
+**新規（実走の入口の契約。`tests/unit/test_evaluation_entrypoint.py`、8 件）**:
+収集対象外（`testpaths` と命名） / オプション集合と繰り返し指定 / 構成も `--judge-only` も無い
+実行の引数エラー / `subprocess` を使わない（AST と `vars()`） / 公開 API を in-process で呼ぶ /
+初期状態が 3 項目のみ（AST） / 既存 CLI の契約を汚さない（設定クラスに判定モデルを足さない） /
+判定モデルの解決順（引数 → `TR_EVAL_MODEL` → 既定）。
 
 ### 7. 参照実装の欠陥を移植していないことの確認（FR-063 / FR-064）
 

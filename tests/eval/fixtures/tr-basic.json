@@ -1,0 +1,22 @@
+{
+  "name": "tr-basic",
+  "description": "基本の指示セット（X / YouTube の両方で走らせられる短い依頼）。指標を同一に保つ比較の単位であり、中身を変えると指紋が変わる。",
+  "entries": [
+    {
+      "id": "x-ai-tools",
+      "prompt": "AI コーディングツールの最新の話題を教えて"
+    },
+    {
+      "id": "x-local-llm",
+      "prompt": "ローカル LLM の動向を教えて"
+    },
+    {
+      "id": "yt-langgraph",
+      "prompt": "LangGraph の使い方を解説している動画の要点を教えて"
+    },
+    {
+      "id": "yt-eval",
+      "prompt": "LLM の出力を評価する方法を解説している動画の要点を教えて"
+    }
+  ]
+}
