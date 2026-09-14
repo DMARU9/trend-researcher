@@ -97,7 +97,7 @@ SC-011 / SC-026）。
 - [X] T001 `plan.md` の「基準値のずれ」と Constitution Check に記録した基準値（**601 passed / カバレッジ 96.65% / `ruff` 0 件 / `mypy` 0 件 / 49.10 秒**）をブランチ `003-pipeline-hardening-and-evaluation` の作業ツリーで再現する（`uv run pytest -q`、`uv run ruff check .`、`uv run mypy src`、`git status --short`）。結果を作業ツリーの確認（`git status --short` が ` M .specify/feature.json` と `?? specs/003-pipeline-hardening-and-evaluation/` のみ）とともに本ファイルの「実装メモ §0」に記録する
 - [X] T002 [P] 遅いテストを把握して時間予算を確保する。`uv run pytest -q --no-cov --durations=15` を実行し、上位 15 件の所要時間を「実装メモ §2」に控える（SC-013 の 60 秒以内を守るため、追加するテスト群の上限を決める根拠にする）
 - [X] T003 [P] オフライン制約を実測する。`env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB uv run pytest -q --no-cov` を実行し、認証情報なしでも **601 passed** のままであることを確認する（原則 II の安全網）
-- [ ] T004 [P] **設計の分岐点 1 を実測する**: 構造化出力が `json_schema` で通るかを、`uv run python -c` で `ChatOpenAI.with_structured_output(<Pydantic モデル>, method="json_schema")` の疎通を確認して確定する。通らなければ `Configuration.structured_method` の**既定を `function_calling` にする**（research §R-2 / 未解決事項 1）。「実装メモ §1」に記録
+- [X] T004 [P] **設計の分岐点 1 を実測する**: 構造化出力が `json_schema` で通るかを、`uv run python -c` で `ChatOpenAI.with_structured_output(<Pydantic モデル>, method="json_schema")` の疎通を確認して確定する。通らなければ `Configuration.structured_method` の**既定を `function_calling` にする**（research §R-2 / 未解決事項 1）。「実装メモ §1」に記録
 - [ ] T005 [P] **設計の分岐点 2 を実測する**: 実際の上限超過応答の形（`status_code` / `exc.body` の構造 / メッセージの語彙）を採取し、`contracts/llm-invocation-contract.md` §5 の条件 3 の語彙を確定する（research §R-1 / 未解決事項 2）。テストは語彙に依存しない形（条件ごとの反例）で書く方針も同時に決める。「実装メモ §1」に記録
 - [ ] T006 [P] **設計の分岐点 3 を実測する**: `TR_EVAL_MODEL` の既定値（生成 `openai:mimo-v2.5` と同じで走るか、判定用の別名が必要か）を疎通で確定する（research §R-19 / 未解決事項 3）。「実装メモ §1」に記録
 - [ ] T007 [P] **設計の分岐点 4 を実測する**: Pydantic v2 の `Configuration.model_copy(update=...)` → 再検証の 2 案（`Configuration.model_validate(model_dump())` / `_check_bounds(settings)` による各フィールドの検査）のうち、**`model_fields_set` を保つ**のはどちらかを短いスクリプトで実測して確定する（research §R-10）。`providers/x.py:48` が `model_fields_set` を読むため、ここを誤ると US5 / US8 が壊れる。「実装メモ §1」に記録
@@ -409,7 +409,7 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 | # | 実測した内容 | 結果 | 決定 |
 |---|---|---|---|
-| 1 | 構造化出力が `json_schema` で通るか | （記入） | `structured_method` の既定 |
+| 1 | 構造化出力が `json_schema` で通るか | **通る（フォールバック不要）**。`build_model("research").with_structured_output(<Pydantic モデル>, method="json_schema").invoke(...)` → 検証済みモデルが返る（実測 `Probe(topic='AI ニュース', count=3)`）。`method="function_calling"` も同じ入力で成功 | `structured_method` の既定は **`json_schema`** のまま（`Configuration` で切り替え可能にする） |
 | 2 | 上限超過の応答の形（`status_code` / `body` / 語彙） | （記入） | 検出器の語彙 |
 | 3 | `TR_EVAL_MODEL` の既定値 | （記入） | 既定値 |
 | 4 | `model_copy` 後の再検証で `model_fields_set` が保たれるか | （記入） | 再検証の実装位置 |
