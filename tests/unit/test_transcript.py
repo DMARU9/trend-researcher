@@ -236,6 +236,24 @@ def test_fetch_transcript_without_requested_subtitles_returns_empty():
     assert t.source == TranscriptSource.AUTOMATIC_CAPTION
 
 
+def test_fetch_transcript_suppresses_yt_dlp_progress_output():
+    """yt-dlp の進捗バーを stdout に出さない。
+
+    字幕は `download=True` で取得するため、`quiet` だけでは進捗バー
+    （`[download] 1.00KiB at ...`）が stdout に残り、`--output` 指定時に stdout を
+    0 バイトにする契約（CLI-002-6）を破る。`noprogress` の指定を固定する。
+    """
+    with mock.patch("yt_dlp.YoutubeDL") as ydl_mock:
+        ydl_mock.return_value.__enter__.return_value.extract_info.side_effect = _fake_info_no_subs
+        fetch_transcript("vid1", language="ja")
+
+    opts = ydl_mock.call_args.args[0]
+    assert opts["quiet"] is True
+    assert opts["noprogress"] is True
+    download = ydl_mock.return_value.__enter__.return_value.extract_info.call_args.kwargs["download"]
+    assert download is True, "進捗が出る経路（download=True）で検証していること"
+
+
 def test_fetch_transcript_falls_back_to_first_requested_language():
     """要求言語が取得できなかった場合は、取得できた先頭の言語を使う。"""
     info = {

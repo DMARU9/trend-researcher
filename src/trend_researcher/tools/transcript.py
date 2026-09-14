@@ -37,6 +37,10 @@ def fetch_transcript(video_id: str, language: str = "ja") -> Transcript:
     ydl_opts: dict = {
         "quiet": True,
         "no_warnings": True,
+        # `quiet` はログメッセージを抑えるだけで、進捗バー（`[download] ...`）は
+        # stdout に残る。`--output` 指定時に stdout を 0 バイトにする契約
+        # （CLI-002-6）のため `noprogress` も指定する。
+        "noprogress": True,
         "skip_download": True,
         "writesubtitles": True,
         "writeautomaticsub": True,
