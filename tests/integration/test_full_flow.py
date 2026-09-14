@@ -646,3 +646,61 @@ def test_compression_timeout_still_exits_zero_with_a_report(
     # 縮退した事実は追加の観測として stderr に 1 行だけ出る（FR-029）
     err = capsys.readouterr().err
     assert "[補足] 長文素材 1 件を圧縮（成功 0/1" in err
+
+
+# --- 使用量の集約（US8 / FR-061 / FR-062 / SC-022） --------------------------
+
+
+def test_usage_is_aggregated_across_every_llm_node(
+    fake_model_factory, x_flow, tmp_path: Path
+) -> None:
+    """ノードごとの記録が 1 本の `usage` に連結される（後勝ちにならない）。
+
+    状態のフィールド `usage` は `operator.add` の reducer を持つ（data-model §2.1）。
+    reducer が外れると、最後に書いたノードの記録だけで上書きされ、`by_node` の
+    内訳が 1 ノード分に潰れる（探針 (a) の検出対象）。
+    """
+    _search, _threads = x_flow
+    with fake_model_factory.install(_X_RESPONSES):
+        result = _run_graph("オタクの困りごとを調査したい", cache_dir=tmp_path)
+
+    usage = result["usage"]
+    counts: dict[str, int] = {}
+    for record in usage:
+        counts[record.node_name] = counts.get(record.node_name, 0) + 1
+
+    # analyze_content は候補ごと（5 件）、plan_search は生成 ＋ 点検で 2 回。
+    # 呼び出し回数の凍結値（契約 §8-3）と同じ数え方であること
+    assert counts == {
+        "parse_instruction": 1,
+        "plan_search": 2,
+        "analyze_content": 5,
+        "extract_common": 1,
+    }
+    # 圧縮は発動しない（素材が短い）ので、記録される役割は research だけ
+    assert {record.role for record in usage} == {"research"}
+    # ダブルの応答は使用量を返さない（実 API が返さない場合と同じ経路）。
+    # 「不明」として記録され、実行は失敗しない（FR-061 / SC-022）
+    assert all(record.total_tokens is None for record in usage)
+    assert json.loads((tmp_path / "usage.json").read_text(encoding="utf-8")) == {
+        "calls": 9,
+        "unknown_calls": 9,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "by_node": counts,
+        "by_role": {"research": 9},
+    }
+
+
+def test_the_usage_note_reports_the_aggregate_for_the_whole_run(
+    fake_model_factory, x_flow, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """集計は進捗（stderr の補足行）にも出る（FR-062）。stdout は汚さない。"""
+    _search, _threads = x_flow
+    with fake_model_factory.install(_X_RESPONSES):
+        _run_graph("オタクの困りごとを調査したい")
+
+    captured = capsys.readouterr()
+    assert "[補足] LLM 呼び出し合計 9 回（入力 0 / 出力 0 トークン、不明 9 回）" in captured.err
+    assert "LLM 呼び出し合計" not in captured.out

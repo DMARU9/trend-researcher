@@ -11,7 +11,7 @@ from trend_researcher.progress import NODE_PLAN_SEARCH, make_emitter
 from trend_researcher.providers import get_provider
 from trend_researcher.state import AgentState
 from trend_researcher.tools.degradation import DegradeOptions, options_for
-from trend_researcher.tools.llm import build_model, invoke_text
+from trend_researcher.tools.llm import UsageMeter, build_model, invoke_text
 
 #: 年号。`\b` は日本語（CJK も `\w`）と数字の間で境界にならないため、`2024年` の
 #: 年号が残る。前後を「数字でない」条件で挟んで日本語に隣接する年号も拾う。
@@ -35,6 +35,7 @@ def _invoke(
     *,
     configurable: Configuration,
     env_prefix: str | None,
+    meter: UsageMeter | None = None,
 ) -> str:
     """生成・点検の 1 呼び出し（再試行と縮退を設定値で行い、本文を文字列で返す）。
 
@@ -50,6 +51,7 @@ def _invoke(
         retry_max=configurable.retry_max,
         retry_wait_seconds=configurable.retry_wait_seconds,
         degrade=degrade,
+        meter=meter,
     )
     return result.content if hasattr(result, "content") else str(result)
 
@@ -131,10 +133,18 @@ def plan_search(state: AgentState, config: RunnableConfig) -> dict:
         date_hint = ""
 
     model = build_model("research", provider.env_prefix)
+    # 使用量（FR-061）はこのノードの呼び出し（生成＋点検）を 1 つの受け皿に集める
+    meter = UsageMeter(NODE_PLAN_SEARCH)
     prompt = provider.plan_search_prompt.format(topic=search_topic, date_hint=date_hint)
     # 生成も呼び出し境界（再試行 ＋ 縮退）を通す。`model.invoke` を直に呼ぶと、
     # 再試行回数・待機・縮退の設定がこのノードだけ効かない（FR-010 / FR-015 / T078）。
-    raw = _invoke(model, prompt, configurable=configurable, env_prefix=provider.env_prefix)
+    raw = _invoke(
+        model,
+        prompt,
+        configurable=configurable,
+        env_prefix=provider.env_prefix,
+        meter=meter,
+    )
 
     queries = _parse_queries(raw)
 
@@ -152,7 +162,11 @@ def plan_search(state: AgentState, config: RunnableConfig) -> dict:
                 topic=search_topic, queries="\n".join(queries)
             )
             reviewed_raw = _invoke(
-                model, review_prompt, configurable=configurable, env_prefix=provider.env_prefix
+                model,
+                review_prompt,
+                configurable=configurable,
+                env_prefix=provider.env_prefix,
+                meter=meter,
             )
             queries = _apply_review(queries, _parse_queries(reviewed_raw), limit)
         except Exception as exc:  # noqa: BLE001 - 点検の失敗は生成結果で継続する（FR-051）
@@ -165,4 +179,9 @@ def plan_search(state: AgentState, config: RunnableConfig) -> dict:
     emitter.emit(NODE_PLAN_SEARCH, "完了", detail=f'クエリ {len(queries)} 件: {", ".join(queries)}')
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
-    return {"search_queries": queries, "messages": progress_messages}
+    return {
+        "search_queries": queries,
+        # 使用量は reducer（`operator.add`）で連結される（FR-061 / data-model §2.1）
+        "usage": meter.records,
+        "messages": progress_messages,
+    }

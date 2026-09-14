@@ -23,7 +23,7 @@ from typing import Any
 
 from trend_researcher.models import CompressedSource
 from trend_researcher.prompts import COMPRESSION_PROMPT
-from trend_researcher.tools.llm import build_model
+from trend_researcher.tools.llm import UsageMeter, build_model
 
 #: 圧縮の出力契約のタグ（`prompts.COMPRESSION_PROMPT` と対）
 SUMMARY_TAG = "summary"
@@ -67,8 +67,18 @@ def _reason_for_exception(exc: BaseException) -> str:
     return REASON_TIMEOUT if isinstance(exc, TimeoutError) else REASON_ERROR
 
 
-async def _collect_response(model: Any, prompt: str, timeout: float) -> tuple[str, str | None]:
+async def _collect_response(
+    model: Any,
+    prompt: str,
+    timeout: float,
+    *,
+    env_prefix: str | None = None,
+    meter: UsageMeter | None = None,
+) -> tuple[str, str | None]:
     """1 回だけ呼び出し、`(本文, 失敗理由)` を返す（例外は投げない）。
+
+    使用量の記録（FR-061）もこの 1 回の呼び出しの位置で行う。記録する役割は
+    `compression`（`build_model("compression", ...)` と対）。
 
     `asyncio.CancelledError` だけは再送出する。サービス終了要求を「圧縮できなかった」
     として飲み込むと、停止要求が部分失敗に化ける（contract §3）。
@@ -79,6 +89,9 @@ async def _collect_response(model: Any, prompt: str, timeout: float) -> tuple[st
         raise
     except Exception as exc:  # noqa: BLE001 - 失敗の型を問わず縮退する（FR-003）
         return "", _reason_for_exception(exc)
+
+    if meter is not None:
+        meter.add(result, role="compression", env_prefix=env_prefix, structured=False)
 
     content = result.content if hasattr(result, "content") else str(result)
     content = content if isinstance(content, str) else str(content)
@@ -95,6 +108,8 @@ async def compress_text(
     timeout: float,
     instruction: str = "",
     source_id: str = "",
+    env_prefix: str | None = None,
+    meter: UsageMeter | None = None,
 ) -> tuple[str, CompressedSource | None]:
     """素材を 1 回の呼び出しで圧縮し、`(解析に渡す素材, 記録)` を返す。
 
@@ -109,6 +124,8 @@ async def compress_text(
         timeout: 1 回の呼び出しの上限秒（`compression_timeout_seconds`）。
         instruction: 素材の文脈を失わないためにプロンプトへ載せる元の指示文（R-5）。
         source_id: 記録に残す素材の識別子（`Candidate.id`）。
+        env_prefix: 使用量に記録するモデル名の解決に使う接頭辞（SET-009）。
+        meter: 呼び出し 1 回分の使用量を記録する受け皿（FR-061）。
     """
     if len(text) <= max_chars:
         return text, None
@@ -116,7 +133,9 @@ async def compress_text(
     prompt = COMPRESSION_PROMPT.format(
         instruction=instruction or NO_INSTRUCTION, material=text
     )
-    response, failure = await _collect_response(model, prompt, timeout)
+    response, failure = await _collect_response(
+        model, prompt, timeout, env_prefix=env_prefix, meter=meter
+    )
 
     if failure is not None:
         # 縮退: 生素材をしきい値で切って使う（素材は捨てない。FR-003）
@@ -147,6 +166,7 @@ async def compress_source(
     timeout: float,
     instruction: str = "",
     source_id: str = "",
+    meter: UsageMeter | None = None,
 ) -> tuple[str, CompressedSource | None]:
     """ノード向けの入口。しきい値を判定し、超過時のみモデルを構築して圧縮する。
 
@@ -162,4 +182,6 @@ async def compress_source(
         timeout=timeout,
         instruction=instruction,
         source_id=source_id,
+        env_prefix=env_prefix,
+        meter=meter,
     )

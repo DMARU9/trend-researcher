@@ -17,7 +17,12 @@ from trend_researcher.tools.degradation import (
     DegradeOptions,
     options_for,
 )
-from trend_researcher.tools.llm import build_model, invoke_structured, invoke_text
+from trend_researcher.tools.llm import (
+    UsageMeter,
+    build_model,
+    invoke_structured,
+    invoke_text,
+)
 from trend_researcher.tools.parse import extract_list_items, extract_section
 
 
@@ -45,6 +50,8 @@ def extract_common(state: AgentState, config: RunnableConfig) -> dict:
     model = build_model("research", provider.env_prefix)
     # 縮退（US3）は 1 ノード実行につき 1 つの梯子を使い、記録を状態へ返す（FR-017）
     degrade = options_for(configurable, NODE_EXTRACT_COMMON)
+    # 使用量（FR-061）はこのノードの呼び出しを 1 つの受け皿に集める
+    meter = UsageMeter(NODE_EXTRACT_COMMON)
     prompt = provider.extract_common_prompt.format(analyses=_format_analyses(analyses))
     themes, fallback_note = _extract_themes(
         prompt,
@@ -53,6 +60,7 @@ def extract_common(state: AgentState, config: RunnableConfig) -> dict:
         ids=[a.id for a in analyses],
         degrade=degrade,
         env_prefix=provider.env_prefix,
+        meter=meter,
     )
     if fallback_note:
         # 進捗行（`messages`）ではなく補足行に出す（D-3 / FR-029）。
@@ -64,6 +72,8 @@ def extract_common(state: AgentState, config: RunnableConfig) -> dict:
     return {
         "common_themes": themes,
         "degradations": degrade.records,
+        # 使用量は reducer（`operator.add`）で連結される（FR-061 / data-model §2.1）
+        "usage": meter.records,
         "messages": progress_messages,
     }
 
@@ -76,6 +86,7 @@ def _extract_themes(
     ids: list[str],
     degrade: DegradeOptions,
     env_prefix: str | None,
+    meter: UsageMeter | None = None,
 ) -> tuple[list[CommonTheme], str]:
     """LLM の応答から共通テーマを得る（構造化出力 → 全失敗なら見出し解析）。
 
@@ -97,6 +108,7 @@ def _extract_themes(
             retry_wait_seconds=configurable.retry_wait_seconds,
             method=configurable.structured_method,
             degrade=degrade,
+            meter=meter,
         )
     except DegradationError:
         raise
@@ -108,6 +120,7 @@ def _extract_themes(
             retry_max=configurable.retry_max,
             retry_wait_seconds=configurable.retry_wait_seconds,
             degrade=degrade,
+            meter=meter,
         )
         content = text.content if hasattr(text, "content") else str(text)
         return _parse_themes(content, ids), (

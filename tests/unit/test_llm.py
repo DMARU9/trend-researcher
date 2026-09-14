@@ -26,6 +26,7 @@ from pydantic import BaseModel, ValidationError
 from trend_researcher import config as config_module
 from trend_researcher.tools.degradation import DegradationError, DegradeOptions
 from trend_researcher.tools.llm import (
+    UsageMeter,
     ainvoke_structured,
     ainvoke_text,
     build_model,
@@ -561,3 +562,208 @@ def test_no_note_is_emitted_when_nothing_is_degraded(capsys: pytest.CaptureFixtu
         )
 
     assert capsys.readouterr().err == ""
+
+
+# --- 使用量の記録（US8 / FR-061 / FR-062 / contract §7） --------------------
+#
+# 固定する契約:
+#   - 使用量は**呼び出し境界**で数える（`invoke` / `ainvoke` / 構造化呼び出しの
+#     すべて。ノードは数えない）。受け皿は `UsageMeter` で、戻り値 1 つにつき
+#     `ModelUsage` 1 要素を記録する
+#   - トークン数は `AIMessage.usage_metadata` から読む。読めない場合は `None` の
+#     まま記録する（0 に潰さない。FR-061）
+#   - 記録するモデル名は `build_model` が `init_chat_model` に渡す文字列と同じ
+
+#: 差分応答の `usage_metadata` の例（research R-11 の実測値と同じ形）。
+_USAGE = {"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}
+
+
+class _UsageMessage:
+    """`usage_metadata` を持つ応答（実 API の `AIMessage` の代役）。"""
+
+    def __init__(self, content: str, usage_metadata: dict[str, int] | None) -> None:
+        self.content = content
+        self.usage_metadata = usage_metadata
+
+
+def test_a_text_call_records_one_usage_element() -> None:
+    """テキスト呼び出し 1 回につき `ModelUsage` が 1 要素（契約 §7 の粒度）。"""
+    _model, patch = _patch_model([_UsageMessage("text", _USAGE)])
+    meter = UsageMeter("plan_search")
+
+    with patch:
+        result = asyncio.run(
+            ainvoke_text(
+                "prompt",
+                env_prefix=None,
+                retry_max=0,
+                retry_wait_seconds=0.0,
+                meter=meter,
+            )
+        )
+
+    assert result.content == "text"
+    assert [record.model_dump() for record in meter.records] == [
+        {
+            "node_name": "plan_search",
+            "role": "research",
+            "model": _DEFAULT_MODEL,
+            "input_tokens": 120,
+            "output_tokens": 30,
+            "total_tokens": 150,
+            "structured": False,
+        }
+    ]
+
+
+def test_the_recorded_model_name_follows_the_resolution_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """記録するモデル名は `build_model` の解決結果（`TR_MODEL` → 接頭辞 → 既定）。"""
+    monkeypatch.setenv("XTR_MODEL", "openai:platform")
+    _model, patch = _patch_model([_UsageMessage("text", _USAGE)])
+    meter = UsageMeter("plan_search")
+
+    with patch:
+        asyncio.run(
+            ainvoke_text(
+                "prompt",
+                env_prefix="XTR",
+                retry_max=0,
+                retry_wait_seconds=0.0,
+                meter=meter,
+            )
+        )
+
+    assert [record.model for record in meter.records] == ["openai:platform"]
+
+
+def test_a_structured_call_is_counted_through_the_same_path() -> None:
+    """構造化呼び出しも同じ経路で数える（`structured=True` と役割を残す）。
+
+    `with_structured_output(...)` の戻り値は `AIMessage` ではなく検証済みの
+    インスタンスである（`include_raw=False` の既定）。したがって `usage_metadata`
+    を読む対象が無く、トークン数は `None`（不明）のまま記録する（FR-061）。
+    0 に潰すと「0 トークンで呼んだ」という嘘の集計になる。
+    """
+    _model, patch = _patch_model([_Sample(value=7)])
+    meter = UsageMeter("extract_common")
+
+    with patch:
+        asyncio.run(
+            ainvoke_structured(
+                _Sample,
+                "prompt",
+                role="summary",
+                env_prefix=None,
+                retry_max=0,
+                retry_wait_seconds=0.0,
+                meter=meter,
+            )
+        )
+
+    assert len(meter.records) == 1
+    record = meter.records[0]
+    assert (record.node_name, record.role, record.structured) == ("extract_common", "summary", True)
+    assert (record.input_tokens, record.output_tokens, record.total_tokens) == (None, None, None)
+
+
+def test_a_response_without_usage_is_recorded_as_unknown() -> None:
+    """`usage_metadata` が無い応答は「不明」として記録する（0 ではない。FR-061）。"""
+    _model, patch = _patch_model([_UsageMessage("text", None)])
+    meter = UsageMeter("plan_search")
+
+    with patch:
+        asyncio.run(
+            ainvoke_text(
+                "prompt", env_prefix=None, retry_max=0, retry_wait_seconds=0.0, meter=meter
+            )
+        )
+
+    assert len(meter.records) == 1
+    assert (meter.records[0].input_tokens, meter.records[0].total_tokens) == (None, None)
+
+
+def test_partial_usage_metadata_does_not_invent_the_missing_counts() -> None:
+    """一部のキーしか無い応答では、無いキーだけを `None` にする（補完しない）。"""
+    _model, patch = _patch_model([_UsageMessage("text", {"input_tokens": 5})])
+    meter = UsageMeter("plan_search")
+
+    with patch:
+        asyncio.run(
+            ainvoke_text(
+                "prompt", env_prefix=None, retry_max=0, retry_wait_seconds=0.0, meter=meter
+            )
+        )
+
+    record = meter.records[0]
+    assert (record.input_tokens, record.output_tokens, record.total_tokens) == (5, None, None)
+
+
+def test_failed_attempts_do_not_add_usage_elements(no_retry_sleep: Any) -> None:
+    """失敗した試行は要素を増やさない（戻り値が無く `usage_metadata` を読めないため）。
+
+    契約 §3 の「試行ごとの記録」は、失敗した試行に `AIMessage` が存在しない
+    （= 読む対象が無い）ため、**境界呼び出し 1 回（戻り値 1 つ）につき 1 要素**として
+    実装する。再試行が起きたことは `note()` と `degradations` から確認できる
+    （FR-013 / FR-017）。実装メモ §5 の乖離表を参照。
+    """
+    _model, patch = _patch_model([_connection_error(), _UsageMessage("text", _USAGE)])
+    meter = UsageMeter("plan_search")
+
+    with patch:
+        asyncio.run(
+            ainvoke_text(
+                "prompt", env_prefix=None, retry_max=2, retry_wait_seconds=1.0, meter=meter
+            )
+        )
+
+    assert no_retry_sleep.sleeps == [1.0]
+    assert len(meter.records) == 1
+
+
+def test_a_degraded_call_records_only_the_successful_call(no_retry_sleep: Any) -> None:
+    """縮退（上限超過 → 縮小して再試行）でも、成功した呼び出しの 1 要素だけを記録する。"""
+    options = _degrade_options()
+    _model, patch = _patch_model([_context_length_error(), _UsageMessage("text", _USAGE)])
+    meter = UsageMeter("analyze_content")
+
+    with patch:
+        asyncio.run(
+            ainvoke_text(
+                _LONG_PROMPT,
+                env_prefix=None,
+                retry_max=0,
+                retry_wait_seconds=0.0,
+                degrade=options,
+                meter=meter,
+            )
+        )
+
+    assert len(options.records) == 1  # 縮退は 1 段（既存の契約は変わらない）
+    assert len(meter.records) == 1
+
+
+def test_calls_without_a_meter_record_nothing() -> None:
+    """受け皿を渡さない呼び出しは従来どおり（境界を直接使うテストを壊さない）。"""
+    _model, patch = _patch_model([_UsageMessage("text", _USAGE)])
+
+    with patch:
+        result = asyncio.run(
+            ainvoke_text("prompt", env_prefix=None, retry_max=0, retry_wait_seconds=0.0)
+        )
+
+    assert result.content == "text"
+
+
+def test_the_sync_wrapper_records_the_same_way() -> None:
+    """同期入口（同期ノード用）も同じ受け皿に記録する（経路は 1 つ）。"""
+    _model, patch = _patch_model([_UsageMessage("text", _USAGE)])
+    meter = UsageMeter("parse_instruction")
+
+    with patch:
+        invoke_text(
+            "prompt", env_prefix=None, retry_max=0, retry_wait_seconds=0.0, meter=meter
+        )
+
+    assert [record.input_tokens for record in meter.records] == [120]

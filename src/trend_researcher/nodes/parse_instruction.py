@@ -18,7 +18,7 @@ from trend_researcher.tools.degradation import (
     DegradeOptions,
     options_for,
 )
-from trend_researcher.tools.llm import build_model, invoke_structured, invoke_text
+from trend_researcher.tools.llm import UsageMeter, build_model, invoke_structured, invoke_text
 from trend_researcher.tools.parse import extract_json_block
 
 # 期間ラベル（数字+月以外）を投稿日下限の相対日数に変換するマッピング。
@@ -154,12 +154,15 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     prompt = provider.parse_instruction_prompt.format(instruction=raw)
     # 縮退（US3）は 1 ノード実行につき 1 つ用意し、段の記録を状態へ返す（FR-017）
     degrade = options_for(configurable, NODE_PARSE_INSTRUCTION)
+    # 使用量（FR-061）はこのノードの呼び出しを 1 つの受け皿に集める
+    meter = UsageMeter(NODE_PARSE_INSTRUCTION)
     parsed, fallback_note = _parse_with_llm(
         prompt,
         model=model,
         configurable=configurable,
         degrade=degrade,
         env_prefix=provider.env_prefix,
+        meter=meter,
     )
     if fallback_note:
         # 進捗行（`messages`）ではなく補足行に出す。既定の入力の `messages` と
@@ -214,6 +217,8 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     return {
         "instruction": instruction,
         "degradations": degrade.records,
+        # 使用量は reducer（`operator.add`）で連結される（FR-061 / data-model §2.1）
+        "usage": meter.records,
         "messages": progress_messages,
     }
 
@@ -244,6 +249,7 @@ def _parse_with_llm(
     configurable: Configuration,
     degrade: DegradeOptions,
     env_prefix: str | None,
+    meter: UsageMeter | None = None,
 ) -> tuple[dict[str, Any], str]:
     """LLM の応答から解析結果を得る（構造化出力 → 全失敗なら JSON ブロック抽出）。
 
@@ -264,6 +270,7 @@ def _parse_with_llm(
             retry_wait_seconds=configurable.retry_wait_seconds,
             method=configurable.structured_method,
             degrade=degrade,
+            meter=meter,
         )
     except DegradationError:
         raise
@@ -275,6 +282,7 @@ def _parse_with_llm(
             retry_max=configurable.retry_max,
             retry_wait_seconds=configurable.retry_wait_seconds,
             degrade=degrade,
+            meter=meter,
         )
         content = text.content if hasattr(text, "content") else str(text)
         return extract_json_block(content) or {}, (

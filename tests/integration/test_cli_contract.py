@@ -671,5 +671,42 @@ def test_a_valid_max_results_still_runs(cli_runner):
         assert result.exit_code == 0, result.stderr
 
 
+# --- US8: 使用量の集約が実行プロセスの観測結果に現れる（FR-061 / FR-062） ------
+
+
+def test_us8_usage_json_records_the_run(cli_runner, tmp_path):
+    """実プロセスの実行で `cache/usage.json` に集計が残る（SC-022）。
+
+    ハーネスの LLM ダブルは `usage_metadata` を返さない（実 API が使用量を
+    返さない場合と同じ経路）。それでも**実行は成功し**、不明として集計される
+    （FR-061 の「不明でも実行を失敗させない」）。
+    """
+    result = cli_runner(*X_ARGS, scenario="x_success")
+
+    assert result.exit_code == 0
+    written = json.loads((tmp_path / "cache" / "usage.json").read_text(encoding="utf-8"))
+    # 呼び出し回数はノードごとの内訳の合計と一致する（reducer で連結されている）
+    assert written["calls"] == sum(written["by_node"].values())
+    assert written["by_node"] == {
+        "parse_instruction": 1,
+        "plan_search": 2,
+        "analyze_content": 3,
+        "extract_common": 1,
+    }
+    assert written["unknown_calls"] == written["calls"]
+    assert written["input_tokens"] == written["output_tokens"] == 0
+
+
+def test_us8_usage_is_reported_on_stderr_only(cli_runner):
+    """集計は進捗（stderr）に 1 行で出て、stdout のレポートには混ざらない（D-3）。"""
+    result = cli_runner(*X_ARGS, scenario="x_success")
+
+    assert result.exit_code == 0
+    assert "[補足] LLM 呼び出し合計 7 回（入力 0 / 出力 0 トークン、不明 7 回）" in result.stderr
+    assert "LLM 呼び出し合計" not in result.stdout
+    # 使用量はレポート本文にも備考にも入らない（D-3）
+    assert "不明" not in result.stdout
+
+
 
 

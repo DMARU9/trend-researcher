@@ -21,6 +21,7 @@ from trend_researcher.models import (
     Context,
     Degradation,
     Failure,
+    ModelUsage,
     ResearchInstruction,
     ResearchReport,
 )
@@ -540,6 +541,7 @@ def test_intermediate_data_is_written_when_enabled(tmp_path: Path) -> None:
         "degradations.json",
         "failures.json",
         "report.json",
+        "usage.json",
     ]
     compressed = json.loads((tmp_path / "compressed.json").read_text(encoding="utf-8"))
     degradations = json.loads((tmp_path / "degradations.json").read_text(encoding="utf-8"))
@@ -548,12 +550,17 @@ def test_intermediate_data_is_written_when_enabled(tmp_path: Path) -> None:
 
 
 def test_the_default_writes_no_new_files_and_keeps_the_report_keys(tmp_path: Path) -> None:
-    """既定（偽）では `cache/` のファイルが増えず、`report.json` の形も変わらない。"""
+    """既定（偽）では `compressed` / `degradations` / `failures` を書かない。
+
+    `usage.json` は `include_intermediate` に依存しない（使用量は利用者に出さない
+    中間成果物であり、`cache_dir` があるときは常に書く。data-model §4.3 の段 4 /
+    quickstart 3 節の `cache/` の表）。`report.json` の形は変わらない（SC-026）。
+    """
     state = _intermediate_state(tmp_path)
 
     result = compile_report(state, _config())
 
-    assert [p.name for p in tmp_path.iterdir()] == ["report.json"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["report.json", "usage.json"]
     written = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
     assert set(written) == REPORT_JSON_KEYS
     assert written == result["report"].model_dump(mode="json")
@@ -591,4 +598,212 @@ def test_no_breakdown_note_without_intermediate_data(
     compile_report(_state(candidates=[_candidate(1)], analyses=[_analysis("t1")]), _config())
 
     assert "[補足]" not in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# US8: 使用量の集約と記録（FR-061 / FR-062 / SC-022 / data-model §3.4・§4.3）
+# ---------------------------------------------------------------------------
+
+#: `cache/usage.json` に書く集計のキー（data-model §3.4 の派生値）。
+USAGE_JSON_KEYS = frozenset(
+    {
+        "calls",
+        "unknown_calls",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "by_node",
+        "by_role",
+    }
+)
+
+
+def _usage(
+    node: str,
+    *,
+    role: str = "research",
+    input_tokens: int | None = 120,
+    output_tokens: int | None = 30,
+    total_tokens: int | None = 150,
+    structured: bool = False,
+) -> ModelUsage:
+    """使用量の記録 1 件（トークン数は `None` = 不明も作れる）。"""
+    return ModelUsage(
+        node_name=node,
+        role=role,
+        model="openai:mimo-2.5",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        structured=structured,
+    )
+
+
+def _usage_state(tmp_path: Path, usage: list[ModelUsage]) -> dict[str, Any]:
+    """使用量の記録を持つ入力 state（レポートは空で足りる）。"""
+    return _state(
+        candidates=[_candidate(1)],
+        analyses=[_analysis("t1")],
+        usage=usage,
+        cache_dir=str(tmp_path),
+    )
+
+
+def _written_usage(tmp_path: Path) -> dict[str, Any]:
+    return json.loads((tmp_path / "usage.json").read_text(encoding="utf-8"))
+
+
+def test_usage_json_records_the_calls_tokens_and_the_breakdowns(tmp_path: Path) -> None:
+    """呼び出し回数・トークン合計・内訳が `cache/usage.json` に書かれる（FR-062）。"""
+    state = _usage_state(
+        tmp_path,
+        [
+            _usage("plan_search"),
+            _usage("plan_search", structured=True, input_tokens=10, output_tokens=5, total_tokens=15),
+            _usage("extract_common", role="summary", input_tokens=1, output_tokens=2, total_tokens=3),
+        ],
+    )
+
+    compile_report(state, _config())
+
+    written = _written_usage(tmp_path)
+    assert set(written) == USAGE_JSON_KEYS
+    assert written["calls"] == 3
+    assert written["unknown_calls"] == 0
+    assert written["input_tokens"] == 131
+    assert written["output_tokens"] == 37
+    assert written["total_tokens"] == 168
+    assert written["by_node"] == {"plan_search": 2, "extract_common": 1}
+    assert written["by_role"] == {"research": 2, "summary": 1}
+
+
+def test_usage_json_marks_unknown_calls_and_leaves_them_out_of_the_totals(
+    tmp_path: Path,
+) -> None:
+    """不明な呼び出しは `unknown_calls` に計上し、合計には 0 として足す（FR-061）。"""
+    state = _usage_state(
+        tmp_path,
+        [
+            _usage("plan_search"),
+            _usage(
+                "extract_common",
+                input_tokens=None,
+                output_tokens=None,
+                total_tokens=None,
+                structured=True,
+            ),
+        ],
+    )
+
+    compile_report(state, _config())
+
+    written = _written_usage(tmp_path)
+    assert written["calls"] == 2
+    assert written["unknown_calls"] == 1
+    assert written["input_tokens"] == 120
+    assert written["output_tokens"] == 30
+    assert written["total_tokens"] == 150
+
+
+def test_usage_json_is_written_even_when_no_llm_call_happened(tmp_path: Path) -> None:
+    """記録が 0 件でもファイルは書く（「呼んでいない」ことの記録。FR-062）。
+
+    `calls = 0` を書かないと、ファイルが無い実行と「LLM を呼ばずに完走した実行」を
+    区別できない。
+    """
+    compile_report(_usage_state(tmp_path, []), _config())
+
+    assert _written_usage(tmp_path) == {
+        "calls": 0,
+        "unknown_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "by_node": {},
+        "by_role": {},
+    }
+
+
+def test_no_usage_json_without_a_cache_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`cache_dir` が無ければ `usage.json` も書かない（data-model §4.3 の段 4）。"""
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        compile_report_module, "write_json", lambda *a, **k: calls.append((a, k))
+    )
+    state = _usage_state(Path("/tmp/does-not-matter"), [_usage("plan_search")])
+    state["cache_dir"] = None
+
+    compile_report(state, _config())
+
+    assert calls == []
+
+
+def test_usage_json_is_written_before_the_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`usage.json` は `report.json` より先に書く（data-model §4.3 の順序）。
+
+    順序を固定しないと、書き込みの途中で失敗したときに「使用量が残っているのに
+    レポートが無い」状態の理由が分からなくなる。
+    """
+    written: list[str] = []
+    original = compile_report_module.write_json
+
+    def _record(directory: Path, name: str, data: Any) -> Path:
+        written.append(name)
+        return original(directory, name, data)
+
+    monkeypatch.setattr(compile_report_module, "write_json", _record)
+
+    compile_report(_usage_state(tmp_path, [_usage("plan_search")]), _config())
+
+    assert written == ["usage", "report"]
+
+
+def test_the_usage_note_reports_the_calls_and_tokens(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """使用量は補足行 1 行で進捗に現れる（FR-062 / R-11 の文面）。"""
+    compile_report(_usage_state(tmp_path, [_usage("plan_search")]), _config())
+
+    err = capsys.readouterr().err
+    assert err.count("[補足]") == 1
+    assert "LLM 呼び出し合計 1 回（入力 120 / 出力 30 トークン）" in err
+
+
+def test_the_usage_note_mentions_the_unknown_count(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """不明な呼び出しがあるときは「不明 N 回」を併記する（FR-061 / T084）。"""
+    state = _usage_state(
+        tmp_path,
+        [
+            _usage("plan_search"),
+            _usage("extract_common", input_tokens=None, output_tokens=None, total_tokens=None),
+        ],
+    )
+
+    compile_report(state, _config())
+
+    err = capsys.readouterr().err
+    assert "LLM 呼び出し合計 2 回（入力 120 / 出力 30 トークン、不明 1 回）" in err
+
+
+def test_no_usage_note_when_no_call_was_recorded(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """記録が 0 件なら補足行を出さない（内訳の補足と同じ規則。FR-035）。"""
+    compile_report(_usage_state(tmp_path, []), _config())
+
+    assert "[補足]" not in capsys.readouterr().err
+
+
+def test_the_usage_is_not_put_into_the_report(tmp_path: Path) -> None:
+    """使用量はレポートに入れない（D-3。`report.notes` は本文に描画される）。"""
+    result = compile_report(_usage_state(tmp_path, [_usage("plan_search")]), _config())
+
+    report = result["report"]
+    assert all("LLM 呼び出し合計" not in note for note in report.notes)
+    assert set(report.model_dump(mode="json")) == REPORT_JSON_KEYS
+    assert not hasattr(report, "usage")
 

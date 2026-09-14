@@ -15,6 +15,7 @@ from trend_researcher.models import (
     Context,
     Degradation,
     Failure,
+    ModelUsage,
     ResearchReport,
 )
 from trend_researcher.progress import NODE_COMPILE_REPORT, make_emitter
@@ -38,6 +39,50 @@ def _breakdown_note(
     return (
         f"内訳: 圧縮 {len(compressed)} 件 / "
         f"縮退 {len(degradations)} 段 / 失敗 {len(failures)} 件"
+    )
+
+
+def _usage_summary(usage: list[ModelUsage]) -> dict[str, Any]:
+    """使用量の記録を `cache/usage.json` の集計へ畳む（data-model §3.4）。
+
+    不明なトークン（`None`）は合計に 0 として足し、`unknown_calls` で件数を明示する。
+    0 に潰しただけでは「0 トークンで呼んだ」と区別できなくなるため（FR-061）。
+    """
+    by_node: dict[str, int] = {}
+    by_role: dict[str, int] = {}
+    input_tokens = output_tokens = total_tokens = unknown_calls = 0
+    for record in usage:
+        by_node[record.node_name] = by_node.get(record.node_name, 0) + 1
+        by_role[record.role] = by_role.get(record.role, 0) + 1
+        if record.total_tokens is None:
+            unknown_calls += 1
+        input_tokens += record.input_tokens or 0
+        output_tokens += record.output_tokens or 0
+        total_tokens += record.total_tokens or 0
+    return {
+        "calls": len(usage),
+        "unknown_calls": unknown_calls,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "by_node": by_node,
+        "by_role": by_role,
+    }
+
+
+def _usage_note(summary: dict[str, Any]) -> str:
+    """使用量の 1 行（FR-062）。呼び出しが 0 回なら空文字（補足を足さない）。
+
+    不明な呼び出しがあるときだけ「、不明 N 回」を併記する（FR-061）。既定の入力の
+    補足行を増やさないため、0 回では何も出さず、不明 0 件でも文言を増やさない。
+    """
+    calls = summary["calls"]
+    if not calls:
+        return ""
+    unknown = f"、不明 {summary['unknown_calls']} 回" if summary["unknown_calls"] else ""
+    return (
+        f"LLM 呼び出し合計 {calls} 回"
+        f"（入力 {summary['input_tokens']} / 出力 {summary['output_tokens']} トークン{unknown}）"
     )
 
 
@@ -83,6 +128,8 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
     # 中間データ（US2 の圧縮・US3 の縮退）は内訳の補足行と `cache/` の書き出しに使う
     compressed = list(state.get("compressed", []))
     degradations = list(state.get("degradations", []))
+    # 使用量は各ノードが境界で記録したものを、この段でまとめて畳む（FR-062）
+    usage = list(state.get("usage", []))
     notes = list(state.get("notes", []))
 
     published_after = instruction.published_after
@@ -123,6 +170,7 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
     # 永続化先は Configuration（CLI --cache-dir / TR_CACHE_DIR）から渡る。
     # state は Studio 入力や将来の途中再開による上書き用。
     cache_dir = state.get("cache_dir") or configurable.cache_dir
+    usage_summary = _usage_summary(usage)
     if cache_dir:
         try:
             # 中間データは `include_intermediate` が真のときだけ書く（契約 §5）。
@@ -140,11 +188,17 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
                 write_json(
                     Path(cache_dir), "failures", [f.model_dump(mode="json") for f in failures]
                 )
+            # 使用量は `include_intermediate` に依らず書く（data-model §4.3 の段 4）。
+            # 「呼んでいない」ことも `calls: 0` として残す必要がある（FR-062）
+            write_json(Path(cache_dir), "usage", usage_summary)
             write_json(Path(cache_dir), "report", report.model_dump(mode="json"))
         except Exception as exc:  # noqa: BLE001
             emitter.emit(NODE_COMPILE_REPORT, f"キャッシュ書き込み失敗: {exc}")
 
     # 追加の観測は `note()` に出す（`emit()` の書式と `messages` は不変。FR-030 / D-3）
+    usage_note = _usage_note(usage_summary)
+    if usage_note:
+        emitter.note(usage_note)
     breakdown = _breakdown_note(compressed, degradations, failures)
     if breakdown:
         emitter.note(breakdown)

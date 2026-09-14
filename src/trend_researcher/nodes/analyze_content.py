@@ -26,7 +26,12 @@ from trend_researcher.tools.degradation import (
     DegradeOptions,
     options_for,
 )
-from trend_researcher.tools.llm import ainvoke_structured, ainvoke_text, build_model
+from trend_researcher.tools.llm import (
+    UsageMeter,
+    ainvoke_structured,
+    ainvoke_text,
+    build_model,
+)
 from trend_researcher.tools.parse import extract_list_items, extract_section
 
 #: `Failure.message` の上限（data-model §3.3「先頭 200 文字に切り詰める」）
@@ -106,6 +111,7 @@ async def _structured_finding(
     method: str,
     env_prefix: str | None,
     degrade: DegradeOptions,
+    meter: UsageMeter | None = None,
 ) -> AnalysisFinding | None:
     """構造化出力で 1 件を解析する（規定回数を使い切ったら `None`）。
 
@@ -125,6 +131,7 @@ async def _structured_finding(
             retry_wait_seconds=retry_wait_seconds,
             method=method,
             degrade=degrade,
+            meter=meter,
         )
     except DegradationError:
         raise
@@ -144,11 +151,15 @@ async def _analyze_one(
     retry_wait_seconds: float,
     method: str,
     degrade: DegradeOptions,
+    meter: UsageMeter,
 ) -> tuple[AnalysisFinding, CompressedSource | None, bool]:
     """1 件を解析する。返り値は `(解析結果, 圧縮の記録（無ければ None）, フォールバックしたか)`。
 
     圧縮はここで完結させる。後続段（`extract_common` / `compile_report`）は生の素材を
     参照しないため、圧縮した本文を解析に渡して解析結果を残せば足りる（FR-026）。
+
+    使用量（FR-061）は圧縮も含めて `meter` に記録する。並列実行でも 1 つの受け皿を
+    共有するため、どの呼び出しも漏れない（`analyze_content` 名でまとまる）。
     """
     model = build_model("research", provider.env_prefix)
     material, compressed = await compression.compress_source(
@@ -158,6 +169,7 @@ async def _analyze_one(
         timeout=timeout,
         instruction=instruction,
         source_id=candidate.id,
+        meter=meter,
     )
     prompt = provider.analyze_content_prompt.format(
         title=candidate.author_handle or candidate.title or candidate.url,
@@ -171,6 +183,7 @@ async def _analyze_one(
         method=method,
         env_prefix=provider.env_prefix,
         degrade=degrade,
+        meter=meter,
     )
     if structured is not None:
         # LLM には素材の識別子を渡していないため、`id` / `title` は候補から入れる
@@ -188,6 +201,7 @@ async def _analyze_one(
         retry_max=retry_max,
         retry_wait_seconds=retry_wait_seconds,
         degrade=degrade,
+        meter=meter,
     )
     text = result.content if hasattr(result, "content") else str(result)
 
@@ -238,6 +252,7 @@ async def _analyze_all(
     retry_wait_seconds: float,
     method: str,
     degrade: DegradeOptions,
+    meter: UsageMeter,
 ) -> tuple[list[AnalysisFinding], list[CompressedSource], int, list[Failure]]:
     """全件を `concurrency` 件ずつ並列に解析し、`(解析結果, 圧縮の記録, フォールバック件数, 失敗)` を返す。
 
@@ -269,6 +284,7 @@ async def _analyze_all(
                 retry_wait_seconds=retry_wait_seconds,
                 method=method,
                 degrade=degrade,
+                meter=meter,
             )
 
     outcomes = await asyncio.gather(*[_bounded(c) for c in candidates], return_exceptions=True)
@@ -326,6 +342,8 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
     instruction = getattr(state.get("instruction"), "raw_text", "") or ""
     # 縮退（US3）は 1 ノード実行につき 1 つの梯子を使い、記録を状態へ返す（FR-017）
     degrade = options_for(configurable, NODE_ANALYZE_CONTENT)
+    # 使用量は 1 ノード実行につき 1 つの受け皿へ集める（FR-061）。並列でも 1 つ
+    meter = UsageMeter(NODE_ANALYZE_CONTENT)
     analyses, compressed, fallen_back, failed = asyncio.run(
         _analyze_all(
             candidates,
@@ -339,6 +357,7 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
             retry_wait_seconds=configurable.retry_wait_seconds,
             method=configurable.structured_method,
             degrade=degrade,
+            meter=meter,
         )
     )
 
@@ -361,5 +380,7 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
         # 前の段（`fetch`）の記録を上書きしない。`failures` は通常フィールド
         # （reducer なし）なので、返す値に前の段の分を含めておかないと消える
         "failures": list(state.get("failures", [])) + failed,
+        # 使用量は reducer（`operator.add`）で連結される（FR-061 / data-model §2.1）
+        "usage": meter.records,
         "messages": progress_messages,
     }

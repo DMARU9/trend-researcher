@@ -16,7 +16,7 @@ LangGraph の `RunnableConfig`（Studio UI / `__main__.py` が組み立てる
 
 from __future__ import annotations
 
-from typing import Literal, get_args
+from typing import Literal, get_args, get_origin
 
 import pytest
 from annotated_types import Ge, Le
@@ -568,6 +568,142 @@ def test_added_fields_declare_the_studio_ui_config():
         assert set(ui) >= {"type", "label", "desc"}, name
         assert ui["label"], name
         assert ui["desc"], name
+
+
+# --- 宣言の網羅（US8 / FR-059 / settings-contract §1） -----------------------
+
+#: `x_oap_ui_config` を要求しない既存 7 項目（data-model §1.1「既存 7 フィールドは
+#: **そのまま**」＋ 同 §1.1 の不変条件 4「**追加フィールドに** `json_schema_extra` を
+#: 付ける」）。`max_results` は T078 で値域と UI の宣言を足したため対象に含める。
+FROZEN_LEGACY_FIELDS = frozenset(
+    {"platform", "output_format", "sort_by", "transcript_language", "cache_dir", "published_after"}
+)
+
+
+def _ui_config_or_none(name: str) -> dict[str, object] | None:
+    """JSON スキーマ上の `x_oap_ui_config`（無ければ `None`）。"""
+    return Configuration.model_json_schema()["properties"][name].get("x_oap_ui_config")
+
+
+def test_every_field_declares_its_ui_config_except_the_frozen_legacy_ones():
+    """凍結された既存項目を除く全項目が `x_oap_ui_config` を持つ（FR-060）。
+
+    走査の対象を「凍結された既存 6 項目」だけに限定する。ここを限定しないと、
+    既存の宣言（`data-model.md` §1.1 が「そのまま」と定める）を変更する要求に
+    なってしまう。逆に、**新しい項目を凍結扱いにして宣言を省く**ことはできない
+    （例外集合そのものを固定する）。
+    """
+    assert FROZEN_LEGACY_FIELDS <= set(Configuration.model_fields)
+
+    missing = [
+        name
+        for name in Configuration.model_fields
+        if name not in FROZEN_LEGACY_FIELDS and _ui_config_or_none(name) is None
+    ]
+
+    assert missing == []
+
+
+def test_declared_ui_types_follow_the_contract_table():
+    """`x_oap_ui_config.type` が契約の対応表のとおり（settings-contract §1）。"""
+    expected_by_annotation = {bool: "boolean", int: "number", float: "number"}
+
+    declared: dict[str, str] = {}
+    for name, field in Configuration.model_fields.items():
+        ui = _ui_config_or_none(name)
+        if ui is None:
+            continue
+        kind = expected_by_annotation.get(field.annotation)
+        if kind is None:
+            kind = "text"  # `str` / `Literal[...]` は text（契約の表）
+        declared[name] = str(ui["type"])
+        assert ui["type"] == kind, name
+
+    # 走査が空虚でない（両方の型が実際に宣言されている）
+    assert {"number", "boolean", "text"} <= set(declared.values())
+    assert declared["structured_method"] == "text"
+
+
+def test_every_numeric_field_declares_a_range():
+    """数値項目（`int` / `float`）は `ge` か `le` を宣言する（FR-024 / FR-059）。
+
+    値域の無い数値項目は「いくつでも受け付ける」ことと同じで、起動時の拒否
+    （`_check_bounds`）も効かない。宣言と検証を一致させる。
+    """
+    numeric = {
+        name: field
+        for name, field in Configuration.model_fields.items()
+        if field.annotation in (int, float)
+    }
+
+    missing = [name for name in numeric if _declared_bounds(name) == (None, None)]
+
+    assert missing == []
+    assert {"max_results", "analysis_concurrency", "shrink_ratio"} <= set(numeric)
+
+
+def test_every_choice_field_is_declared_with_literals():
+    """選択肢を持つ項目は `Literal` で宣言する（settings-contract §1）。"""
+    choices = {
+        name: get_args(field.annotation)
+        for name, field in Configuration.model_fields.items()
+        if get_origin(field.annotation) is Literal
+    }
+
+    assert choices == {"structured_method": ("json_schema", "function_calling")}
+    for name, values in choices.items():
+        assert len(values) >= 2, name
+        # 選択肢は無限の文字列を受け付けない（`Literal` 以外の注釈に逃げていない）
+        with pytest.raises(ValidationError):
+            Configuration(**{name: "自動で選ぶ"})
+
+
+# --- Studio 経路（US8 / FR-060 / settings-contract §4） ---------------------
+
+
+def test_studio_can_change_an_added_setting_within_its_range():
+    """Studio の `configurable` から値域内の値へ変更できる（SC-009）。"""
+    config = Configuration.from_runnable_config(
+        {"configurable": {"analysis_concurrency": 4}}
+    )
+
+    assert config.analysis_concurrency == 4
+
+
+def test_studio_cannot_escape_the_declared_range():
+    """値域外は `from_runnable_config` の時点で `ValidationError`（FR-060 / §3）。"""
+    with pytest.raises(ValidationError):
+        Configuration.from_runnable_config({"configurable": {"analysis_concurrency": 99}})
+
+
+def test_every_added_field_is_changeable_from_the_studio_config():
+    """追加 11 項目の**すべて**が Studio の `configurable` で変更できる（FR-060）。
+
+    変更前は「既定値と違う値域内の値」を 1 つ選び、その値がそのまま採用される
+    ことを確かめる（丸めや既定値への置換が起きない。FR-024）。
+    """
+    changes = {
+        name: _probe_value(name, ge, le, ui_type)
+        for name, (ge, le, ui_type) in ADDED_FIELDS.items()
+    }
+
+    for name, value in changes.items():
+        config = Configuration.from_runnable_config({"configurable": {name: value}})
+        assert getattr(config, name) == value, name
+        assert getattr(config, name) != DEFAULTS[name], name  # 実際に変わっている
+
+
+def _probe_value(name: str, ge: object, le: object, ui_type: str) -> object:
+    """値域内で既定値と異なる「変更後」の値（変更できることの探針）。"""
+    if ui_type == "boolean":
+        return not DEFAULTS[name]
+    if ui_type == "text":
+        return "function_calling"
+    if le is not None and le != DEFAULTS[name]:
+        return le
+    if ge is not None:
+        return ge
+    raise AssertionError(f"{name}: 値域内の探針を作れません（宣言を確認してください）")
 
 
 # --- `ConfigurationError` の形（data-model §1.2 / settings-contract §3） --------

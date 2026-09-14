@@ -362,17 +362,17 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 ### Tests for User Story 8（憲法 原則 I により必須）⚠️
 
-- [ ] T083 [P] [US8] 使用量の集約テストを作成する: 呼び出し 1 回につき `ModelUsage` が 1 要素 / 並列実行でも `operator.add` で**全ノード分が連結**される（後勝ちにならない）/ `cache/usage.json` に `calls` / `unknown_calls` / トークン合計 / `by_node` / `by_role` が書かれる。`tests/unit/test_state.py`（T081 と同じファイルに追記）＋ `tests/unit/test_compile_report.py`（拡張）
-- [ ] T084 [P] [US8] 使用量欠落のテストを作成する: `usage_metadata` が `None` でも実行が継続し、`unknown_calls` に計上され、`note()` が「不明 N 回」を併記する。`tests/unit/test_compile_report.py`（拡張）
-- [ ] T085 [P] [US8] 宣言の網羅テストを作成する: `Configuration.model_fields` の**全項目**に `description` があり、数値項目に `ge` / `le`、選択肢項目に `Literal` があり、`x_oap_ui_config` が付いている（走査）。`tests/unit/test_configuration.py`（拡張）
-- [ ] T086 [P] [US8] Studio 経路のテストを作成する: `{"configurable": {"analysis_concurrency": 4}}` を `from_runnable_config` に渡すと値が反映され、値域内である限り変更できる（FR-060）。`tests/unit/test_configuration.py`（T085 と同じファイルに追記）
-- [ ] T087 [P] [US8] 環境変数の直接参照の走査テストを作成する: ノードと `tools/`（`tools/llm.py` の `OPENAI_API_KEY` / `OPENAI_BASE_URL` の 2 つを除く）が `os.environ` / `os.getenv` を直接読んでいない（FR-025 の単一解決経路）。`tests/unit/test_config_scan.py`（新規）
+- [X] T083 [P] [US8] 使用量の集約テストを作成する: 呼び出し 1 回につき `ModelUsage` が 1 要素 / 並列実行でも `operator.add` で**全ノード分が連結**される（後勝ちにならない）/ `cache/usage.json` に `calls` / `unknown_calls` / トークン合計 / `by_node` / `by_role` が書かれる。`tests/unit/test_state.py`（T081 と同じファイルに追記）＋ `tests/unit/test_compile_report.py`（拡張）
+- [X] T084 [P] [US8] 使用量欠落のテストを作成する: `usage_metadata` が `None` でも実行が継続し、`unknown_calls` に計上され、`note()` が「不明 N 回」を併記する。`tests/unit/test_compile_report.py`（拡張）
+- [X] T085 [P] [US8] 宣言の網羅テストを作成する: `Configuration.model_fields` の**全項目**に `description` があり、数値項目に `ge` / `le`、選択肢項目に `Literal` があり、`x_oap_ui_config` が付いている（走査）。`tests/unit/test_configuration.py`（拡張）
+- [X] T086 [P] [US8] Studio 経路のテストを作成する: `{"configurable": {"analysis_concurrency": 4}}` を `from_runnable_config` に渡すと値が反映され、値域内である限り変更できる（FR-060）。`tests/unit/test_configuration.py`（T085 と同じファイルに追記）
+- [X] T087 [P] [US8] 環境変数の直接参照の走査テストを作成する: ノードと `tools/`（`tools/llm.py` の `OPENAI_API_KEY` / `OPENAI_BASE_URL` の 2 つを除く）が `os.environ` / `os.getenv` を直接読んでいない（FR-025 の単一解決経路）。`tests/unit/test_config_scan.py`（新規）
 
 ### Implementation for User Story 8
 
-- [ ] T088 [US8] `src/trend_researcher/tools/llm.py` に使用量の記録を追加する: 呼び出し境界で `AIMessage.usage_metadata` を読み、`ModelUsage` を 1 要素返す。欠落は `None` のまま保持し「不明」として扱う（FR-061。例外にしない）。構造化出力の呼び出しも同じ経路で数える
-- [ ] T089 [US8] `src/trend_researcher/nodes/compile_report.py` に `cache/usage.json` の書き出し（`cache_dir` があるときのみ。既存の `cache.py:write_json` を使う。UTF-8 / `ensure_ascii=False`）と、`note()` の 1 行（呼び出し回数・入力/出力トークン・不明の件数）を追加する。**レポートには入れない**（D-3）
-- [ ] T090 [US8] 変異探針を実行する: (a) `usage` の reducer を外す → T083 が落ちる、(b) `usage_metadata` の読み取りを削る → T083 が落ちる、(c) `x_oap_ui_config` を 1 項目から削る → T085 が落ちる、(d) `_check_bounds` を削る → T077 が落ちる、(e) 1 ノードだけ `os.getenv` を直接読む → T087 が落ちる
+- [X] T088 [US8] `src/trend_researcher/tools/llm.py` に使用量の記録を追加する: 呼び出し境界で `AIMessage.usage_metadata` を読み、`ModelUsage` を 1 要素返す。欠落は `None` のまま保持し「不明」として扱う（FR-061。例外にしない）。構造化出力の呼び出しも同じ経路で数える
+- [X] T089 [US8] `src/trend_researcher/nodes/compile_report.py` に `cache/usage.json` の書き出し（`cache_dir` があるときのみ。既存の `cache.py:write_json` を使う。UTF-8 / `ensure_ascii=False`）と、`note()` の 1 行（呼び出し回数・入力/出力トークン・不明の件数）を追加する。**レポートには入れない**（D-3）
+- [X] T090 [US8] 変異探針を実行する: (a) `usage` の reducer を外す → T083 が落ちる、(b) `usage_metadata` の読み取りを削る → T083 が落ちる、(c) `x_oap_ui_config` を 1 項目から削る → T085 が落ちる、(d) `_check_bounds` を削る → T077 が落ちる、(e) 1 ノードだけ `os.getenv` を直接読む → T087 が落ちる
 
 **Checkpoint**: 8 つのストーリーすべてが独立して機能する。
 
@@ -468,6 +468,23 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 実行時へずれて exit 1 ＋ ノード走行）。(e) の失敗メッセージが `assert 1 == 2` である
 ことは、`_check_bounds` の呼び出しが「exit 2 で拒否する」ことの**直接の証拠**になる。
 (b) は spec が名指しした `test_full_flow.py` の assertion が落ちることを確認した。
+
+**US8（T090。`/tmp/probe_t090.py`。`setsid` で起動し、結果は `/tmp/probe_t090.log` から読む。
+各探針は「変異 → 対象テスト → 復元 → sha256 照合」を 1 プロセスで回す。変異は
+`assert s.count(old) == 1` で 1 箇所であることを確かめてから適用する）**
+
+| # | 変異 | 落ちたテスト | 復元確認 |
+|---|---|---|---|
+| 14 | (a) `usage` の reducer を外す（`Annotated[list[ModelUsage], operator.add]` → `list[ModelUsage]`） | `test_usage_from_parallel_nodes_is_concatenated` / `test_usage_elements_are_kept_when_two_sequential_nodes_write_them` / `test_usage_is_aggregated_across_every_llm_node` / `test_the_usage_note_reports_the_aggregate_for_the_whole_run`（4 failed / 28 deselected）。**観測値が 9 回 → 1 回**になり、`plan_search` の 2 回が後勝ちで消える | `state.py` sha256 一致（`efdebdc4…`） |
+| 15 | (b) `usage_metadata` の読み取りを削る（`usage = getattr(result, "usage_metadata", None)` → `None`） | `test_a_text_call_records_one_usage_element` / `test_partial_usage_metadata_does_not_invent_the_missing_counts` / `test_the_sync_wrapper_records_the_same_way`（3 failed / 34 passed）。`assert [None] == [120]` | `tools/llm.py` sha256 一致（`e6a92657…`）。探針の後に `UsageMeter` の docstring の参照節番号（§3 → §7）だけを直したため、現在のハッシュは `028b1a52…`（コメントのみの変更で、対象テスト 37 件は再実行して green） |
+| 16 | (c) `compression_threshold` の宣言を `_setting(...)` から `Field(default=20000, ge=1000)` に置き換える（`x_oap_ui_config` が 1 項目から消える） | `test_every_declared_field_has_a_description` / `test_added_fields_declare_defaults_and_ui_type` / `test_added_fields_declare_the_studio_ui_config` / `test_every_field_declares_its_ui_config_except_the_frozen_legacy_ones`（4 failed / 51 passed）。`assert ['compression_threshold'] == []` | `configuration.py` sha256 一致（`d4a723b4…`） |
+| 17 | (d) `_check_bounds` の本体を素通しにする（`for` の前に `return settings` を挿入） | `test_out_of_range_max_results_is_rejected_before_any_node_runs` / `…_from_the_environment_is_rejected_too[0]` / `…[101]` / `…_does_not_call_the_llm`（4 failed / 2 passed / 58 deselected / 23.65 秒）。exit 2 ではなく **exit 1**（`ValidationError` が実行中の例外ハンドラに落ちる） | `configuration.py` sha256 一致（`d4a723b4…`） |
+| 18 | (e) `plan_search` だけ `os.getenv` を直接読む（`import os` を足し、`build_model("research", …)` の第 1 引数を `os.getenv("TR_MODEL_PREFIX") or "research"` にする） | `test_nodes_and_tools_do_not_read_the_environment_directly`（1 failed / 1 passed）。`nodes/plan_search.py:137` を `Hit` として報告 | `plan_search.py` sha256 一致（`d21598f1…`） |
+
+**探針の総括**: 5 件すべてで `rc != 0`（＝対象テストが落ちる）を確認し、
+`sha256(after)` は 5 ファイルすべて一致（探針で検出できなかった変異 **0 件**）。
+(a) は「reducer を外すと並列・逐次の書き込みが**後勝ちで消える**」という
+`operator.add` の役割そのものを観測値の差（9 → 1）として示せた。
 
 **US5 で踏んだ落とし穴（実装メモ §5 にも記録）**: 「state の値をその場で書き換えて解放する」
 版は、呼び出し元と共有している `Candidate` / `Context` まで空にする。統合テストの
@@ -619,6 +636,15 @@ golden を相手にしていないため。既定の入力（失敗 0 件）で�
 - 抑制の追加: なし（`# noqa` は `compile_report.py` / `plan_search.py` の既存 `# noqa: BLE001` のみ / `testpaths` 不変 / 除外設定の追加 0 件）
 - 統合テストの内訳: `tests/integration` 全体で **107 passed**（US5 で追加した起動時拒否 6 件を含む）
 
+**US8 のチェックポイント（Phase 10 完了時点。T095 で最終確認する）**
+
+- `uv run pytest -q`: **1021 passed / カバレッジ 97.42% / 438.11 秒 / exit 0**（`fail_under = 90` を満たす）
+- `uv run ruff check .`: **All checks passed!**（0 件）
+- `uv run mypy src`: **Success: no issues found in 29 source files**（0 件）
+- 抑制の追加: なし（`# noqa` は `compile_report.py` / `plan_search.py` の既存 `# noqa: BLE001` のみ / `testpaths` 不変 / 除外設定の追加 0 件。新規テストは 1 件も `# noqa` を使っていない）
+- 統合テストの内訳: `tests/integration` 全体で **111 passed / 435.17 秒**（US8 で追加した 4 件を含む）。単体は **910 passed / 1.46 秒**
+- **SC-013 の 60 秒は未達**（438.11 秒）。原因と対処は §5 に記録（T095 で扱う）
+
 
 ### 5. spec と実測のずれ（spec は変更しない）
 
@@ -660,6 +686,11 @@ golden を相手にしていないため。既定の入力（失敗 0 件）で�
 | `data-model.md` §3.3「`error_type` ＝ 例外の型名（`RuntimeError` 等）」 | 文脈取得の失敗（US4 / T063）は `error_type="MissingContext"`（**例外型名ではない**） | **意図的な逸脱**。`providers/x.py` は取得の例外をその場で握り（`except Exception` で `notes` に文言を積む）、`tools/x_search.py` の `_fetch_context_*` も `_CONTEXT_FETCH_ERRORS` を握って**空の `Context`** を返す。失敗がノードへ届く時点で例外は存在しないため、`error_type` に入れられる例外型名は無い。「`RuntimeError` 等」という例示は解析の失敗には合うが文脈取得には合わない。捏造した型名を入れるより、失敗の種類（`MissingContext`）を示す方が `data-model` の目的（後から理由を辿れる）に適う。判定は「対応する `Context` が無い、または `text` / `thread_text` / `replies` がすべて空」の 1 規則で、platform に依存しない（`tests/unit/test_fetch.py` の X / YouTube 両方のテストが固定） |
 | T063「`providers/x.py` / `youtube.py` 側の取得失敗を `failures` に記録する」 | 判定は `nodes/fetch.py` の `_context_failures()` に置き、provider の戻り値は `(contexts, notes)` のまま（**2 要素**） | `Provider.fetch_contexts` の戻り値は既存テストが多重に固定している（`test_x_search.py:749/763/779` / `test_youtube_search.py:288/304` / `test_providers.py:68/186` / `test_platform_extension.py:94`）。3 要素に変えるとプラットフォーム実装と拡張の契約を同時に壊す（FR-035 / SC-008）。失敗の判定は provider が「取れなかった」ことを表す既存の表現（**空の `Context`**）から導けるので、コアは理由を解釈せずに済む（原則 IV）。T063 の「`fetch` 経路」は provider の内側を指すとは限らず、`fetch` ノードも含むと読む |
 | T058「`tests/integration/test_full_flow.py`（既存シナリオの維持確認）」 | ファイルを変更していない（既存 102 件が green のまま） | 「維持確認」は既存シナリオが壊れていないことの確認で、変更を要求していない。既定の入力では `failures` が空になり `contexts` は非空のため、`_context_failures` は 1 件も返さない（`test_no_context_failure_when_every_context_has_content` が固定） |
+| T088「呼び出し境界で `AIMessage.usage_metadata` を読み、`ModelUsage` を 1 要素返す」（契約 §7 の表も「粒度: 呼び出し 1 回につき `ModelUsage` 1 要素」） | 実装は**境界の呼び出し 1 回につき 1 要素**（試行ごとではない）。`_with_retry` が再試行した回数のうち、記録されるのは**成功した 1 回だけ** | **実測に基づく解釈**。usage を読む先は成功して返ってきた `AIMessage` であり、**失敗した試行にはその応答が存在しない**（例外で終わる）。「試行ごとの記録」を素直に読むと例外からトークン数を取り出す実装になるが、取れる値が無いので捏造になる。契約の文言（呼び出し 1 回につき 1 要素）と一致する形にした。`test_failed_attempts_do_not_add_usage_elements` が「再試行 1 回（待機 1 回）でも記録は 1 要素」を固定する |
+| T088「構造化出力の呼び出しも同じ経路で数える」（契約 §7 の「集計元」は `AIMessage.usage_metadata`） | **構造化出力の呼び出しは数えるが、トークン数は常に `None`（不明）になる**。`with_structured_output(..., include_raw=False)` の戻り値はスキーマのインスタンス（Pydantic モデル）で、`usage_metadata` を持たない | **実測に基づく制約**（FR-061 の「使用量が応答に含まれない場合は不明として記録し、実行を失敗させない」の範囲内）。`include_raw=True` に変えると今度は戻り値の形（`{"raw": …, "parsed": …, "parsing_error": …}`）が変わり、既存の呼び出し側（3 ノード）の期待値を壊す（FR-035）。**呼び出し回数の集計（`by_node` / `by_role` / `calls`）は構造化出力でも正しい**ため、情報としての欠落はトークン数のみに留まる。実測: 既定の 5 件実行で `calls=9`（うち `analyze_content` のフォールバックが `ainvoke_text` へ落ちる分は usage を読める）・`unknown_calls=9`。テスト用のフェイクは `usage_metadata=None` を返すため、統合テストでは常に不明側の経路を通る |
+| `quickstart.md:137`「stderr … ＋ 追加の `[補足] ...` 行（圧縮・縮退・失敗・**使用量があったときのみ**）」 | 使用量の `[補足]` 行は **`calls == 0` のときだけ出さない**（`_usage_note`）。呼び出しが 1 回でもあれば、トークン数が不明でも「LLM 呼び出し合計 N 回（入力 0 / 出力 0 トークン、不明 N 回）」の 1 行が出る | **FR-062 が優先する解釈**。FR-062 は「集計結果は中間成果物と進捗に記録する MUST」と定め、契約 §7 も「記録先: `cache/usage.json`（`cache_dir` があるときのみ）＋ `note()` の 1 行」とする。「使用量があったときのみ」は**呼び出しが 1 回も無いときに出さない**（内訳の補足と同じ規則）と読むのが自然で、実装もその形にした。結果として、プロキシが usage を返さない既定の環境では**常に 1 行出る**（`不明 N 回` が情報として意味を持つ）。T096 の手動確認ではこの行を「既定で出る `[補足]`」として扱う（進捗行 `[n/7]` の行数・文言は不変で、`messages` にも積まないため FR-035 の凍結対象ではない） |
+| T083 の対象（`tests/unit/test_state.py` に追記） | このファイルの usage テスト **2 件は最初から green**（`usage` の reducer は T015 で導入済み）。赤にならなかったのは `tests/unit/test_llm.py`（`ImportError: cannot import name 'UsageMeter'`）と `tests/unit/test_compile_report.py`（8 件。`usage.json` が無い・`[補足]` 行が無い） | **回帰ガード**として残す（reducer の存在を前提にした並列・逐次の連結を固定する。探針 (a) が落とすことで T090 の対象になる）。T083 の「赤を確認する」は上記 2 ファイルで満たした |
+| **SC-013「テストスイートは… 60 秒以内に完走する」** | **未達**。US8 完了時点で **438.11 秒**（`tests/unit` は 1.46 秒、`tests/integration` が 435.17 秒）。T002 の基準値では 48.55 秒だったため、US2〜US5 のあいだに約 9 倍になった | **原因を実測で特定**（T095 で扱う）。(1) **支配要因は再試行の実待機**: 統合テストの CLI はサブプロセスなので `asyncio.sleep` の差し替え（`no_retry_sleep`）が効かず、ハーネスの構造化出力ダブルが常に `OutputParserException` を送出するため `retry_wait_seconds`（既定 1.0 秒）× 2 回 × 構造化呼び出し 5 回 ≒ 8.7 秒/件を実時間で消費している。実測: 同じハーネス起動が `TR_RETRY_WAIT_SECONDS=0` で **10.06 秒 → 1.32 秒**。(2) 残る下限は CLI の import コスト（`python -X importtime` で 1.19 秒。`openai` が 507 ms、`langgraph.graph` が 496 ms）。US2 でノードが `tools/llm.py` を通るようになり `openai` が CLI の import グラフに入ったため、ベースラインの 0.78 秒/件から 1.3 秒/件へ上がった。サブプロセス起動を使うテストは **55 個のテスト関数**（`cli_runner` / `cli_module_runner` を引数に取るもの。パラメータ化を含めると起動回数はもっと多い）で、いずれも凍結契約を固定しているため減らせない。したがって**この構造のまま 60 秒には入らない**（下限 ≒ 55 × 1.3 秒 ≒ 72 秒）。**spec は変更しない**（§5 は記録のみ）ため、T095 では「実測値・内訳・60 秒に入らない理由」を残し、60 秒の代わりに測れる性質（決定的・ネットワーク非依存・実待機 0）を記録する |
 
 ### 6. 更新または削除したテスト（FR-035 / SC-008）
 
@@ -840,6 +871,48 @@ patch する（既存テストと同じ差し替え点）。**構造化とテキ
 （既存の該当なしの行のみ）/ `include_intermediate=True` のときだけ `cache/failures.json` を
 書く（内容はモデルの `model_dump(mode="json")` と一致）/ `cache_dir` が無ければ書き込み関数を
 1 回も呼ばない。
+
+**更新（US8 / T089。「`cache/` に増えるファイル」を固定していた 2 件）**
+
+| テスト | 変更 | 理由 |
+|---|---|---|
+| `tests/unit/test_compile_report.py::test_intermediate_data_is_written_when_enabled` | 期待ファイル一覧に `usage.json` を追加（5 件に） | 契約 §7「記録先: `cache/usage.json`（**`cache_dir` があるときのみ**）＋ `note()` の 1 行」が、`include_intermediate` とは**独立に** `usage.json` を要求する（quickstart.md:139 の `cache/` の表も「`report.json`（＋ `usage.json`）。`TR_INCLUDE_INTERMEDIATE=true` のときだけ `compressed.json` / `degradations.json` / `failures.json` が増える」と定める）。T080 が固定した「既定で増えるのは `report.json` のみ」は US8 が上書きする設計 |
+| 同上 `test_the_default_writes_no_new_files_and_keeps_the_report_keys` | 期待を `sorted(...) == ["report.json", "usage.json"]` に変更し、docstring に「`usage.json` は `include_intermediate` に依存しない」根拠を明記 | 固定したい性質（`compressed.json` / `degradations.json` / `failures.json` は**中間データのスイッチに従う**）は変えていない。`report.json` の中身の比較（`REPORT_JSON_KEYS` / `model_dump` との一致）もそのまま |
+
+**新規（US8 / T083・T084。使用量の集約と欠落の記録）**: `tests/unit/test_state.py` +2 件
+（`test_usage_from_parallel_nodes_is_concatenated` / `test_usage_elements_are_kept_when_two_sequential_nodes_write_them`。
+**T015 から reducer があるため最初から green**。探針 (a) の標的として残す）／
+`tests/unit/test_llm.py` +9 件（`UsageMeter` を `llm.py` から **import して駆動**する。1 呼び出し = 1 要素、
+`model` は解決順に従う、構造化出力も同じ経路、`usage_metadata` が無い / 一部だけのときは
+`None` を保持、失敗した試行は記録しない（再試行 1 回で 1 要素）、縮退時は成功した 1 回だけ、
+`meter` 未指定なら何も記録しない、同期ラッパーも同じ）／`tests/unit/test_compile_report.py` +9 件
+（`usage.json` の 7 キー、`unknown_calls` を合計から除外、呼び出し 0 件でも全ゼロで書く、
+`cache_dir` が無ければ書かない、**`report.json` より前に書く**（`write_json` を
+`monkeypatch` で包んで呼び出し順を固定）、`[補足]` の 1 行と不明件数、記録 0 件なら出さない、
+レポートにキーを足さない）。
+
+**新規（US8 / T085・T086。宣言の網羅と Studio 経路）**: `tests/unit/test_configuration.py` +7 件。
+凍結した既存 6 項目（`FROZEN_LEGACY_FIELDS`）を除く**全項目**に `x_oap_ui_config` があり、
+`ui_type` が契約の対応表（bool → `boolean` / int・float → `number` / str・`Literal` → `text`）に従い、
+数値項目は `ge` / `le` を持ち、選択肢項目（`structured_method`）の `choices` が
+`("json_schema", "function_calling")` と一致することを走査する。Studio 経路は
+`from_runnable_config({"configurable": {"analysis_concurrency": 4}})` が値を反映し、
+値域外（99）は `ValidationError`、追加した全項目は代表値で変更できることを固定。
+
+**新規（US8 / T087。環境変数の直接参照の走査。`tests/unit/test_config_scan.py`。新規ファイル）**:
+`src/trend_researcher/nodes/**` と `src/trend_researcher/tools/**` を AST で走査し、
+`os.environ` / `os.getenv` / `load_dotenv` の参照を集める。許可するのは `tools/llm.py` の
+`OPENAI_API_KEY` / `OPENAI_BASE_URL` の **2 行だけ**（行の内容で照合）。走査対象が
+全ノード・全ツールを覆っていること（非空虚性）を別テストで固定し、新しいモジュールを
+足したときに走査から漏れないようにする。
+
+**拡張（US8 / T083・T084。統合。`tests/integration/test_full_flow.py` +2 件 / `tests/integration/test_cli_contract.py` +2 件）**:
+既定の入力（5 件の候補）で `usage` が実グラフを経由して 9 要素に連結され、
+`usage.json` の `by_node` が `parse_instruction:1` / `plan_search:2` / `analyze_content:5` /
+`extract_common:1` になること、および `[補足]` の 1 行が **stderr のみ**に出ること。
+CLI 契約側は `--max-results 3` の実行で 7 回（`analyze_content:3`）になることを
+サブプロセスから固定する（フェイクは `usage_metadata=None` を返すため、
+**FR-061 の「不明でも継続」の経路そのもの**を通る）。
 
 ### 7. 参照実装の欠陥を移植していないことの確認（FR-063 / FR-064）
 

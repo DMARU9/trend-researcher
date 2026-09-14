@@ -27,6 +27,11 @@ import ast
 from dataclasses import dataclass
 from pathlib import Path
 
+from langgraph.graph import END, START, StateGraph
+
+from trend_researcher.models import ModelUsage
+from trend_researcher.state import AgentState
+
 NODES_ROOT = Path(__file__).resolve().parents[2] / "src" / "trend_researcher" / "nodes"
 
 #: 生データのフィールド名（`Context` / `Candidate` の本文・スレッド・返信）。
@@ -217,3 +222,61 @@ def test_the_scan_detects_a_known_reference() -> None:
 
     assert samples, "analyze_content.py でも生データを検出できない（走査が空振りしている）"
     assert any(a.is_write is False for a in samples)
+
+
+# --- 使用量の集約（US8 / FR-061 / FR-062 / data-model §2.1） ------------------
+#
+# `usage` は `AgentState` で唯一 reducer を持つ（`Annotated[..., operator.add]`）。
+# ノードの戻り値は 1 つの dict にまとめて返るため、ノード内では reducer を経由しない。
+# 固定すべきは「並列に到着した複数ノードの要素が**連結**される」ことである
+# （通常フィールドなら後から書いたノードの要素だけが残る）。
+
+#: 使用量の記録 1 件を作る（トークン数は `None` = 不明も作れるようにする）。
+def _usage(node: str, *, role: str = "research", total: int | None = 150) -> ModelUsage:
+    return ModelUsage(
+        node_name=node,
+        role=role,
+        model="openai:mimo-2.5",
+        input_tokens=None if total is None else total - 30,
+        output_tokens=None if total is None else 30,
+        total_tokens=total,
+        structured=False,
+    )
+
+
+def test_usage_from_parallel_nodes_is_concatenated() -> None:
+    """並列ノードの `usage` が連結される（reducer が無ければ片方が消える。FR-061）。
+
+    非空虚性: `a` は 2 要素・`b` は 1 要素を返す。`operator.add` が外れて後勝ちに
+    なると `["b"]` しか残らず、この assertion が落ちる。
+    """
+    builder = StateGraph(AgentState)
+    builder.add_node("a", lambda _state: {"usage": [_usage("a"), _usage("a", role="summary")]})
+    builder.add_node("b", lambda _state: {"usage": [_usage("b", total=None)]})
+    builder.add_node("join", lambda _state: {})
+    builder.add_edge(START, "a")
+    builder.add_edge(START, "b")
+    builder.add_edge("a", "join")
+    builder.add_edge("b", "join")
+    builder.add_edge("join", END)
+
+    result = builder.compile().invoke({"messages": [], "usage": []})
+
+    assert sorted(record.node_name for record in result["usage"]) == ["a", "a", "b"]
+    assert sorted(record.role for record in result["usage"]) == ["research", "research", "summary"]
+    # 不明（`None`）の要素も連結の対象から外れない（件数の集計に効く）
+    assert [record.total_tokens for record in result["usage"] if record.node_name == "b"] == [None]
+
+
+def test_usage_elements_are_kept_when_two_sequential_nodes_write_them() -> None:
+    """直列のノードでも要素は加算される（`operator.add` の意味を直列でも固定する）。"""
+    builder = StateGraph(AgentState)
+    builder.add_node("first", lambda _state: {"usage": [_usage("first")]})
+    builder.add_node("second", lambda _state: {"usage": [_usage("second")]})
+    builder.add_edge(START, "first")
+    builder.add_edge("first", "second")
+    builder.add_edge("second", END)
+
+    result = builder.compile().invoke({"messages": [], "usage": []})
+
+    assert [record.node_name for record in result["usage"]] == ["first", "second"]

@@ -8,6 +8,10 @@
 
 再試行と結退は排他。上限超過は「同じ入力を投げ直しても結果は変わらない」ため
 再試行に回さず、縮小した入力で呼び直す（US3 シナリオ 4 / FR-015）。
+
+使用量の記録（`UsageMeter` / FR-061）もこの層が担う。呼び出し側は `meter` を
+渡すだけで、実際にどの試行が成功したかを知る必要がない（呼び出し側は「戻り値 1
+つ = 記録 1 要素」として受け取る）。
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from pydantic import BaseModel, ValidationError
 
 from trend_researcher.config import load_env
 from trend_researcher.configuration import resolve_env
+from trend_researcher.models import ModelUsage
 from trend_researcher.progress import make_emitter
 from trend_researcher.tools.degradation import (
     DegradationError,
@@ -114,6 +119,60 @@ def build_model(role: Role = "research", env_prefix: str | None = None):
         default_headers=_session_headers(env_prefix),
         tags=["langsmith:nostream"],
         configurable_fields=("model", "max_tokens", "api_key"),
+    )
+
+
+class UsageMeter:
+    """1 つのノードの LLM 呼び出しの使用量を集める受け皿（FR-061 / data-model §3.4）。
+
+    数えるのは**呼び出し境界**だけである（ノードは数えない）。ノードは自分の名前で
+    受け皿を作り、境界呼び出しに渡し、`records` を `usage` として状態へ返す。
+
+    粒度は「境界呼び出し 1 回（戻り値 1 つ）= 要素 1 つ」。失敗した試行には
+    `usage_metadata` を読む対象（`AIMessage`）が存在しないため、再試行の途中経過は
+    要素を増やさない（契約 §7 の「粒度」の読み方との差は実装メモ §5 に記録）。
+    """
+
+    def __init__(self, node_name: str) -> None:
+        """ノード名（`ModelUsage.node_name` になる）を受け取る。"""
+        self.node_name = node_name
+        self.records: list[ModelUsage] = []
+
+    def add(self, result: Any, *, role: Role, env_prefix: str | None, structured: bool) -> None:
+        """戻り値 1 つ分の使用量を記録する（読めない値は `None` のまま。FR-061）。"""
+        input_tokens, output_tokens, total_tokens = _usage_counts(result)
+        self.records.append(
+            ModelUsage(
+                node_name=self.node_name,
+                role=role,
+                model=resolve_model_name(env_prefix),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                structured=structured,
+            )
+        )
+
+
+def _as_int(value: Any) -> int | None:
+    """整数ならその値、そうでなければ `None`（不明を 0 に潰さない）。"""
+    return value if isinstance(value, int) else None
+
+
+def _usage_counts(result: Any) -> tuple[int | None, int | None, int | None]:
+    """応答から (入力, 出力, 合計) トークンを読む（読めない項目は `None`）。
+
+    構造化出力（`with_structured_output` / `include_raw=False`）の戻り値は検証済みの
+    インスタンスであり `usage_metadata` を持たない。その場合は 3 つとも `None` に
+    なる（0 に潰すと「0 トークンで呼んだ」という嘘の集計になる）。
+    """
+    usage = getattr(result, "usage_metadata", None)
+    if not isinstance(usage, dict):
+        return (None, None, None)
+    return (
+        _as_int(usage.get("input_tokens")),
+        _as_int(usage.get("output_tokens")),
+        _as_int(usage.get("total_tokens")),
     )
 
 
@@ -223,6 +282,7 @@ async def ainvoke_text(
     retry_max: int,
     retry_wait_seconds: float,
     degrade: DegradeOptions | None = None,
+    meter: UsageMeter | None = None,
 ) -> Any:
     """テキスト応答を規定回数まで再試行して取得する（FR-010）。
 
@@ -234,9 +294,12 @@ async def ainvoke_text(
 
     `degrade` を渡すと、上限超過（US3 / FR-015）だけは結退へ回す。省略時は既存の
     振る舞いのままで、上限超過もそのまま伝わる。
+
+    `meter` を渡すと成功した呼び出し 1 回分の使用量を記録する（FR-061）。記録は
+    使用量の読み取りに失敗しても例外にしない（呼び出しの成否を変えない）。
     """
     built = model if model is not None else build_model(role, env_prefix)
-    return await _invoke_with_degradation(
+    result = await _invoke_with_degradation(
         built.ainvoke,
         prompt,
         retry_max=retry_max,
@@ -244,6 +307,9 @@ async def ainvoke_text(
         degrade=degrade,
         env_prefix=env_prefix,
     )
+    if meter is not None:
+        meter.add(result, role=role, env_prefix=env_prefix, structured=False)
+    return result
 
 
 async def ainvoke_structured(
@@ -257,6 +323,7 @@ async def ainvoke_structured(
     retry_wait_seconds: float,
     method: str = "json_schema",
     degrade: DegradeOptions | None = None,
+    meter: UsageMeter | None = None,
 ) -> _ModelT:
     """構造化出力を規定回数まで再試行して取得する（FR-009 / FR-010）。
 
@@ -269,10 +336,13 @@ async def ainvoke_structured(
     `with_structured_output` は `Runnable[..., Any]` を返すため、検証済みの型は
     呼び出し側で `cast` して取り出す（`schema` に `with_structured_output` を
     渡している以上、実行時の戻り値は `schema` のインスタンスになる）。
+
+    `meter` の扱いは `ainvoke_text` と同じだが、戻り値が `AIMessage` ではないため
+    トークン数は不明（`None`）のまま記録される（`structured=True`）。
     """
     built = model if model is not None else build_model(role, env_prefix)
     runnable = built.with_structured_output(schema, method=method)
-    return cast(
+    result = cast(
         "_ModelT",
         await _invoke_with_degradation(
             runnable.ainvoke,
@@ -283,6 +353,9 @@ async def ainvoke_structured(
             env_prefix=env_prefix,
         ),
     )
+    if meter is not None:
+        meter.add(result, role=role, env_prefix=env_prefix, structured=True)
+    return result
 
 
 def invoke_text(
@@ -294,6 +367,7 @@ def invoke_text(
     retry_max: int,
     retry_wait_seconds: float,
     degrade: DegradeOptions | None = None,
+    meter: UsageMeter | None = None,
 ) -> Any:
     """`ainvoke_text` の同期入口（同期ノード用）。経路は 1 つに保つ。"""
     return asyncio.run(
@@ -305,6 +379,7 @@ def invoke_text(
             retry_max=retry_max,
             retry_wait_seconds=retry_wait_seconds,
             degrade=degrade,
+            meter=meter,
         )
     )
 
@@ -320,6 +395,7 @@ def invoke_structured(
     retry_wait_seconds: float,
     method: str = "json_schema",
     degrade: DegradeOptions | None = None,
+    meter: UsageMeter | None = None,
 ) -> _ModelT:
     """`ainvoke_structured` の同期入口（同期ノード用）。経路は 1 つに保つ。"""
     return asyncio.run(
@@ -333,5 +409,6 @@ def invoke_structured(
             retry_wait_seconds=retry_wait_seconds,
             method=method,
             degrade=degrade,
+            meter=meter,
         )
     )
