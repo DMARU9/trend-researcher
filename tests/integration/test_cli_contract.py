@@ -591,6 +591,36 @@ def test_us3_non_limit_error_is_not_degraded(cli_runner):
     assert "試した段数" not in result.stderr
 
 
+def test_us3_compression_and_degradation_happen_in_the_same_run(cli_runner):
+    """FR-019 / FR-026: 長文素材の圧縮と上限超過の縮退が**同じ実行**で起きる。
+
+    既存の統合シナリオは片方ずつしか動かしていない（縮退のシナリオは
+    `parse_instruction` だけで、圧縮は起きず、圧縮のシナリオは縮退しない）。
+    ここでは 1 プロセスで両方を起こし、`analyze_content` が「圧縮で削った素材で
+    組み立てたプロンプト」を縮小して続行できることを、実行プロセスの観測結果
+    （FR-002）として固定する。
+
+    しきい値だけをテスト側で下げる（`TR_COMPRESSION_THRESHOLD`）。値域の下限は
+    1000 で、長文スレッド（既定 20,000 文字超）はそれを上回る。縮退の判断
+    （`min_input_chars` 既定 1000 に対する縮小後の長さ）は既定のままにする。
+    """
+    result = cli_runner(
+        *DEGRADE_ARGS,
+        scenario="compress_and_degrade",
+        env={"TR_COMPRESSION_THRESHOLD": "2000"},
+    )
+
+    assert result.exit_code == 0
+    # 圧縮と縮退の両方が、同じ実行の補足行として stderr に残る（FR-029）
+    assert re.search(r"\[補足\] 長文素材 1 件を圧縮（成功 1/1、平均 \d+(\.\d+)?% 削減）", result.stderr)
+    assert re.search(r"\[補足\] 縮退: analyze_content / 1 段 / \d+ → \d+ 文字", result.stderr)
+    assert "[エラー]" not in result.stderr
+    # レポート（stdout）は変わらない。進捗・補足は stderr のみ（CLI-002-1 / CLI-002-3）
+    assert result.stdout != ""
+    assert "[補足]" not in result.stdout
+    assert "Traceback" not in result.stderr
+
+
 # ---------------------------------------------------------------------------
 # US5: 起動時拒否（FR-024 / SC-023 / settings-contract §3）
 # ---------------------------------------------------------------------------

@@ -982,3 +982,68 @@ def test_the_degrade_stages_come_from_the_configuration(
     (failure,) = out["failures"]
     assert failure.error_type == "DegradationError"
     assert f"試した段数: {expected_stages}" in failure.message
+
+
+class _LimitErrorWithPrompt:
+    """常に上限超過になる計測用フェイク（縮小の対象になった入力を記録する）。"""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> _LimitErrorWithPrompt:
+        return self
+
+    async def ainvoke(self, prompt: Any) -> AIMessage:
+        self.prompts.append(str(prompt))
+        raise _context_length_error()
+
+
+def test_compression_and_degradation_happen_in_the_same_run(fake_model_factory):
+    """圧縮で素材を削った後に、上限超過で梯子を登る（同じ実行で両方が起きる。FR-019 / FR-026）。
+
+    既存のテストは片方ずつしか見ていない（圧縮のテストは縮退なし、縮退のテストは
+    圧縮なし）。ここでは 1 回の実行で「しきい値超過 → 圧縮」と「上限超過 → 梯子」を
+    起こし、梯子が縮める対象が**圧縮後の素材で組み立てたプロンプト**であることを
+    長さの実測で固定する（生素材の長さではない）。
+
+    このテストが叩くのは構造化の経路（ダブルが `with_structured_output` で自分自身を
+    返すため `ainvoke_structured` の梯子が回る）。テキスト経路（構造化が使えない
+    ときの決定的解析）の側は `tests/integration/test_cli_contract.py` の
+    `compress_and_degrade` シナリオが同じ前提で固定する。
+
+    観測: 解析が縮退で失敗した候補の `CompressedSource` は状態に残らない（記録は
+    解析結果と対で返るため）。圧縮が走ったことは圧縮プロンプトの記録と、縮小対象に
+    圧縮結果の固有語が載っていることで確かめる。
+    """
+    candidate = _candidate(1, text=_OVER_THRESHOLD_SOURCE)
+    source = _build_source_text(candidate, None)
+    llm = _LimitErrorWithPrompt()
+
+    with (
+        fake_model_factory.install(
+            {"analyze_content": _STRUCTURED_RESPONSE}, compression=_COMPRESSION_RESPONSE
+        ),
+        # 解析の呼び出しだけを常に上限超過にする（圧縮は既定の応答のまま）
+        mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=llm),
+    ):
+        out = analyze_content(
+            _node_state(candidate),
+            _config(degrade_max_attempts=2, retry_max=0, min_input_chars=100),
+        )
+
+    # 同じ実行で圧縮と縮退の両方が起きている。
+    assert len(fake_model_factory.compression_prompts) == 1  # 圧縮が走った（FR-001）
+    assert [d.stage for d in out["degradations"]] == [1, 2]  # 梯子を 2 段登った
+
+    # 梯子が縮めたのは**圧縮後の素材で組み立てたプロンプト**（生素材ではない）。
+    first = out["degradations"][0]
+    assert _TAIL_KEYWORD in llm.prompts[0]  # 圧縮結果の固有語が載っている
+    assert first.before_chars == len(llm.prompts[0])
+    assert first.before_chars < len(source)  # 生素材を縮めたのではない
+    assert first.after_chars < first.before_chars
+    assert out["degradations"][1].before_chars == first.after_chars  # 段ごとに縮む
+
+    # 段を使い切った解析は部分失敗として残り、ノードは完了する（FR-020）。
+    (failure,) = out["failures"]
+    assert failure.error_type == "DegradationError"
+    assert "試した段数: 2" in failure.message

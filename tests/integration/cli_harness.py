@@ -73,6 +73,17 @@ _COMMON_OK = """### 編集の自動化
 
 _COMMON_EMPTY = "共通テーマは見つかりませんでした。"
 
+#: 圧縮（FR-001）と縮退（US3）を**同じ実行で**起こすシナリオの圧縮応答。
+#: 圧縮結果は `compression_threshold` で切り詰められるため、応答自体は長めにする。
+_COMPRESSION_OK = (
+    "<summary>\n編集ワークフローの自動化が進んでいる。\n"
+    + "圧縮後の要約。" * 400
+    + "\n</summary>\n<key_excerpts>\n- 編集時間が半分になった\n</key_excerpts>\n"
+)
+
+#: 圧縮を発動させる長文スレッド（既定のしきい値 20,000 文字を超える長さ）
+_LONG_THREAD = "埋め草" * 800
+
 #: ノード名 → 応答。`analyze_content` / `extract_common` はシナリオで差し替える。
 LLM_RESPONSES: dict[str, str] = {
     "parse_instruction": _PARSE_OK,
@@ -95,6 +106,18 @@ _NO_BOUNDARY_SCENARIOS = frozenset({"no_report"})
 #: 縮退（US3 / FR-015）のシナリオ。`parse_instruction` の LLM だけを上限超過の
 #: ダブルに差し替える（他ノードは既定の応答のまま）。
 _DEGRADE_SCENARIOS = frozenset({"degrade_success", "degrade_exhausted", "degrade_other_error"})
+
+#: 圧縮（FR-001）を発動させるシナリオ（`fetch_threads` が 1 件だけ長文を返す）
+_COMPRESSION_SCENARIOS = frozenset({"compress_and_degrade"})
+
+#: シナリオ → 上限超過のダブルに差し替えるノード。`compress_and_degrade` は
+#: `analyze_content`（圧縮の後段）で上限超過を起こし、圧縮と縮退を同居させる。
+_DEGRADED_NODES: dict[str, str] = {
+    "degrade_success": "parse_instruction",
+    "degrade_exhausted": "parse_instruction",
+    "degrade_other_error": "parse_instruction",
+    "compress_and_degrade": "analyze_content",
+}
 
 
 # --- テストダブル ---------------------------------------------------------
@@ -259,6 +282,18 @@ def _contexts_for(candidates: list[Candidate]) -> list[Context]:
     return [Context(id=c.id, text=f"{c.text} のスレッド") for c in candidates]
 
 
+def _contexts_with_a_long_thread(candidates: list[Candidate]) -> list[Context]:
+    """1 件だけしきい値超えの長文スレッドを持つ素材を返す（圧縮の発動条件。FR-001）。"""
+    return [
+        Context(
+            id=c.id,
+            text=f"{c.text} のスレッド",
+            thread_text=_LONG_THREAD if index == 0 else "",
+        )
+        for index, c in enumerate(candidates)
+    ]
+
+
 # --- シナリオのパッチ -----------------------------------------------------
 
 
@@ -295,10 +330,16 @@ def _patched_boundaries(scenario: str) -> Iterator[None]:
                     new=_RecordingBoundary(lambda *a, **kw: list(x_candidates)),
                 )
             )
+            # 圧縮のシナリオだけ 1 件を長文スレッドにする（他は短いまま）
+            threads_responder = (
+                _contexts_with_a_long_thread
+                if scenario in _COMPRESSION_SCENARIOS
+                else _contexts_for
+            )
             stack.enter_context(
                 mock.patch(
                     "trend_researcher.providers.x.fetch_threads",
-                    new=_RecordingBoundary(lambda cands, **kw: _contexts_for(cands)),
+                    new=_RecordingBoundary(lambda cands, **kw: threads_responder(cands)),
                 )
             )
 
@@ -320,9 +361,10 @@ def _patched_boundaries(scenario: str) -> Iterator[None]:
         )
 
         responses = {**LLM_RESPONSES, **LLM_OVERRIDES.get(scenario, {})}
+        degraded_node = _DEGRADED_NODES.get(scenario)
         for node in LLM_NODES:
-            if node == "parse_instruction" and scenario in _DEGRADE_SCENARIOS:
-                # 縮退のシナリオは `parse_instruction` だけを上限超過のダブルにする
+            if node == degraded_node:
+                # 縮退のシナリオは 1 ノードだけを上限超過のダブルにする
                 stack.enter_context(
                     mock.patch(
                         f"trend_researcher.nodes.{node}.build_model",
@@ -336,6 +378,17 @@ def _patched_boundaries(scenario: str) -> Iterator[None]:
                 mock.patch(
                     f"trend_researcher.nodes.{node}.build_model",
                     side_effect=lambda role="research", _content=responses[node]: _FakeLLM(_content),
+                )
+            )
+
+        if scenario in _COMPRESSION_SCENARIOS:
+            # 圧縮は `tools/compression.py` の経路でモデルを組み立てる（FR-045）
+            stack.enter_context(
+                mock.patch(
+                    "trend_researcher.tools.compression.build_model",
+                    side_effect=lambda role="compression", env_prefix=None: _FakeLLM(
+                        _COMPRESSION_OK
+                    ),
                 )
             )
 
@@ -371,6 +424,7 @@ def main() -> None:
         set(LLM_OVERRIDES)
         | _NO_BOUNDARY_SCENARIOS
         | _DEGRADE_SCENARIOS
+        | _COMPRESSION_SCENARIOS
         | {"x_success", "x_zero", "x_fewer", "youtube_success", "youtube_zero", "raise_search", "timeout", "write_error"}
     )
     if scenario not in known:
