@@ -94,7 +94,7 @@ SC-011 / SC-026）。
 
 **Purpose**: 変更前の安全網と、設計の分岐点となる実測を確定する。**この段階ではソースを変更しない。**
 
-- [ ] T001 `plan.md` の「基準値のずれ」と Constitution Check に記録した基準値（**601 passed / カバレッジ 96.65% / `ruff` 0 件 / `mypy` 0 件 / 49.10 秒**）をブランチ `003-pipeline-hardening-and-evaluation` の作業ツリーで再現する（`uv run pytest -q`、`uv run ruff check .`、`uv run mypy src`、`git status --short`）。結果を作業ツリーの確認（`git status --short` が ` M .specify/feature.json` と `?? specs/003-pipeline-hardening-and-evaluation/` のみ）とともに本ファイルの「実装メモ §0」に記録する
+- [X] T001 `plan.md` の「基準値のずれ」と Constitution Check に記録した基準値（**601 passed / カバレッジ 96.65% / `ruff` 0 件 / `mypy` 0 件 / 49.10 秒**）をブランチ `003-pipeline-hardening-and-evaluation` の作業ツリーで再現する（`uv run pytest -q`、`uv run ruff check .`、`uv run mypy src`、`git status --short`）。結果を作業ツリーの確認（`git status --short` が ` M .specify/feature.json` と `?? specs/003-pipeline-hardening-and-evaluation/` のみ）とともに本ファイルの「実装メモ §0」に記録する
 - [ ] T002 [P] 遅いテストを把握して時間予算を確保する。`uv run pytest -q --no-cov --durations=15` を実行し、上位 15 件の所要時間を「実装メモ §2」に控える（SC-013 の 60 秒以内を守るため、追加するテスト群の上限を決める根拠にする）
 - [ ] T003 [P] オフライン制約を実測する。`env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB uv run pytest -q --no-cov` を実行し、認証情報なしでも **601 passed** のままであることを確認する（原則 II の安全網）
 - [ ] T004 [P] **設計の分岐点 1 を実測する**: 構造化出力が `json_schema` で通るかを、`uv run python -c` で `ChatOpenAI.with_structured_output(<Pydantic モデル>, method="json_schema")` の疎通を確認して確定する。通らなければ `Configuration.structured_method` の**既定を `function_calling` にする**（research §R-2 / 未解決事項 1）。「実装メモ §1」に記録
@@ -398,11 +398,11 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 | 項目 | 実測値 | 測定日 | 備考 |
 |---|---|---|---|
-| `uv run pytest -q` | （記入） | | 前回は 601 passed / 49.10 秒 |
-| カバレッジ | （記入） | | `fail_under = 90` |
-| `uv run ruff check .` | （記入） | | 前回は 0 件 |
-| `uv run mypy src` | （記入） | | 前回は 0 件（27 source files） |
-| `git status --short` | （記入） | | |
+| `uv run pytest -q` | 601 passed / 48.55 秒 | 2026-09-14 | 前回は 601 passed / 49.10 秒（+0.55 秒の差は許容） |
+| カバレッジ | 96.65% | 2026-09-14 | `fail_under = 90` を満たす（唯一の低水位は `providers/base.py` 71%。`Protocol` の `...` 本体のみ） |
+| `uv run ruff check .` | 0 件（`All checks passed!`） | 2026-09-14 | 前回も 0 件 |
+| `uv run mypy src` | 0 件（`Success: no issues found in 27 source files`） | 2026-09-14 | 前回も 0 件・27 ファイル |
+| `git status --short` | 空（作業ツリー clean） | 2026-09-14 | spec の期待（` M .specify/feature.json` と `?? specs/003-.../`）とは**不一致**。spec 003 一式は `c06152e` で既にコミット済みのため未追跡にはならない。ブランチ名も spec の `003-pipeline-hardening-and-evaluation` ではなく現行の `specs/003-pipeline-hardening-and-evaluation` |
 
 ### 1. 設計の分岐点の実測（T004〜T008）
 
