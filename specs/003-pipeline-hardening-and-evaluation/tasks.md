@@ -301,17 +301,17 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 ### Tests for User Story 7（憲法 原則 I により必須）⚠️
 
-- [ ] T065 [P] [US7] 呼び出し回数と順序のテストを作成する: `self_review = True` で **2 回**（生成 1 ＋ 点検 1）、`False` で **1 回** / `prompts_for("plan_search")[0]` が**生成**プロンプト（点検は 2 番目）/ 点検が反復しない。`tests/unit/test_plan_search.py`（拡張）
-- [ ] T066 [P] [US7] 適用規則のテストを作成する（規則 1〜5）: 点検が 0 行 → 生成結果を採用 / 点検が少ない → **生成結果から補充**して件数を下回らない / 点検が多い → `max_search_queries` で切り詰め / 重複を除去 / 生成 0 件 → 0 件のまま / 点検が例外・タイムアウト → 生成結果で継続。`tests/unit/test_plan_search.py`（T065 と同じファイルに追記）
-- [ ] T067 [P] [US7] 件数契約の宣言テストを作成する: `Provider.required_query_count` が X = 5 / YouTube = 1 で宣言されている / 実装側に**明示の注釈**がある（mypy の Protocol 不変性） / `prompts.py` の生成プロンプトの件数指示と一致する（X のプロンプトは「5 件ちょうど」「5 件を厳守」を実測済み）。`tests/unit/test_providers.py`（拡張）
-- [ ] T068 [P] [US7] プロンプトの走査テストを作成する: `prompts.py` の 8 ＋ 1 定数が**停止条件**と**出力形式**の節を持つ / 重要制約（出力言語・件数・引用形式）が**役割の異なる 2 箇所**にある（FR-058）/ 固定テンプレートの禁止語（「そのまま使う」等）が無い / 判定不能表現の禁止（「おそらく」等で埋めない）がある。`tests/unit/test_prompts.py`（新規）
+- [X] T065 [P] [US7] 呼び出し回数と順序のテストを作成する: `self_review = True` で **2 回**（生成 1 ＋ 点検 1）、`False` で **1 回** / `prompts_for("plan_search")[0]` が**生成**プロンプト（点検は 2 番目）/ 点検が反復しない。`tests/unit/test_plan_search.py`（拡張）
+- [X] T066 [P] [US7] 適用規則のテストを作成する（規則 1〜5）: 点検が 0 行 → 生成結果を採用 / 点検が少ない → **生成結果から補充**して件数を下回らない / 点検が多い → `max_search_queries` で切り詰め / 重複を除去 / 生成 0 件 → 0 件のまま / 点検が例外・タイムアウト → 生成結果で継続。`tests/unit/test_plan_search.py`（T065 と同じファイルに追記）
+- [X] T067 [P] [US7] 件数契約の宣言テストを作成する: `Provider.required_query_count` が X = 5 / YouTube = 1 で宣言されている / 実装側に**明示の注釈**がある（mypy の Protocol 不変性） / `prompts.py` の生成プロンプトの件数指示と一致する（X のプロンプトは「5 件ちょうど」「5 件を厳守」を実測済み）。`tests/unit/test_providers.py`（拡張）
+- [X] T068 [P] [US7] プロンプトの走査テストを作成する: `prompts.py` の 8 ＋ 1 定数が**停止条件**と**出力形式**の節を持つ / 重要制約（出力言語・件数・引用形式）が**役割の異なる 2 箇所**にある（FR-058）/ 固定テンプレートの禁止語（「そのまま使う」等）が無い / 判定不能表現の禁止（「おそらく」等で埋めない）がある。`tests/unit/test_prompts.py`（新規）
 
 ### Implementation for User Story 7
 
-- [ ] T069 [P] [US7] `src/trend_researcher/providers/base.py` の `Provider` Protocol に `required_query_count: int | None` を宣言し、`src/trend_researcher/providers/x.py` に `required_query_count: int | None = 5`、`src/trend_researcher/providers/youtube.py` に `= 1` を実装する（**明示の注釈**を付ける。mypy の Protocol 可変属性は不変）。コアに `platform == "..."` を書かない（原則 IV）
-- [ ] T070 [US7] `src/trend_researcher/nodes/plan_search.py` に自己点検を追加する: `Configuration.self_review` が真のとき、生成の**後**に 1 回だけ点検を呼ぶ（生成と同じ行解析経路 = `_clean_query`。構造化出力は使わない）。規則 1〜5 を適用し、上限（`max_search_queries`）は従来どおり適用する。反復・リトライをしない（FR-050）。失敗時は生成結果で継続し `note()` に 1 行出す（FR-051）
-- [ ] T071 [P] [US7] `src/trend_researcher/prompts.py` の 8 定数に**停止条件**と**出力形式**の節を追加し、重要制約（出力言語・件数・引用形式）を役割の異なる 2 箇所（役割説明の直後と出力形式の節）へ明示する（FR-055 / FR-056 / FR-057 / FR-058）。固定テンプレートの指示を書かない
-- [ ] T072 [US7] 変異探針を実行する: (a) 点検の呼び出しを削る → T065 が落ちる、(b) 補充を削る（点検の結果をそのまま採用）→ T066 が落ちる、(c) `self_review` の既定を `False` にする → T065 が落ちる、(d) 点検を生成の**前**に呼ぶ → T065 のプロンプト順序が落ちる、(e) 二重明示の 1 箇所を削る → T068 が落ちる。復元後にフルスイートを再実行し、**既定の入力で検索クエリが不変**であること（T009）を確認する
+- [X] T069 [P] [US7] `src/trend_researcher/providers/base.py` の `Provider` Protocol に `required_query_count: int | None` を宣言し、`src/trend_researcher/providers/x.py` に `required_query_count: int | None = 5`、`src/trend_researcher/providers/youtube.py` に `= 1` を実装する（**明示の注釈**を付ける。mypy の Protocol 可変属性は不変）。コアに `platform == "..."` を書かない（原則 IV）
+- [X] T070 [US7] `src/trend_researcher/nodes/plan_search.py` に自己点検を追加する: `Configuration.self_review` が真のとき、生成の**後**に 1 回だけ点検を呼ぶ（生成と同じ行解析経路 = `_clean_query`。構造化出力は使わない）。規則 1〜5 を適用し、上限（`max_search_queries`）は従来どおり適用する。反復・リトライをしない（FR-050）。失敗時は生成結果で継続し `note()` に 1 行出す（FR-051）
+- [X] T071 [P] [US7] `src/trend_researcher/prompts.py` の 8 定数に**停止条件**と**出力形式**の節を追加し、重要制約（出力言語・件数・引用形式）を役割の異なる 2 箇所（役割説明の直後と出力形式の節）へ明示する（FR-055 / FR-056 / FR-057 / FR-058）。固定テンプレートの指示を書かない
+- [X] T072 [US7] 変異探針を実行する: (a) 点検の呼び出しを削る → T065 が落ちる、(b) 補充を削る（点検の結果をそのまま採用）→ T066 が落ちる、(c) `self_review` の既定を `False` にする → T065 が落ちる、(d) 点検を生成の**前**に呼ぶ → T065 のプロンプト順序が落ちる、(e) 二重明示の 1 箇所を削る → T068 が落ちる。復元後にフルスイートを再実行し、**既定の入力で検索クエリが不変**であること（T009）を確認する
 
 **Checkpoint**: US1〜US4・US6・US7 が独立して機能。既定の入力でクエリの件数と内容は不変
 （フェイクは全呼び出しに同じ内容を返すため「生成 3 件 → 点検 3 件」になる）。
@@ -428,6 +428,28 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 |---|---|---|---|
 | 1 | `return_exceptions=True` を外す | `test_one_failed_candidate_does_not_stop_the_others` / `test_every_candidate_ends_up_in_analyses_or_failures`（2 failed / 61 deselected） | sha256 一致（US4 / T064 (a)） |
 | … | （quickstart.md §5 の 20 件） | | |
+
+**US7（T072。`/tmp/probe_t072.sh` を `setsid` で起動し、結果は `/tmp/probe_t072.log` から読む。
+各探針は「変異 → 対象テスト 1 ファイル → 復元 → sha256 照合」の順で実行）**
+
+| # | 変異 | 落ちたテスト | 復元確認 |
+|---|---|---|---|
+| 2 | (a) `if configurable.self_review:` を `if False:` にする（点検の呼び出しを削る） | `test_self_review_calls_the_model_twice` / `test_the_first_prompt_stays_the_generation_prompt` / `test_the_review_does_not_repeat` / `test_the_generation_prompt_is_not_the_review_prompt` / `test_rule_3_more_review_lines_are_capped_for_x` / `test_rule_3_has_no_cap_for_youtube` / `test_a_review_failure_is_reported_once_in_the_note`（7 failed / 44 passed） | `plan_search.py` MATCH |
+| 3 | (b) `_apply_review` の補充ループ（規則 2）を削る | `test_rule_2_fewer_review_lines_are_filled_from_the_generated_queries` / `test_rule_2_never_drops_below_the_generated_count` / `test_rule_4_duplicates_are_removed_keeping_the_first`（3 failed / 48 passed） | `plan_search.py` MATCH |
+| 4 | (c) `Configuration.self_review` の既定を `True` → `False` にする | (a) と同じ 7 件（7 failed / 44 passed） | `configuration.py` MATCH |
+| 5 | (d) 点検のプロンプトを生成の**前**に呼ぶ | 15 failed / 36 passed（生成の呼び出し回数・`[0]` の内容・`date_hint` が崩れる。`test_date_hint_is_added_when_published_after_is_set` も含む） | `plan_search.py` MATCH |
+| 6 | (e) `X_PLAN_SEARCH_PROMPT` の二重明示の 1 箇所（件数）を削る | `test_important_constraints_are_stated_twice[X_PLAN_SEARCH_PROMPT-件数]`（1 failed / 77 passed） | `prompts.py` MATCH |
+| 7 | (f) 縮退の `truncated = text[:max_chars]` を `text` にする（§6 で更新した長さ比較の非空虚性の確認） | `test_compression_failure_keeps_the_analysis_running`（1 failed / 62 passed） | `compression.py` MATCH |
+
+**探針後の状態**: `sha256sum -c` で 4 ファイルとも OK、`git status --porcelain` は意図した
+8 ファイル（+ 新規 `tests/unit/test_prompts.py`）のみ。復元後にフルスイートを再実行し
+**958 passed / 97.40% / 397.19 秒 / exit 0** で green に戻ることを確認済み
+（US7 の追加は既存テストの期待値を 1 件だけ更新し、他の期待値は変えずに +24 件）。
+
+**補足（探針の作り方で踏んだこと）**: (d) は「点検を前に動かす」だけでは成立せず、
+`providers/*.py` の `review_search_prompt` を**呼び出し順だけ**入れ替える必要がある
+（点検の入力を空にして、生成の入力と取り違えないようにする）。(e) は `prompts.py` の
+該当行が 1 箇所だけであることを `assert s.count(old) == 1` で確かめてから置換する。
 
 **実装中に回した探針（T011 / T016、`configuration.py`。各 1 回で復元）**
 
@@ -593,6 +615,13 @@ golden を相手にしていないため。既定の入力（失敗 0 件）で�
 | T039「対応表の整合テスト」 | `tests/eval/axes.md` の**本文（表）**を読む走査テストも足した（`test_the_axes_table_documents_axes_constraints_and_defects`） | FR-074 は「1 つの対応表に記録する MUST」と定めるが、表は文章なので実装側へ観点・制約を足したときに黙って古くなる。観点と制約の識別子が表に現れること、実測済み欠陥が 6 件並んでいることを固定した |
 | R-21 の実測済み欠陥 6 件の「固定する方法」 | `tests/eval/axes.md` の §3 に、担当する US（US3 / US4）と固定するテストの内容を並べた。US6 の時点では #1〜#3・#6 の**実装**はまだ無い | 欠陥の一覧を 1 箇所に置くのが FR-074 / R-21 の要求で、移植しない判断は US3 / US4 の実装タスクでテストとして固定する（本フェーズでは「列挙と担当の明示」まで） |
 | 契約 §1 の表「テキスト形態（`plan_search` の生成・点検、圧縮）にも縮退あり」 | T052 で縮退を配線したのは `parse_instruction` / `analyze_content` / `extract_common` の 3 ノード（`degrade=options_for(...)`）。`plan_search` / `compile_report` はまだ渡していない | T052 の指示が「`tools/llm.py` に縮退を組み込む」で、ノード単位の配線は T078（US5）が 5 ノード分をまとめて担う。既定の入力では上限超過が起きないため**観測できる差は無い**（T050 の exit 0 ケースで実測）。T078 で残り 2 ノードに入れる |
+| 契約 §2 が列挙する Provider の追加属性は `required_query_count` のみ | 点検プロンプトも provider に置いた（`review_search_prompt` を Protocol ＋ X / YouTube に追加し、`prompts.py` に `X_REVIEW_SEARCH_PROMPT` / `YOUTUBE_REVIEW_SEARCH_PROMPT` を追加） | **意図的な追加**。コアは `platform == "..."` を書けない（原則 IV）ため、点検の文面（プラットフォームごとの件数・名詞の言い回し）は provider のフックにしか置けない。既存の 5 フック（`parse_instruction_prompt` 等）と同じ形なので、拡張点の増加ではなく同型の追加。`test_provider_exposes_the_full_interface` に `review_search_prompt` の型検査を足した（§6） |
+| 契約 §3 の節の一覧は「8 ＋ `COMPRESSION_PROMPT`」の 9 定数を対象とする | `test_prompts.py` は走査対象を `*_PROMPT` の命名で動的に集めるため、追加した 2 定数（点検）も**自動で対象になる**（計 11 定数） | 走査対象を定数名で固定すると追加時に静かに漏れる。命名で集めて「9 以上ある」ことを別テストで固定する形にした（`test_the_scan_covers_every_prompt_constant`）。点検プロンプトも FR-055〜058 の節を持つ必要があるため、対象に入るのが正しい |
+| T068「固定テンプレートの禁止語（『そのまま使う』等）」 | 禁止語は「テンプレートをそのまま」に固定した | 既存プロンプトには「〜の**まま**引用」「その**まま**貼れる」という**正しい**用法が多数あり、「そのまま使う」を含めると誤検出する。禁止したいのは「テンプレートをそのまま使う」という指示なので、語をそこに絞った（`test_no_prompt_orders_a_fixed_template`） |
+| `plan_search` の点検の入力（契約 §1 の「点検が行うこと」） | 点検プロンプトには `{topic}` と生成済みクエリ（改行連結）を渡す。**指示本文（`raw_text`）は渡さない** | 生成側の `search_topic`（括弧内の除去 ＋ 期間表現の除去）と同じ値を使う。指示本文を渡すと点検がトピックを再解釈でき、規則「生成結果に無いクエリを創作しない」を促す文面と矛盾する（点検が補うのは**語の組み合わせ**まで） |
+| 契約 §1 の表「点検が行うこと (c) 上限（`max_search_queries`）の適用」 | 上限は点検の**後**に `_apply_review` の中で 1 回だけ適用する（生成直後の上限適用と合わせて 2 箇所になるが、適用は同じ値） | 規則 2（補充）は「生成結果の件数を下回らない」を満たすため、生成結果に上限を掛けた**後**の件数を基準にする必要がある。点検前に上限を掛けておくことで `len(generated)` が上限内に収まり、規則 3 の切り詰めと重複しない（`test_rule_3_more_review_lines_are_capped_for_x` が両方を固定） |
+| 契約 §6 の「変異探針」表の 1 行「生成プロンプトの件数を 3 に変える → `required_query_count` との一致テストが落ちる」 | T072 の探針には含めず、T067 の `test_the_generation_prompt_states_the_declared_count` が**同じ関係**（プロンプトの件数指示 ↔ `required_query_count`）を固定している | 探針 (e) が `prompts.py` を変異させる枠を持ち、T094 の 20 件で網羅する。件数指示を 3 に変える変異は `test_the_generation_prompt_states_the_declared_count` が落ちることを構造上保証している（`"5 件ちょうど"` と `"5"` を直接照合） |
+| 契約 §2 の用途「(b) 規則 2（補充）の**上限**」 | 実装はコアで `required_query_count` を**読まない**。補充の目標は規則 2 の文言どおり `len(generated)`（生成結果の件数）にする | 規則 2 は「生成結果から補充し、**生成結果の件数を下回らない**」と定めており、生成結果が規定件数より多い場合（例: X で 8 件）に `required_query_count = 5` を上限にすると「下回らない」を満たせず、規則 1（差分なし）とも衝突する。**D-1 が「規定件数まで増やさない」を明示**しているため、値の役割は (a)（プロンプトの件数指示との一致をテストで確認する）に絞られる。既定の入力では生成が 5 件＝規定件数なので、`len(generated)` と `required_query_count` は一致する（`test_required_query_count_is_declared` と凍結テストの件数（3 / 2 / 8 / 12 / 0）が両立する） |
 | T047「条件 3 を満たさない `400` で `False`」のうち `body` が**文字列**の場合 | 条件 3 は `body` の `code` / `type` を読むため、文字列の `body` は構造として満たせず `False` になる | 契約 §5 の条件 3 は「応答本文**または**メッセージに指標がある」だが、指標は `code == "context_length_exceeded"` か `type == "invalid_request_error"` を要求する。文字列から `getattr` で拾う実装は誤認を生む（FR-018）ため `False` を固定した（テストの docstring に根拠を明記） |
 | 契約 §6「既知モデルの初回は上限に収まる文字数」 | 実装は `(上限トークン − 10,000) × 1 文字`（`_CHARS_PER_TOKEN = 1` / `_OUTPUT_RESERVE_TOKENS = 10,000`） | 係数を安全側（1 トークン = 1 文字）に置く。日本語はトークンあたりの文字数が少なく、多めに見積もると上限を超えたまま呼ぶ。契約の文言は「収まる文字数」とのみ定めるため逸脱ではない |
 | 契約 §6「段数 最大 `degrade_max_attempts`（既定 3）」の数え方 | 実装は `max_attempts` 段（呼び出し回数は初回 ＋ 段数 = 最大 4 回）。`max_attempts=2` なら 2 段（3 回） | 契約の読みと同じ（「段」は縮小して呼び直した回数）。T049 の `test_exhausting_the_ladder_raises_the_reason` が `stages == 2` / `calls == 3` を固定している |
@@ -651,6 +680,42 @@ T016 の指示は「追加 11 項目の宣言」であるため既存 7 項目�
 | `tests/unit/test_fixtures.py::test_fake_model_factory_structured_calls_are_recorded` | 期待を「構造化プロンプトは `structured_prompts_for()` に、テキストは `prompts_for()` に別々に記録される」に書き換え | T028〜T034 で 1 ノードが「構造化 1 回＋フォールバックでテキスト 1 回」を呼ぶようになり、`_FakeStructuredRunnable` が同じログに記録すると**凍結契約**（`tests/integration/test_frozen_contracts.py::test_default_text_call_counts_are_unchanged` / `test_full_flow.py`）の「既定の入力での LLM 呼び出し回数」が構造化の再試行で膨らむ。ログを分け、`prompts_for()` は「テキスト呼び出し」の意味に保った（元のテストの docstring もそう読める） |
 | `tests/unit/test_analyze_content.py::test_progress_note_reports_how_many_were_compressed` / `test_no_note_when_nothing_was_compressed` | 断言を**圧縮の補足行に限定**（`"[補足] 長文素材 1 件を圧縮（成功 1/1" in err` / `"長文素材" not in err`）。docstring に「US2 のフォールバック補足行とは別の契約」と明記 | US2 で既定の入力（フェイクは構造化出力に失敗する）でも `note()` が 1 行出るため、「`note()` が 0 行」を固定する旧断言は維持できない。**消したのは「この既定入力では常に 0 行」という前提だけ**で、圧縮が起きないときに出ない性質は新しい断言で固定し直した |
 | `tests/unit/test_llm.py` の `pytest.raises(BaseException)` | `# noqa: PT011` を削除（コメントは本文へ） | `PT011` は有効でないため `RUF100`（未使用の noqa）になる。抑制は増やさない（ゲート「`# noqa` 0 件」に合わせる） |
+
+**更新（US7 / T071。プロンプトの文面量に依存していた断言）**
+
+| テスト | 変更 | 理由 |
+|---|---|---|
+| `tests/unit/test_analyze_content.py::test_compression_failure_keeps_the_analysis_running` | 末尾の断言を `len(prompt) < len(_OVER_THRESHOLD_SOURCE)` から `prompt.count("埋め草") < _OVER_THRESHOLD_SOURCE.count("埋め草")` に変更（コメントに「長さはプロンプト全体ではなく**素材の部分**で見る」と明記） | 旧断言は「プロンプト全体（テンプレート ＋ 縮退した素材）が素材全体より短い」を意味しており、**テンプレートの文面量が増えると成立しなくなる**（T071 が FR-055〜058 の節を足して 20,007 文字の素材に対して 21,067 文字になり落ちた）。固定したい性質は「縮退が素材を先頭からしきい値で切ったこと」＝ **素材全体が載らないこと**なので、素材の部分（`"埋め草"` の出現数。しきい値 20,000 で 6,666 回 < 全体の 7,000 回）で見る形にした。切り詰めを外す変異で落ちることは §3 の探針 (f) で実測済み（**弱めていない**） |
+
+**新規（US7 / T065・T066。`tests/unit/test_plan_search.py`）**: `test_self_review_calls_the_model_twice` /
+`test_self_review_can_be_turned_off` / `test_the_first_prompt_stays_the_generation_prompt` /
+`test_the_review_does_not_repeat` / `test_the_generation_prompt_is_not_the_review_prompt` /
+`test_rule_1_no_review_lines_keeps_the_generated_queries` /
+`test_rule_2_fewer_review_lines_are_filled_from_the_generated_queries` /
+`test_rule_2_never_drops_below_the_generated_count` / `test_rule_3_more_review_lines_are_capped_for_x` /
+`test_rule_3_has_no_cap_for_youtube` / `test_rule_4_duplicates_are_removed_keeping_the_first` /
+`test_rule_5_no_generated_queries_stays_empty` / `test_a_review_failure_keeps_the_generated_queries` /
+`test_a_review_failure_is_reported_once_in_the_note` / `test_no_review_note_when_the_review_succeeds` /
+`test_the_review_result_is_not_used_when_self_review_is_off` /
+`test_the_note_does_not_grow_the_progress_messages`（17 件。生成と点検で応答を分けるため
+`_SequencedLLM` と `_run_sequenced` を追加。差し替える境界は既存テストと同じ
+`nodes.plan_search.build_model`）
+
+**新規（US7 / T067。`tests/unit/test_providers.py`）**: `test_the_protocol_declares_required_query_count` /
+`test_required_query_count_is_declared[x-5]` / `[youtube-1]` /
+`test_required_query_count_carries_an_explicit_annotation[x-5]` / `[youtube-1]` /
+`test_the_generation_prompt_states_the_declared_count[x-*]` / `[youtube-*]`（7 件。注釈の有無は
+`inspect.getsourcefile` で実装ファイルを読んで照合する）
+
+**新規（US7 / T068。`tests/unit/test_prompts.py`。新規ファイル）**: 走査対象の健全性
+（`test_the_scan_covers_every_prompt_constant`）＋ 各定数 × 4 節（停止条件 / 出力形式 /
+判定不能表現の禁止 / 固定テンプレートの禁止）＋ 重要制約 3 種 ×「出力形式の節の前」と
+「節の中」の二重明示（78 件。`*_PROMPT` の命名で集めるため、追加した点検プロンプトも自動で対象）
+
+**更新（US7 / T069。Protocol の拡張に伴う走査テストの追加）**:
+`test_provider_exposes_the_full_interface` に `review_search_prompt` の型検査を追加
+（`providers/base.py` に `review_search_prompt` を宣言したため。§5 の「契約 §2 が列挙する
+Provider の追加属性は `required_query_count` のみ」の行を参照）
 
 **更新・削除（US6）**: なし。US6 は `tests/eval/` と `script/evaluate.py` の**新規のみ**で、
 既存テストの期待値・名前・`testpaths` を変えていない（`tests/unit/test_evaluation_entrypoint.py`

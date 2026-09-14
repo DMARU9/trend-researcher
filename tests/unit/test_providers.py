@@ -7,11 +7,14 @@ X と YouTube の差は「provider が吸収する」設計なので、ノード
 
 from __future__ import annotations
 
+import inspect
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from trend_researcher import prompts
 from trend_researcher.models import Candidate
 from trend_researcher.providers import (
     _PROVIDERS,
@@ -221,6 +224,58 @@ def test_platform_hooks_match_each_platform(
 
     assert provider.env_prefix == env_prefix
     assert provider.content_noun == content_noun
+
+
+# ---------------------------------------------------------------------------
+# 検索クエリの必要件数（US7 / 契約 §2-3）
+# ---------------------------------------------------------------------------
+
+#: 生成プロンプトが要求する件数。点検の規則 2（補充）の基準になる。
+REQUIRED_QUERY_COUNTS = {"x": 5, "youtube": 1}
+
+
+def test_the_protocol_declares_required_query_count() -> None:
+    """コアが件数を知る唯一の入口（`platform == "..."` を書かない。FR-004）。"""
+    assert "required_query_count" in Provider.__annotations__
+
+
+@pytest.mark.parametrize(("platform", "expected"), sorted(REQUIRED_QUERY_COUNTS.items()))
+def test_required_query_count_is_declared(platform: str, expected: int) -> None:
+    assert get_provider(platform).required_query_count == expected
+
+
+@pytest.mark.parametrize(("platform", "expected"), sorted(REQUIRED_QUERY_COUNTS.items()))
+def test_required_query_count_carries_an_explicit_annotation(
+    platform: str, expected: int
+) -> None:
+    """Protocol の可変属性は不変なので、実装側にも明示の注釈が要る（mypy）。
+
+    素の代入（`required_query_count = 5`）は `int` 推論になり `int | None` に
+    適合しない。注釈が落ちると mypy が落ちるが、ここでも固定しておく。
+    """
+    source_path = inspect.getsourcefile(type(get_provider(platform)))
+    assert source_path is not None
+    source = Path(source_path).read_text(encoding="utf-8")
+
+    assert f"required_query_count: int | None = {expected}" in source
+
+
+@pytest.mark.parametrize(
+    ("platform", "prompt_name", "required_phrases"),
+    [
+        ("x", "X_PLAN_SEARCH_PROMPT", ("5 件ちょうど", "5 件を厳守")),
+        ("youtube", "YOUTUBE_PLAN_SEARCH_PROMPT", ("1 つだけ",)),
+    ],
+)
+def test_the_generation_prompt_states_the_declared_count(
+    platform: str, prompt_name: str, required_phrases: tuple[str, ...]
+) -> None:
+    """プロンプトの件数指示と provider の宣言が一致する（契約 §2-3）。"""
+    text = getattr(prompts, prompt_name)
+
+    for phrase in required_phrases:
+        assert phrase in text, phrase
+    assert str(REQUIRED_QUERY_COUNTS[platform]) in text
 
 
 # ---------------------------------------------------------------------------

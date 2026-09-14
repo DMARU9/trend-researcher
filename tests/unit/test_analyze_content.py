@@ -499,10 +499,12 @@ def test_compression_failure_keeps_the_analysis_running(fake_model_factory):
     records = out["compressed"]
     assert [(r.applied, r.reason) for r in records] == [(False, "timeout")]
     # 縮退は生素材を（先頭から）しきい値で切ったもの。素材全体は載らない。
+    # 長さはプロンプト全体ではなく**素材の部分**で見る（プロンプト全体には
+    # テンプレートの文面も含まれ、その量は FR-055〜058 で増減しうるため）。
     prompt = fake_model_factory.prompts_for("analyze_content")[0]
     assert "埋め草" in prompt
     assert _TAIL_KEYWORD not in prompt
-    assert len(prompt) < len(_OVER_THRESHOLD_SOURCE)
+    assert prompt.count("埋め草") < _OVER_THRESHOLD_SOURCE.count("埋め草")
 
 
 def test_progress_note_reports_how_many_were_compressed(

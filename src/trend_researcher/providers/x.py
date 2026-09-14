@@ -14,6 +14,7 @@ from trend_researcher.prompts import (
     X_EXTRACT_COMMON_PROMPT,
     X_PARSE_INSTRUCTION_PROMPT,
     X_PLAN_SEARCH_PROMPT,
+    X_REVIEW_SEARCH_PROMPT,
 )
 from trend_researcher.tools.x_search import fetch_threads, search_tweets
 
@@ -90,6 +91,9 @@ class XProvider:
     #: 注: Protocol の可変属性は mypy では不変（invariant）のため、`int | None` を
     #: 明示しないと `int` 推論になって適合しない。
     max_search_queries: int | None = 8
+    #: 生成プロンプトが指示する件数（`X_PLAN_SEARCH_PROMPT` の「5 件ちょうど」）。
+    #: 自己点検は件数をこの値まで**増やさない**（下回らない補充の基準に使う。契約 §2）。
+    required_query_count: int | None = 5
     content_noun = "ツイート"
     candidates_section_title = "## 選定ツイートリスト（上位 N 件）"
 
@@ -234,6 +238,10 @@ class XProvider:
     @property
     def plan_search_prompt(self) -> str:
         return X_PLAN_SEARCH_PROMPT
+
+    @property
+    def review_search_prompt(self) -> str:
+        return X_REVIEW_SEARCH_PROMPT
 
     @property
     def analyze_content_prompt(self) -> str:

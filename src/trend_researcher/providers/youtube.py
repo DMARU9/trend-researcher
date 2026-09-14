@@ -11,6 +11,7 @@ from trend_researcher.prompts import (
     YOUTUBE_EXTRACT_COMMON_PROMPT,
     YOUTUBE_PARSE_INSTRUCTION_PROMPT,
     YOUTUBE_PLAN_SEARCH_PROMPT,
+    YOUTUBE_REVIEW_SEARCH_PROMPT,
 )
 from trend_researcher.tools.transcript import fetch_transcript
 from trend_researcher.tools.youtube_search import search_videos
@@ -24,6 +25,9 @@ class YouTubeProvider:
     #: 単一クエリ設計のため上限なし（`None` は無制限）
     #: 注: Protocol の可変属性は mypy では不変（invariant）のため `int | None` を明示する。
     max_search_queries: int | None = None
+    #: 生成プロンプトが指示する件数（`YOUTUBE_PLAN_SEARCH_PROMPT` の「1 つだけ」）。
+    #: 単一クエリ設計なので 1（契約 §2）。
+    required_query_count: int | None = 1
     content_noun = "動画"
     candidates_section_title = "## 選定動画リスト（関連度順上位 N 件）"
 
@@ -87,6 +91,10 @@ class YouTubeProvider:
     @property
     def plan_search_prompt(self) -> str:
         return YOUTUBE_PLAN_SEARCH_PROMPT
+
+    @property
+    def review_search_prompt(self) -> str:
+        return YOUTUBE_REVIEW_SEARCH_PROMPT
 
     @property
     def analyze_content_prompt(self) -> str:

@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
+from unittest import mock
 
 import pytest
 from langchain_core.runnables import RunnableConfig
@@ -184,3 +186,183 @@ def test_progress_messages_report_start_then_finish(fake_model_factory):
 def test_progress_reports_zero_queries(fake_model_factory):
     out = _run(fake_model_factory, "")
     assert [m.content for m in out["messages"]][-1] == "[2/7] plan_search ... 完了（クエリ 0 件: ）"
+
+
+# --- US7: 生成後の自己点検（FR-049〜054 / 契約 §1） -------------------------
+
+
+class _SequencedLLM:
+    """呼び出しごとに違う応答を返すフェイク（生成と点検で応答を変える）。
+
+    `fake_model_factory` はノード単位で 1 つの応答しか持たないため、生成と点検の
+    出力を変えられない。点検の適用規則（契約 §1）を測るには順番つきの応答が要る。
+    差し替える境界（`nodes.plan_search.build_model`）は既存のテストと同じ。
+    """
+
+    def __init__(self, responses: list[str], error_at: int | None = None) -> None:
+        self.responses = list(responses)
+        #: この番号（0 始まり）の呼び出しで例外を送出する（点検の失敗を作る）。
+        self.error_at = error_at
+        self.prompts: list[str] = []
+
+    def invoke(self, prompt: str, *args: Any, **kwargs: Any) -> Any:
+        index = len(self.prompts)
+        self.prompts.append(prompt)
+        if self.error_at is not None and index == self.error_at:
+            raise RuntimeError("点検が失敗しました")
+        content = self.responses[min(index, len(self.responses) - 1)]
+        return SimpleNamespace(content=content)
+
+
+def _run_sequenced(
+    responses: list[str],
+    *,
+    error_at: int | None = None,
+    config: RunnableConfig | None = None,
+    state: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], _SequencedLLM]:
+    """生成と点検で応答を分けたフェイクで `plan_search` を 1 回実行する。"""
+    llm = _SequencedLLM(responses, error_at=error_at)
+    node_state = {"instruction": _instruction()} if state is None else state
+    with mock.patch("trend_researcher.nodes.plan_search.build_model", return_value=llm):
+        out = plan_search(node_state, _config() if config is None else config)
+    return out, llm
+
+
+def test_self_review_calls_the_model_twice():
+    """`self_review` が真（既定）なら生成 1 ＋ 点検 1 の 2 回（FR-050 / SC-021）。"""
+    _, llm = _run_sequenced(["クエリA\nクエリB", "クエリA\nクエリB"])
+
+    assert len(llm.prompts) == 2
+
+
+def test_self_review_can_be_turned_off():
+    """`self_review = False` なら生成の 1 回だけ（SC-036）。"""
+    _, llm = _run_sequenced(["クエリA\nクエリB"], config=_config(self_review=False))
+
+    assert len(llm.prompts) == 1
+
+
+def test_the_first_prompt_stays_the_generation_prompt(fake_model_factory):
+    """点検を足しても `prompts_for(...)[0]` は生成プロンプトのまま（契約 §5-1/§5-2）。"""
+    _run(fake_model_factory, "クエリA")
+
+    prompts = fake_model_factory.prompts_for("plan_search")
+    assert len(prompts) == 2
+    assert "トピック: オタクの困りごと" in prompts[0]
+    # 点検は生成の**後**。生成結果を材料として受け取る
+    assert "クエリA" in prompts[1]
+
+
+def test_the_review_does_not_repeat(fake_model_factory):
+    """点検は 1 回だけでループしない（FR-050）。"""
+    _run(fake_model_factory, "クエリA")
+
+    assert len(fake_model_factory.prompts_for("plan_search")) == 2
+
+
+def test_the_generation_prompt_is_not_the_review_prompt(fake_model_factory):
+    """2 つのプロンプトが別物であること（取り違えると点検の意味が消える）。"""
+    _run(fake_model_factory, "クエリA")
+
+    generated, reviewed = fake_model_factory.prompts_for("plan_search")
+    assert generated != reviewed
+
+
+def test_rule_1_no_review_lines_keeps_the_generated_queries():
+    """規則 1: 点検の出力が 0 行なら生成結果をそのまま採用（FR-051）。"""
+    out, _ = _run_sequenced(["クエリA\nクエリB", ""])
+
+    assert out["search_queries"] == ["クエリA", "クエリB"]
+
+
+def test_rule_2_fewer_review_lines_are_filled_from_the_generated_queries():
+    """規則 2: 点検が生成より少ないときは生成結果から補充する（D-1 / US7 シナリオ 1）。"""
+    out, _ = _run_sequenced(["クエリA\nクエリB\nクエリC", "クエリA"])
+
+    assert out["search_queries"] == ["クエリA", "クエリB", "クエリC"]
+
+
+def test_rule_2_never_drops_below_the_generated_count():
+    """規則 2: 補充の結果が生成の件数を下回らない。"""
+    out, _ = _run_sequenced(["クエリA\nクエリB\nクエリC", "クエリB"])
+
+    assert len(out["search_queries"]) == 3
+    assert set(out["search_queries"]) == {"クエリA", "クエリB", "クエリC"}
+
+
+def test_rule_3_more_review_lines_are_capped_for_x():
+    """規則 3: 点検が生成より多いときは上限（X = 8）で切り詰める。"""
+    reviewed = "\n".join(f"点検{i}" for i in range(1, 11))
+    out, _ = _run_sequenced(["クエリA\nクエリB", reviewed])
+
+    assert out["search_queries"] == [f"点検{i}" for i in range(1, 9)]
+
+
+def test_rule_3_has_no_cap_for_youtube():
+    """規則 3: YouTube は `max_search_queries = None` なので切り詰めない。"""
+    reviewed = "\n".join(f"点検{i}" for i in range(1, 11))
+    out, _ = _run_sequenced(
+        ["クエリA", reviewed],
+        config=_config(platform="youtube"),
+        state={"instruction": _instruction(platform="youtube"), "platform": "youtube"},
+    )
+
+    assert out["search_queries"] == [f"点検{i}" for i in range(1, 11)]
+
+
+def test_rule_4_duplicates_are_removed_keeping_the_first():
+    """規則 4: 正規化後の重複は先に現れたものを残す。"""
+    out, _ = _run_sequenced(["クエリA\nクエリB", "クエリA\nクエリA\nクエリA"])
+
+    assert out["search_queries"] == ["クエリA", "クエリB"]
+
+
+def test_rule_5_no_generated_queries_stays_empty():
+    """規則 5: 生成が 0 件なら点検しても 0 件（固定件数まで増やさない。D-1）。"""
+    out, _ = _run_sequenced(["", "点検1\n点検2"])
+
+    assert out["search_queries"] == []
+
+
+def test_a_review_failure_keeps_the_generated_queries():
+    """点検が例外でも生成結果で継続する（FR-051。例外を送出しない）。"""
+    out, _ = _run_sequenced(["クエリA\nクエリB"], error_at=1)
+
+    assert out["search_queries"] == ["クエリA", "クエリB"]
+
+
+def test_a_review_failure_is_reported_once_in_the_note(
+    capsys: pytest.CaptureFixture[str],
+):
+    """点検の失敗は補足行に 1 行で出す（FR-051。stderr のみ）。"""
+    _run_sequenced(["クエリA\nクエリB"], error_at=1)
+
+    err = capsys.readouterr().err
+    assert err.count("[補足] 検索クエリの点検に失敗") == 1
+    assert "RuntimeError" in err
+
+
+def test_no_review_note_when_the_review_succeeds(capsys: pytest.CaptureFixture[str]):
+    """点検が成功したときは補足行を出さない（既定の入力の stderr を変えない。FR-035）。"""
+    _run_sequenced(["クエリA\nクエリB", "クエリA\nクエリB"])
+
+    assert "点検に失敗" not in capsys.readouterr().err
+
+
+def test_the_review_result_is_not_used_when_self_review_is_off():
+    """無効時は 2 つ目の応答を採用しない（呼び出しもしない）。"""
+    out, llm = _run_sequenced(
+        ["クエリA\nクエリB", "点検1\n点検2"], config=_config(self_review=False)
+    )
+
+    assert out["search_queries"] == ["クエリA", "クエリB"]
+    assert len(llm.prompts) == 1
+
+
+def test_the_note_does_not_grow_the_progress_messages(capsys: pytest.CaptureFixture[str]):
+    """補足行は `messages`（進捗）に載せない（契約 §2-2 / FR-029）。"""
+    out, _ = _run_sequenced(["クエリA\nクエリB"], error_at=1)
+
+    assert "点検" not in "".join(m.content for m in out["messages"])
+    capsys.readouterr()
