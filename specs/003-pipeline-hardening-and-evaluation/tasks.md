@@ -270,18 +270,18 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 ### Tests for User Story 4（憲法 原則 I により必須）⚠️
 
-- [ ] T056 [P] [US4] 部分失敗の隔離テストを作成する: 10 件中 3 件が失敗して 7 件の解析が得られる / 失敗が `failures` に入り**無言で消えない** / 実行は exit 0 / 全件失敗でも完走し、失敗の事実と理由が残る。`tests/unit/test_analyze_content.py`（拡張）
-- [ ] T057 [P] [US4] キャンセルのテストを作成する: `asyncio.CancelledError` は部分失敗として飲み込まれず**再送出**される（原則 V「エラーを握りつぶさない」）。`tests/unit/test_analyze_content.py`（T056 と同じファイルに追記）
-- [ ] T058 [P] [US4] 文脈取得の失敗テストを作成する: 一部の候補で追加文脈が取れなくても取得分で解析が続き、失敗が `failures` に記録され、**既存の `notes` の文言（`スレッド取得に失敗しました（本文のみで解析）`）は変更されない**。`tests/unit/test_fetch.py`（拡張）＋ `tests/integration/test_full_flow.py`（既存シナリオの維持確認）
-- [ ] T059 [P] [US4] 失敗の可視化のテストを作成する: 失敗の件数と理由が `note()`（stderr）と中間データ（`include_intermediate = True` のとき `cache/failures.json`）で確認でき、**`report.notes` には既定で追加されない**。`tests/unit/test_compile_report.py`（拡張）
+- [X] T056 [P] [US4] 部分失敗の隔離テストを作成する: 10 件中 3 件が失敗して 7 件の解析が得られる / 失敗が `failures` に入り**無言で消えない** / 実行は exit 0 / 全件失敗でも完走し、失敗の事実と理由が残る。`tests/unit/test_analyze_content.py`（拡張）
+- [X] T057 [P] [US4] キャンセルのテストを作成する: `asyncio.CancelledError` は部分失敗として飲み込まれず**再送出**される（原則 V「エラーを握りつぶさない」）。`tests/unit/test_analyze_content.py`（T056 と同じファイルに追記）
+- [X] T058 [P] [US4] 文脈取得の失敗テストを作成する: 一部の候補で追加文脈が取れなくても取得分で解析が続き、失敗が `failures` に記録され、**既存の `notes` の文言（`スレッド取得に失敗しました（本文のみで解析）`）は変更されない**。`tests/unit/test_fetch.py`（拡張）＋ `tests/integration/test_full_flow.py`（既存シナリオの維持確認）
+- [X] T059 [P] [US4] 失敗の可視化のテストを作成する: 失敗の件数と理由が `note()`（stderr）と中間データ（`include_intermediate = True` のとき `cache/failures.json`）で確認でき、**`report.notes` には既定で追加されない**。`tests/unit/test_compile_report.py`（拡張）
 
 ### Implementation for User Story 4
 
-- [ ] T060 [US4] `src/trend_researcher/nodes/analyze_content.py` の `asyncio.gather` を `return_exceptions=True` にし、`asyncio.CancelledError` だけ再送出する。成功分を `analyses`、失敗分を `failures` に分ける（FR-020）
-- [ ] T061 [US4] `src/trend_researcher/nodes/analyze_content.py`（または `__main__.py` の既存ハンドリングを壊さない位置）で、失敗の件数と理由を `note()` に 1 行で出す（FR-023）
-- [ ] T062 [US4] 全件失敗のときに `src/trend_researcher/nodes/compile_report.py` の `notes` に「解析 0 件（すべて失敗: N 件）」を追加し、exit 0 で完走させる（US4 シナリオ 3）。**この行は全件失敗のときだけ**追加する（既定の入力では増えない = FR-035）
-- [ ] T063 [US4] `src/trend_researcher/providers/x.py` / `youtube.py` 側の取得失敗（`fetch` 経路）を `failures`（`kind="context"`）に記録する。既存の `notes` の文言と `report.notes` の要素は**変えない**
-- [ ] T064 [US4] 変異探針を実行する: (a) `return_exceptions=True` を外す → T056 が落ちる、(b) `CancelledError` の再送出を削る → T057 が落ちる、(c) `failures` への記録を削る → T056 が落ちる、(d) 全件失敗の `notes` を無条件に足す → T009（凍結契約）が落ちる
+- [X] T060 [US4] `src/trend_researcher/nodes/analyze_content.py` の `asyncio.gather` を `return_exceptions=True` にし、`asyncio.CancelledError` だけ再送出する。成功分を `analyses`、失敗分を `failures` に分ける（FR-020）
+- [X] T061 [US4] `src/trend_researcher/nodes/analyze_content.py`（または `__main__.py` の既存ハンドリングを壊さない位置）で、失敗の件数と理由を `note()` に 1 行で出す（FR-023）
+- [X] T062 [US4] 全件失敗のときに `src/trend_researcher/nodes/compile_report.py` の `notes` に「解析 0 件（すべて失敗: N 件）」を追加し、exit 0 で完走させる（US4 シナリオ 3）。**この行は全件失敗のときだけ**追加する（既定の入力では増えない = FR-035）
+- [X] T063 [US4] `src/trend_researcher/providers/x.py` / `youtube.py` 側の取得失敗（`fetch` 経路）を `failures`（`kind="context"`）に記録する。既存の `notes` の文言と `report.notes` の要素は**変えない**
+- [X] T064 [US4] 変異探針を実行する: (a) `return_exceptions=True` を外す → T056 が落ちる、(b) `CancelledError` の再送出を削る → T057 が落ちる、(c) `failures` への記録を削る → T056 が落ちる、(d) 全件失敗の `notes` を無条件に足す → T009（凍結契約）が落ちる
 
 **Checkpoint**: US1〜US4 と US6 が独立して機能。既定の入力（失敗なし）では `failures` が空で出力は不変。
 
@@ -426,7 +426,7 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 | # | 変異 | 落ちたテスト | 復元確認 |
 |---|---|---|---|
-| 1 | `return_exceptions=True` を外す | （記入） | （記入） |
+| 1 | `return_exceptions=True` を外す | `test_one_failed_candidate_does_not_stop_the_others` / `test_every_candidate_ends_up_in_analyses_or_failures`（2 failed / 61 deselected） | sha256 一致（US4 / T064 (a)） |
 | … | （quickstart.md §5 の 20 件） | | |
 
 **実装中に回した探針（T011 / T016、`configuration.py`。各 1 回で復元）**
@@ -543,6 +543,25 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 見ているテストだけが落ちることを確認してから探針の証拠とした（無関係なテストが巻き添えで
 落ちる探針は「何を検出したのか」を言えない）。
 
+**実装中に回した探針（US4 / T064。各 1 回で復元）**
+
+対象: `src/trend_researcher/nodes/analyze_content.py`（`sha256 = 0402f850…`）/ 
+`src/trend_researcher/nodes/compile_report.py`（`sha256 = 1d6b7a64…`）。
+探針は `/tmp/probe_t064.sh`（各変異の前後で `sha256` を比較し、`git status` も記録する）。
+
+| 変異 | 落ちたテスト | 復元確認 |
+|---|---|---|
+| (a) `gather(..., return_exceptions=True)` の `return_exceptions=True` を外す | `test_one_failed_candidate_does_not_stop_the_others` / `test_every_candidate_ends_up_in_analyses_or_failures`（2 failed / 61 deselected）。スタックトレースが「失敗した候補の例外がそのまま `analyze_content` 全体を落とす」ことを示す | sha256 一致 |
+| (b) `isinstance(outcome, asyncio.CancelledError): raise outcome` の 2 行を削る | `test_cancellation_is_not_swallowed_as_a_partial_failure`（1 failed / 62 deselected） | sha256 一致 |
+| (c) `failures.append(_analysis_failure(...))` の 1 行を削る | `test_one_failed_candidate_does_not_stop_the_others` / `test_every_candidate_ends_up_in_analyses_or_failures` / `test_the_failure_record_carries_the_id_and_the_reason`（3 failed / 60 deselected） | sha256 一致 |
+| (d) 全件失敗の注記の条件 `elif not analyses and failures:` を `elif True:` にする（無条件に足す） | `test_default_stdout_matches_the_golden` / `test_default_run_does_not_add_notes`（2 failed / 4 passed）。既定の入力（失敗なし）でも注記が増えるため凍結契約が落ちる | sha256 一致 |
+
+復元後: フルスイートで green に戻ることを確認済み（§4 の最終ゲート表を参照）。
+**探針 (d) の意味**: この探針は「全件失敗のときだけ」という条件が**既定の出力を守るために
+効いている**ことを示す。条件を外すと T059（`test_partial_failure_does_not_add_a_report_note`）
+ではなく T009（凍結契約）が落ちるのは、部分失敗の入力では `report.notes` の比較が
+golden を相手にしていないため。既定の入力（失敗 0 件）でも注記が増えるので golden が落ちる。
+
 ### 4. 最終ゲート（T095）
 
 - `uv run pytest -q`: （記入）
@@ -577,7 +596,10 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 | T047「条件 3 を満たさない `400` で `False`」のうち `body` が**文字列**の場合 | 条件 3 は `body` の `code` / `type` を読むため、文字列の `body` は構造として満たせず `False` になる | 契約 §5 の条件 3 は「応答本文**または**メッセージに指標がある」だが、指標は `code == "context_length_exceeded"` か `type == "invalid_request_error"` を要求する。文字列から `getattr` で拾う実装は誤認を生む（FR-018）ため `False` を固定した（テストの docstring に根拠を明記） |
 | 契約 §6「既知モデルの初回は上限に収まる文字数」 | 実装は `(上限トークン − 10,000) × 1 文字`（`_CHARS_PER_TOKEN = 1` / `_OUTPUT_RESERVE_TOKENS = 10,000`） | 係数を安全側（1 トークン = 1 文字）に置く。日本語はトークンあたりの文字数が少なく、多めに見積もると上限を超えたまま呼ぶ。契約の文言は「収まる文字数」とのみ定めるため逸脱ではない |
 | 契約 §6「段数 最大 `degrade_max_attempts`（既定 3）」の数え方 | 実装は `max_attempts` 段（呼び出し回数は初回 ＋ 段数 = 最大 4 回）。`max_attempts=2` なら 2 段（3 回） | 契約の読みと同じ（「段」は縮小して呼び直した回数）。T049 の `test_exhausting_the_ladder_raises_the_reason` が `stages == 2` / `calls == 3` を固定している |
-| 検出器の `_EXCLUDED_WORDS` の判定順 | 除外語彙（条件 4）を条件 3 より**先**に見る（`unsupported` を含む `400` は指標があっても `False`） | 契約 §5 は「すべての条件を満たしたときだけ `True`」と定めるので順序は結果に影響しないが、早期に除外して無駄な照合をしない形にした。T055(a) で条件 4 を削ると反例テストが落ちることを実測 |
+| 検出器の `_EXCLUDED_WORDS` の判定順 | 除外語彙（条件 4）を条件 3 より**先**に見る（`unsupported` を含む `400` は指標があっても `False`） | 契約 §5 は「すべての条件を満たしたときだけ `True`」と定めるので順序は結果に影響しないが、早期に除外して無駄な照合をしない形にした。T055(a) で条件 4 を削ると反試テストが落ちることを実測 |
+| `data-model.md` §3.3「`error_type` ＝ 例外の型名（`RuntimeError` 等）」 | 文脈取得の失敗（US4 / T063）は `error_type="MissingContext"`（**例外型名ではない**） | **意図的な逸脱**。`providers/x.py` は取得の例外をその場で握り（`except Exception` で `notes` に文言を積む）、`tools/x_search.py` の `_fetch_context_*` も `_CONTEXT_FETCH_ERRORS` を握って**空の `Context`** を返す。失敗がノードへ届く時点で例外は存在しないため、`error_type` に入れられる例外型名は無い。「`RuntimeError` 等」という例示は解析の失敗には合うが文脈取得には合わない。捏造した型名を入れるより、失敗の種類（`MissingContext`）を示す方が `data-model` の目的（後から理由を辿れる）に適う。判定は「対応する `Context` が無い、または `text` / `thread_text` / `replies` がすべて空」の 1 規則で、platform に依存しない（`tests/unit/test_fetch.py` の X / YouTube 両方のテストが固定） |
+| T063「`providers/x.py` / `youtube.py` 側の取得失敗を `failures` に記録する」 | 判定は `nodes/fetch.py` の `_context_failures()` に置き、provider の戻り値は `(contexts, notes)` のまま（**2 要素**） | `Provider.fetch_contexts` の戻り値は既存テストが多重に固定している（`test_x_search.py:749/763/779` / `test_youtube_search.py:288/304` / `test_providers.py:68/186` / `test_platform_extension.py:94`）。3 要素に変えるとプラットフォーム実装と拡張の契約を同時に壊す（FR-035 / SC-008）。失敗の判定は provider が「取れなかった」ことを表す既存の表現（**空の `Context`**）から導けるので、コアは理由を解釈せずに済む（原則 IV）。T063 の「`fetch` 経路」は provider の内側を指すとは限らず、`fetch` ノードも含むと読む |
+| T058「`tests/integration/test_full_flow.py`（既存シナリオの維持確認）」 | ファイルを変更していない（既存 102 件が green のまま） | 「維持確認」は既存シナリオが壊れていないことの確認で、変更を要求していない。既定の入力では `failures` が空になり `contexts` は非空のため、`_context_failures` は 1 件も返さない（`test_no_context_failure_when_every_context_has_content` が固定） |
 
 ### 6. 更新または削除したテスト（FR-035 / SC-008）
 
@@ -691,6 +713,37 @@ T016 の指示は「追加 11 項目の宣言」であるため既存 7 項目�
 縮退せず exit 1（誤認の禁止）。ハーネス（`cli_harness.py`）に `degrade_success` /
 `degrade_exhausted` / `degrade_other_error` の 3 シナリオを追加し、`parse_instruction` の
 LLM だけを上限超過のダブルに差し替える（他ノードは既定の応答のまま）。
+
+**拡張（部分失敗の隔離。`tests/unit/test_analyze_content.py` +7 件 → 63 件。US4 / T056・T057）**
+
+既存の `FakeModelFactory` はノード単位で応答を決めるため「特定の候補だけ失敗させる」ことが
+できない。テスト内に `_SelectiveLLM` / `_SelectiveStructured`（プロンプトに**目印の文字列**が
+含まれる候補だけ例外を送出する）を置き、`trend_researcher.nodes.analyze_content.build_model` を
+patch する（既存テストと同じ差し替え点）。**構造化とテキストの両経路で送出する**のが要点で、
+片方だけだと他方が成功して失敗が再現しない（フォールバックが失敗を覆い隠す）。
+
+| 関心 | テスト |
+|---|---|
+| 1 件の失敗が他を止めない（US4 シナリオ 1） | `test_one_failed_candidate_does_not_stop_the_others`（10 件中 3 件失敗 → 解析 7 件・失敗 3 件） |
+| 無言の欠落が無い（FR-021） | `test_every_candidate_ends_up_in_analyses_or_failures`（`analyses` ＋ `failures` の id の和集合が全候補と一致） |
+| 失敗の内容（FR-023） | `test_the_failure_record_carries_the_id_and_the_reason`（`kind` / `id` / `error_type` / `message` に目印の理由が入る） |
+| 全件失敗でも完走（US4 シナリオ 3） | `test_all_candidates_failing_still_completes`（`analyses` が空で完走する） |
+| キャンセルは飲み込まない（T057） | `test_cancellation_is_not_swallowed_as_a_partial_failure`（`pytest.raises(asyncio.CancelledError)`） |
+| 失敗の可視化（FR-023） | `test_the_failure_note_reports_the_count_and_the_reasons`（`[補足] 解析できなかった対象 3 件` が**ちょうど 1 行**、`RuntimeError` を含む） |
+| 既定の入力の出力を変えない（FR-035） | `test_no_failure_note_when_nothing_failed` |
+
+**拡張（追加文脈の取得失敗。`tests/unit/test_fetch.py` +5 件 → 7 件。US4 / T058）**:
+取得できなかった候補が `Failure(kind="context")` になる / 前の段の `failures` を上書きせず
+**追記**する（`AgentState` の `failures` に reducer が無いため）/ 文脈が取れていれば増えない /
+一括取得の失敗は**既存の `notes` の文言のまま**（`contexts` は候補の本文で代替されるので
+`failures` には載せない）/ YouTube の字幕なしも同じ規則で記録する。
+
+**拡張（失敗の可視化。`tests/unit/test_compile_report.py` +5 件 → 25 件。US4 / T059）**:
+一部失敗は `report.notes` に足さない（既定の出力を変えない）/ 全件失敗のときだけ
+`解析 0 件（すべて失敗: 3 件）` を **1 行だけ**足す / 候補 0 件は「全件失敗」ではない
+（既存の該当なしの行のみ）/ `include_intermediate=True` のときだけ `cache/failures.json` を
+書く（内容はモデルの `model_dump(mode="json")` と一致）/ `cache_dir` が無ければ書き込み関数を
+1 回も呼ばない。
 
 ### 7. 参照実装の欠陥を移植していないことの確認（FR-063 / FR-064）
 

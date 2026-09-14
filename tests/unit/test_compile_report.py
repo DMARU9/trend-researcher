@@ -17,6 +17,7 @@ from trend_researcher.models import (
     AnalysisFinding,
     Candidate,
     CommonTheme,
+    Failure,
     ResearchInstruction,
     ResearchReport,
 )
@@ -89,8 +90,10 @@ def _state(**overrides: Any) -> dict[str, Any]:
     return base
 
 
-def _config(platform: str = "x", cache_dir: str | None = None) -> dict[str, Any]:
-    return {"configurable": {"platform": platform, "cache_dir": cache_dir}}
+def _config(
+    platform: str = "x", cache_dir: str | None = None, **options: Any
+) -> dict[str, Any]:
+    return {"configurable": {"platform": platform, "cache_dir": cache_dir, **options}}
 
 
 def _report(platform: str = "x", **overrides: Any) -> ResearchReport:
@@ -300,6 +303,87 @@ def test_cache_write_failure_does_not_add_a_note(monkeypatch: pytest.MonkeyPatch
     report = compile_report(_state(cache_dir="/tmp/does-not-matter"), _config())["report"]
 
     assert not any("キャッシュ" in n for n in report.notes)
+
+
+# ---------------------------------------------------------------------------
+# US4: 失敗の可視化（FR-021 / FR-023 / 契約 §3・§5）
+# ---------------------------------------------------------------------------
+
+
+def _failure(idx: int = 1, kind: str = "analysis") -> Failure:
+    return Failure(
+        kind=kind,
+        id=f"t{idx}",
+        error_type="RuntimeError",
+        message=f"{idx} 件目の解析に失敗しました",
+    )
+
+
+def test_partial_failure_does_not_add_a_report_note() -> None:
+    """一部の失敗は `report.notes` に足さない（既定の出力を変えない。FR-035 / FR-021）。"""
+    state = _state(
+        candidates=[_candidate(1), _candidate(2)],
+        analyses=[_analysis("t1")],
+        failures=[_failure(2)],
+    )
+
+    report = compile_report(state, _config())["report"]
+
+    assert not any("解析できなかった" in n or "すべて失敗" in n for n in report.notes)
+
+
+def test_all_candidates_failing_adds_exactly_one_note() -> None:
+    """全件失敗のときだけ「解析 0 件（すべて失敗: N 件）」を 1 行足す（US4 シナリオ 3）。"""
+    state = _state(
+        candidates=[_candidate(i) for i in (1, 2, 3)],
+        analyses=[],
+        failures=[_failure(i) for i in (1, 2, 3)],
+    )
+
+    report = compile_report(state, _config())["report"]
+
+    lines = [n for n in report.notes if "すべて失敗" in n]
+    assert lines == ["解析 0 件（すべて失敗: 3 件）"]
+
+
+def test_the_all_failed_note_is_not_added_when_there_are_no_candidates() -> None:
+    """候補 0 件は「全件失敗」ではない（既存の該当なしの行だけが載る）。"""
+    report = compile_report(_state(candidates=[], analyses=[]), _config())["report"]
+
+    assert not any("すべて失敗" in n for n in report.notes)
+    assert any("見つかりませんでした" in n for n in report.notes)
+
+
+def test_failures_json_is_written_only_when_intermediate_is_enabled(tmp_path: Path) -> None:
+    """`include_intermediate` が真のときだけ `cache/failures.json` を書く（契約 §5）。"""
+    state = _state(
+        candidates=[_candidate(1), _candidate(2)],
+        analyses=[_analysis("t1")],
+        failures=[_failure(2)],
+        cache_dir=str(tmp_path),
+    )
+
+    compile_report(state, _config())
+    assert not (tmp_path / "failures.json").exists()
+
+    compile_report(state, _config(include_intermediate=True))
+    written = json.loads((tmp_path / "failures.json").read_text(encoding="utf-8"))
+
+    assert written == [_failure(2).model_dump(mode="json")]
+
+
+def test_no_failures_json_without_a_cache_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        compile_report_module, "write_json", lambda *a, **k: calls.append((a, k))
+    )
+
+    compile_report(
+        _state(candidates=[_candidate(1)], failures=[_failure(1)], cache_dir=None),
+        _config(include_intermediate=True),
+    )
+
+    assert calls == []
 
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,8 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
     candidates = state.get("candidates", [])
     analyses = state.get("analyses", [])
     common_themes = state.get("common_themes", [])
+    # `failures` は前の段の記録（解析・文脈取得）。件数と理由の確認に使う（FR-023）
+    failures = list(state.get("failures", []))
     notes = list(state.get("notes", []))
 
     published_after = instruction.published_after
@@ -42,6 +44,11 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
             f"該当する{provider.content_noun}が見つかりませんでした"
             "（検索クエリまたは期間フィルタの条件に一致する投稿なし）。"
         )
+    elif not analyses and failures:
+        # 全件失敗のときだけ 1 行足す（US4 シナリオ 3 / FR-021）。一部失敗では
+        # 足さない（既定の入力の `report.notes` を増やさない = FR-035）。
+        # 候補 0 件は「全件失敗」ではないので `elif` で外す
+        notes.append(f"解析 0 件（すべて失敗: {len(failures)} 件）")
 
     sources = [c.url for c in candidates if c.url]
 
@@ -62,6 +69,12 @@ def compile_report(state: AgentState, config: RunnableConfig) -> dict:
     if cache_dir:
         try:
             write_json(Path(cache_dir), "report", report.model_dump(mode="json"))
+            # 中間データは `include_intermediate` が真のときだけ書く（契約 §5）。
+            # 既定（偽）の出力は変更前と一致させる（SC-026）
+            if configurable.include_intermediate:
+                write_json(
+                    Path(cache_dir), "failures", [f.model_dump(mode="json") for f in failures]
+                )
         except Exception as exc:  # noqa: BLE001
             emitter.emit(NODE_COMPILE_REPORT, f"キャッシュ書き込み失敗: {exc}")
 

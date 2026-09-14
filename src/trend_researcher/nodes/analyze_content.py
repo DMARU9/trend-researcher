@@ -14,6 +14,7 @@ from trend_researcher.models import (
     Candidate,
     CompressedSource,
     Context,
+    Failure,
 )
 from trend_researcher.progress import NODE_ANALYZE_CONTENT, make_emitter
 from trend_researcher.providers import get_provider
@@ -27,6 +28,34 @@ from trend_researcher.tools.degradation import (
 )
 from trend_researcher.tools.llm import ainvoke_structured, ainvoke_text, build_model
 from trend_researcher.tools.parse import extract_list_items, extract_section
+
+#: `Failure.message` の上限（data-model §3.3「先頭 200 文字に切り詰める」）
+_FAILURE_MESSAGE_CHARS = 200
+
+
+def _analysis_failure(candidate: Candidate, exc: BaseException) -> Failure:
+    """解析 1 件の失敗を記録する（無言で欠落させない。FR-021）。
+
+    `id` は候補の識別子にする。失敗した対象が分からないと「どの素材が解析できて
+    いないか」を後から辿れない（FR-023）。
+    """
+    message = str(exc).strip() or type(exc).__name__
+    return Failure(
+        kind="analysis",
+        id=candidate.id,
+        error_type=type(exc).__name__,
+        message=message[:_FAILURE_MESSAGE_CHARS],
+    )
+
+
+def _failure_note(failures: list[Failure]) -> str:
+    """失敗の件数と理由の 1 行（FR-023。候補ごとではなく 1 行にまとめる）。
+
+    理由は**重複を除いて**並べる。同じ原因で 10 件落ちたときに同じ文を 10 回
+    出しても読めない。
+    """
+    reasons = sorted({f"{f.error_type}: {f.message}" for f in failures})
+    return f"解析できなかった対象 {len(failures)} 件（{' / '.join(reasons)}）"
 
 
 def _parse_angles_table(markdown_table: str) -> list[BlogAngle]:
@@ -208,12 +237,17 @@ async def _analyze_all(
     retry_wait_seconds: float,
     method: str,
     degrade: DegradeOptions,
-) -> tuple[list[AnalysisFinding], list[CompressedSource], int]:
-    """全件を並列上限 2 で解析し、`(解析結果, 圧縮の記録, フォールバック件数)` を返す。
+) -> tuple[list[AnalysisFinding], list[CompressedSource], int, list[Failure]]:
+    """全件を並列上限 2 で解析し、`(解析結果, 圧縮の記録, フォールバック件数, 失敗)` を返す。
 
     縮退の記録（`degrade`）は候補をまたいで共有する。1 ノード実行＝1 本の梯子
     （FR-017）。並列実行なので、段のカウンタを候補ごとに増やすと上限が
     候補数倍になってしまう。
+
+    失敗は隔離する。`gather(return_exceptions=True)` で候補ごとの例外を受け取り、
+    成功分を `analyses`、失敗分を `failures` に分ける（FR-020）。1 件の失敗でレポート
+    全体を失わせない。**サービス終了要求（`asyncio.CancelledError`）だけは例外**で、
+    部分失敗として飲み込まずに再送出する（原則 V / 契約 §3）。
     """
     sem = asyncio.Semaphore(2)
 
@@ -233,11 +267,24 @@ async def _analyze_all(
                 degrade=degrade,
             )
 
-    outcomes = await asyncio.gather(*[_bounded(c) for c in candidates])
-    analyses = [finding for finding, _, _ in outcomes]
-    compressed = [record for _, record, _ in outcomes if record is not None]
-    fallen_back = sum(1 for _, _, fell_back in outcomes if fell_back)
-    return analyses, compressed, fallen_back
+    outcomes = await asyncio.gather(*[_bounded(c) for c in candidates], return_exceptions=True)
+
+    analyses: list[AnalysisFinding] = []
+    compressed: list[CompressedSource] = []
+    failures: list[Failure] = []
+    fallen_back = 0
+    for candidate, outcome in zip(candidates, outcomes, strict=True):
+        if isinstance(outcome, BaseException):
+            if isinstance(outcome, asyncio.CancelledError):
+                raise outcome
+            failures.append(_analysis_failure(candidate, outcome))
+            continue
+        finding, record, fell_back = outcome
+        analyses.append(finding)
+        if record is not None:
+            compressed.append(record)
+        fallen_back += fell_back
+    return analyses, compressed, fallen_back, failures
 
 
 def _compression_note(records: list[CompressedSource]) -> str:
@@ -272,7 +319,7 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
     instruction = getattr(state.get("instruction"), "raw_text", "") or ""
     # 縮退（US3）は 1 ノード実行につき 1 つの梯子を使い、記録を状態へ返す（FR-017）
     degrade = options_for(configurable, NODE_ANALYZE_CONTENT)
-    analyses, compressed, fallen_back = asyncio.run(
+    analyses, compressed, fallen_back, failed = asyncio.run(
         _analyze_all(
             candidates,
             contexts_by_id,
@@ -294,11 +341,17 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
     if fallen_back:
         # 同じく補足行。件数で 1 行にまとめる（候補ごとに 1 行出すと既定の入力で増えすぎる）
         emitter.note(_fallback_note(fallen_back))
+    if failed:
+        # 失敗の件数と理由（FR-023）。件数で 1 行にまとめる（理由は重複を除く）
+        emitter.note(_failure_note(failed))
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
     return {
         "analyses": analyses,
         "compressed": compressed,
         "degradations": degrade.records,
+        # 前の段（`fetch`）の記録を上書きしない。`failures` は通常フィールド
+        # （reducer なし）なので、返す値に前の段の分を含めておかないと消える
+        "failures": list(state.get("failures", [])) + failed,
         "messages": progress_messages,
     }

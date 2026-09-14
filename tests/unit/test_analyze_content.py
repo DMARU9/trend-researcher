@@ -686,3 +686,144 @@ def test_structured_method_comes_from_the_configuration(fake_model_factory: Any)
     options = fake_model_factory.structured_options_for("analyze_content")
     assert options and options[0]["method"] == "function_calling"
     assert options[0]["schema"] is AnalysisFinding
+
+
+# --- US4: 部分失敗の隔離（FR-020 / FR-021 / FR-023 / SC-007） ----------------
+
+#: 失敗させる候補の目印。素材（プロンプト）にこの文字列が含まれる候補だけが失敗する。
+_FAILURE_MARKER = "壊れた素材"
+
+
+class _SelectiveLLM:
+    """目印を含む素材だけを失敗させる計測用フェイク（US4 の隔離の観測）。
+
+    `FakeModelFactory` のフェイクは「ノード単位で 1 つの応答」しか持てないため、
+    「10 件中 3 件だけ失敗」を作れない。`_TrackingLLM` と同じく、差し替える境界
+    （`build_model`）は R-7 のまま、候補ごとの成否を判定する実装だけをここに置く。
+
+    失敗は構造化出力とテキスト呼び出しの**両方**で起こす。片方だけだと
+    `_structured_finding` のフォールバックがもう片方を呼び、失敗が消えてしまう
+    （隔離のテストが「フォールバックで救えた」経路に化ける）。
+    """
+
+    def __init__(self, marker: str = _FAILURE_MARKER, error: BaseException | None = None) -> None:
+        self.marker = marker
+        self.error = error if error is not None else RuntimeError(f"{marker} を解析できません")
+        self.structured_calls = 0
+        self.text_calls = 0
+
+    def _decide(self, prompt: str) -> None:
+        if self.marker in prompt:
+            raise self.error
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        return _SelectiveStructured(self, schema)
+
+    async def ainvoke(self, prompt: str) -> AIMessage:
+        self.text_calls += 1
+        self._decide(prompt)
+        return AIMessage(content=_STRUCTURED_RESPONSE)
+
+
+class _SelectiveStructured:
+    """`with_structured_output` の戻り（目印の判定だけを行う runnable）。"""
+
+    def __init__(self, llm: _SelectiveLLM, schema: Any) -> None:
+        self._llm = llm
+        self._schema = schema
+
+    async def ainvoke(self, prompt: str) -> Any:
+        self._llm.structured_calls += 1
+        self._llm._decide(prompt)
+        return self._schema.model_validate({"id": "目印", "summary": "構造化の要約"})
+
+
+def _run_selective(
+    candidates: list[Candidate], llm: _SelectiveLLM
+) -> dict[str, Any]:
+    """隔離用のフェイクで `analyze_content` を 1 回実行し、出力 state を返す。"""
+    with mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=llm):
+        return analyze_content(
+            {"candidates": candidates, "contexts": [], "platform": "x"}, _config()
+        )
+
+
+def _partial_candidates(total: int = 10, failing: tuple[int, ...] = (2, 5, 9)) -> list[Candidate]:
+    """`failing` に挙げた番号の候補だけ素材に目印を入れる（SC-007 の 10 中 3）。"""
+    return [
+        _candidate(i, text=f"{_FAILURE_MARKER} {i}" if i in failing else f"本文{i}")
+        for i in range(1, total + 1)
+    ]
+
+
+def test_one_failed_candidate_does_not_stop_the_others() -> None:
+    """10 件中 3 件が失敗しても 7 件の解析が得られる（FR-020 / SC-007）。"""
+    out = _run_selective(_partial_candidates(), _SelectiveLLM())
+
+    assert len(out["analyses"]) == 7
+    assert len(out["failures"]) == 3
+
+
+def test_every_candidate_ends_up_in_analyses_or_failures() -> None:
+    """成功と失敗の和集合が候補全体と一致する（無言の欠落の禁止。FR-021）。"""
+    candidates = _partial_candidates()
+    out = _run_selective(candidates, _SelectiveLLM())
+
+    covered = {a.id for a in out["analyses"]} | {f.id for f in out["failures"]}
+    assert covered == {c.id for c in candidates}
+    assert {f.id for f in out["failures"]} == {"t2", "t5", "t9"}
+
+
+def test_the_failure_record_carries_the_id_and_the_reason() -> None:
+    """失敗は `kind` / `id` / 例外型 / 理由が分かる形で残る（FR-021 / FR-023）。"""
+    out = _run_selective(_partial_candidates(total=1, failing=(1,)), _SelectiveLLM())
+
+    (failure,) = out["failures"]
+    assert failure.kind == "analysis"
+    assert failure.id == "t1"
+    assert failure.error_type == "RuntimeError"
+    assert _FAILURE_MARKER in failure.message
+
+
+def test_all_candidates_failing_still_completes() -> None:
+    """全件失敗でも例外にせず、失敗の事実と理由を残す（US4 シナリオ 3）。"""
+    out = _run_selective(_partial_candidates(total=1, failing=(1,)), _SelectiveLLM())
+
+    assert out["analyses"] == []
+    assert [f.id for f in out["failures"]] == ["t1"]
+
+
+def test_cancellation_is_not_swallowed_as_a_partial_failure() -> None:
+    """`asyncio.CancelledError` は部分失敗として飲み込まず再送出する（原則 V / 契約 §3）。
+
+    `CancelledError` は `BaseException` なので `except Exception` では捕まらない。
+    `return_exceptions=True` を付けた `gather` は**戻り値として**返してくるため、
+    明示的に再送出しないと「キャンセルされたのに正常完了」になる。
+    """
+    candidates = _partial_candidates(total=2, failing=(1,))
+    llm = _SelectiveLLM(error=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError):
+        _run_selective(candidates, llm)
+
+
+# --- US4: 失敗の可視化（FR-023） ------------------------------------------
+
+
+def test_the_failure_note_reports_the_count_and_the_reasons(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """失敗の件数と理由を補足行に 1 行で出す（FR-023。stderr のみ）。"""
+    _run_selective(_partial_candidates(), _SelectiveLLM())
+
+    err = capsys.readouterr().err
+    assert "[補足] 解析できなかった対象 3 件" in err
+    assert err.count("[補足] 解析できなかった") == 1
+    assert "RuntimeError" in err
+
+
+def test_no_failure_note_when_nothing_failed(capsys: pytest.CaptureFixture[str]) -> None:
+    """失敗が無ければ補足行を出さない（既定の入力の stderr を変えない。FR-035）。"""
+    _run_selective([_candidate(1), _candidate(2)], _SelectiveLLM())
+
+    assert "解析できなかった" not in capsys.readouterr().err
