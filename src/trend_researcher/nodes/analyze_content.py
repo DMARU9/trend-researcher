@@ -1,4 +1,4 @@
-"""analyze_content ノード（FR-007 対応、並列上限 2、X / YouTube 共通）。"""
+"""analyze_content ノード（FR-007 対応、並列上限は設定値（既定 2）、X / YouTube 共通）。"""
 
 from __future__ import annotations
 
@@ -230,6 +230,7 @@ async def _analyze_all(
     contexts_by_id: dict[str, Context],
     provider: Provider,
     *,
+    concurrency: int,
     max_chars: int,
     timeout: float,
     instruction: str,
@@ -238,7 +239,10 @@ async def _analyze_all(
     method: str,
     degrade: DegradeOptions,
 ) -> tuple[list[AnalysisFinding], list[CompressedSource], int, list[Failure]]:
-    """全件を並列上限 2 で解析し、`(解析結果, 圧縮の記録, フォールバック件数, 失敗)` を返す。
+    """全件を `concurrency` 件ずつ並列に解析し、`(解析結果, 圧縮の記録, フォールバック件数, 失敗)` を返す。
+
+    並列数は設定（`analysis_concurrency`。既定 2）から受け取る。ここに固定値を
+    書くと、実行 1 回あたりの上限が設定を無視して 2 に張り付く（FR-005 / FR-028）。
 
     縮退の記録（`degrade`）は候補をまたいで共有する。1 ノード実行＝1 本の梯子
     （FR-017）。並列実行なので、段のカウンタを候補ごとに増やすと上限が
@@ -249,7 +253,7 @@ async def _analyze_all(
     全体を失わせない。**サービス終了要求（`asyncio.CancelledError`）だけは例外**で、
     部分失敗として飲み込まずに再送出する（原則 V / 契約 §3）。
     """
-    sem = asyncio.Semaphore(2)
+    sem = asyncio.Semaphore(concurrency)
 
     async def _bounded(cand: Candidate) -> tuple[AnalysisFinding, CompressedSource | None, bool]:
         source_text = _build_source_text(cand, contexts_by_id.get(cand.id))
@@ -305,10 +309,13 @@ def _fallback_note(count: int) -> str:
 
 
 def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
-    """各コンテンツを「ブログ執筆の参考」として要約する（並列上限 2）。"""
+    """各コンテンツを「ブログ執筆の参考」として要約する（並列上限は設定値。既定 2）。"""
     configurable = Configuration.from_runnable_config(config)
     emitter = make_emitter()
-    emitter.emit(NODE_ANALYZE_CONTENT, "開始", detail="並列上限 2")
+    # 表示する並列上限も同じ設定値を映す（既定は 2 なので既存の文言は変わらない。FR-035）
+    emitter.emit(
+        NODE_ANALYZE_CONTENT, "開始", detail=f"並列上限 {configurable.analysis_concurrency}"
+    )
     progress_messages = emitter.get_messages()
 
     platform = state.get("platform") or configurable.platform
@@ -324,6 +331,7 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
             candidates,
             contexts_by_id,
             provider,
+            concurrency=configurable.analysis_concurrency,
             max_chars=configurable.compression_threshold,
             timeout=configurable.compression_timeout_seconds,
             instruction=instruction,

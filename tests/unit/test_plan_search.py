@@ -206,6 +206,13 @@ class _SequencedLLM:
         self.prompts: list[str] = []
 
     def invoke(self, prompt: str, *args: Any, **kwargs: Any) -> Any:
+        return self._respond(prompt)
+
+    async def ainvoke(self, prompt: str, *args: Any, **kwargs: Any) -> Any:
+        """呼び出し境界（`tools/llm.py`）は `ainvoke` を使う（T078 で境界に載せた）。"""
+        return self._respond(prompt)
+
+    def _respond(self, prompt: str) -> Any:
         index = len(self.prompts)
         self.prompts.append(prompt)
         if self.error_at is not None and index == self.error_at:

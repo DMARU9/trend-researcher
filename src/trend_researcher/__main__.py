@@ -12,7 +12,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from trend_researcher.configuration import Configuration
+from trend_researcher.configuration import Configuration, ConfigurationError, _check_bounds
 from trend_researcher.graph import EXECUTION_TIMEOUT, trend_researcher
 from trend_researcher.models import OutputFormat
 from trend_researcher.providers import available_platforms, get_provider
@@ -119,17 +119,28 @@ def main(argv: list[str] | None = None) -> int:
     # 実行時設定は単一の型で解決する（FR-013 / SET-002）。明示指定（CLI）は
     # `model_copy(update=...)` で与え、`model_fields_set` に載せて環境変数より
     # 優先させる（SET-006 / SET-007）。
-    settings = Configuration.load(env_prefix=provider.env_prefix)
-    overrides: dict[str, Any] = {}
-    if args.max_results is not None:
-        overrides["max_results"] = args.max_results
-    if args.lang is not None:
-        overrides["transcript_language"] = args.lang
-    if args.cache_dir is not None:
-        # 明示指定のパスは実行時の CWD 基準で解決する（現行の `--cache-dir` と同じ）
-        overrides["cache_dir"] = str(Path(args.cache_dir).expanduser().resolve())
-    if overrides:
-        settings = settings.model_copy(update=overrides)
+    #
+    # 検証は**起動時**（LLM・検索・ファイル読み書きの前）に済ませる。値域外は
+    # 丸めず・既定値に置換せず、引数エラーと同じ exit 2 で拒否する（FR-024 / SC-023 /
+    # settings-contract §3）。`model_copy(update=...)` は検証しないため、上書きの
+    # 直後に宣言した値域でもう一度検査する（実測: Pydantic v2 は update を検証しない）。
+    try:
+        settings = Configuration.load(env_prefix=provider.env_prefix)
+        overrides: dict[str, Any] = {}
+        if args.max_results is not None:
+            overrides["max_results"] = args.max_results
+        if args.lang is not None:
+            overrides["transcript_language"] = args.lang
+        if args.cache_dir is not None:
+            # 明示指定のパスは実行時の CWD 基準で解決する（現行の `--cache-dir` と同じ）
+            overrides["cache_dir"] = str(Path(args.cache_dir).expanduser().resolve())
+        if overrides:
+            settings = settings.model_copy(update=overrides)
+        settings = _check_bounds(settings)
+    except ConfigurationError as exc:
+        # 文言は `ConfigurationError.message` が 1 か所で組み立てる（契約の書式）
+        print(exc.message, file=sys.stderr, flush=True)
+        return 2
 
     if args.since:
         try:

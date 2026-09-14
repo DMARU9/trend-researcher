@@ -15,6 +15,8 @@ import asyncio
 from typing import Any
 from unittest import mock
 
+import httpx
+import openai
 import pytest
 from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import AIMessage
@@ -829,3 +831,154 @@ def test_no_failure_note_when_nothing_failed(capsys: pytest.CaptureFixture[str])
     _run_selective([_candidate(1), _candidate(2)], _SelectiveLLM())
 
     assert "解析できなかった" not in capsys.readouterr().err
+
+
+# --- US5: 実行時設定の注入（FR-005 / FR-010 / FR-015 / FR-025） --------------
+#
+# このノードが読む値（同時実行数・再試行・縮退）は**すべて** `Configuration` から
+# 来る。コードに固定値を残すと、Studio / CLI から変更しても挙動が変わらない
+# （FR-025）。ここでは値そのものではなく「設定を変えると観測が変わること」を
+# 固定する。
+
+
+@pytest.mark.parametrize("concurrency", [1, 2])
+def test_the_concurrency_limit_comes_from_the_configuration(concurrency: int) -> None:
+    """同時実行数は設定から注入される（`Semaphore(2)` の固定値を持たない）。
+
+    `analysis_concurrency = 1` で同時実行数が 1 にならなければ、値は配線されて
+    いない（既定の 2 と一致してしまうため、既定値だけでは検出できない）。
+    """
+    tracking = _TrackingLLM()
+    candidates = [_candidate(i) for i in range(1, 6)]
+
+    with mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=tracking):
+        out = analyze_content(
+            {"platform": "x", "candidates": candidates, "contexts": []},
+            _config(analysis_concurrency=concurrency),
+        )
+
+    assert tracking.calls == 5
+    assert tracking.max_in_flight == concurrency
+    assert len(out["analyses"]) == 5
+
+
+def test_the_start_line_reports_the_configured_concurrency(fake_model_factory: Any) -> None:
+    """開始行の同時実行数は設定値を映す（既定 2 の文言は変えない。FR-035）。"""
+    out = _run(fake_model_factory, _STRUCTURED_RESPONSE, config=_config(analysis_concurrency=3))
+
+    assert out["messages"][0].content == "[5/7] analyze_content ... 開始（並列上限 3）"
+
+
+class _StructuredFailingLLM:
+    """構造化出力だけが失敗する計測用フェイク（再試行の回数を数える）。
+
+    テキスト経路は 1 回で成功させる。両方を失敗させると再試行の回数が
+    「構造化 ＋ フォールバック」の合計になり、どちらの配線が効いたのか分からなく
+    なるため。
+    """
+
+    def __init__(self) -> None:
+        self.structured_calls = 0
+        self.text_calls = 0
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        return _StructuredFailingRunnable(self)
+
+    async def ainvoke(self, prompt: Any) -> AIMessage:
+        self.text_calls += 1
+        return AIMessage(content=_STRUCTURED_RESPONSE)
+
+
+class _StructuredFailingRunnable:
+    """`with_structured_output` の戻り（毎回 `OutputParserException` を送出）。"""
+
+    def __init__(self, llm: _StructuredFailingLLM) -> None:
+        self._llm = llm
+
+    async def ainvoke(self, prompt: Any) -> Any:
+        self._llm.structured_calls += 1
+        raise OutputParserException("スキーマに一致しません")
+
+
+@pytest.mark.parametrize(("retry_max", "expected_calls"), [(0, 1), (2, 3)])
+def test_the_retry_count_comes_from_the_configuration(
+    retry_max: int, expected_calls: int
+) -> None:
+    """`retry_max` が試行回数（1 + retry_max）になる（FR-010 / FR-025）。"""
+    llm = _StructuredFailingLLM()
+
+    with mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=llm):
+        out = analyze_content(
+            {"platform": "x", "candidates": [_candidate(1)], "contexts": []},
+            _config(retry_max=retry_max, retry_wait_seconds=0.5),
+        )
+
+    assert llm.structured_calls == expected_calls
+    assert llm.text_calls == 1
+    assert len(out["analyses"]) == 1
+
+
+def test_the_wait_between_retries_comes_from_the_configuration(no_retry_sleep: Any) -> None:
+    """`retry_wait_seconds` が待機として境界へ届く（FR-010 / FR-025）。"""
+    llm = _StructuredFailingLLM()
+
+    with mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=llm):
+        analyze_content(
+            {"platform": "x", "candidates": [_candidate(1)], "contexts": []},
+            _config(retry_max=2, retry_wait_seconds=0.5),
+        )
+
+    # 2 回の再試行の前だけ待つ（成功したフォールバックでは待たない）
+    assert no_retry_sleep.sleeps == [0.5, 0.5]
+
+
+def _context_length_error() -> Exception:
+    """上限超過（400 ＋ `context_length_exceeded`）を模した例外（契約 §5）。"""
+    return openai.BadRequestError(
+        message="This endpoint's maximum context length is 1048576 tokens.",
+        response=httpx.Response(400, request=httpx.Request("POST", "https://example.test/v1")),
+        body={"error": {"code": "context_length_exceeded"}},
+    )
+
+
+class _LimitErrorLLM:
+    """構造化出力が常に上限超過になる計測用フェイク（縮退の段数を数える）。
+
+    上限超過は再試行の対象ではないため、呼び出し回数がそのまま「初回 ＋ 段数」に
+    なる（契約 §3 の対象外）。
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        return self
+
+    async def ainvoke(self, prompt: Any) -> AIMessage:
+        self.calls += 1
+        raise _context_length_error()
+
+
+@pytest.mark.parametrize(("max_attempts", "expected_stages"), [(1, 1), (3, 3)])
+def test_the_degrade_stages_come_from_the_configuration(
+    max_attempts: int, expected_stages: int
+) -> None:
+    """`degrade_max_attempts` が縮退の段数になる（FR-015 / FR-025）。
+
+    素材は縮小の下限（`min_input_chars` の既定 1000）より十分に長くし、段数が
+    設定値で決まるようにする。段を使い切った `DegradationError` は部分失敗として
+    記録され、ノードは完了する（FR-020。US3 の exit 1 は CLI が捕捉して作る）。
+    """
+    llm = _LimitErrorLLM()
+
+    with mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=llm):
+        out = analyze_content(
+            {"platform": "x", "candidates": [_candidate(1, text="あ" * 5000)], "contexts": []},
+            _config(degrade_max_attempts=max_attempts, retry_max=0),
+        )
+
+    assert llm.calls == 1 + expected_stages
+    assert [d.stage for d in out["degradations"]] == list(range(1, expected_stages + 1))
+    (failure,) = out["failures"]
+    assert failure.error_type == "DegradationError"
+    assert f"試した段数: {expected_stages}" in failure.message

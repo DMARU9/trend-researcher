@@ -26,6 +26,7 @@ from pydantic import Field, ValidationError
 from trend_researcher import config as config_module
 from trend_researcher import configuration as configuration_module
 from trend_researcher.configuration import Configuration, ConfigurationError
+from trend_researcher.providers.x import _explicit_setting
 
 #: 宣言された全フィールドと既定値（既存 7 ＋ data-model §1.1 の追加 11）。
 DEFAULTS = {
@@ -196,7 +197,9 @@ def test_from_runnable_config_with_none():
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        pytest.param("max_results", 0, id="zero"),
+        # `0` は値域内で偽になる唯一の項目（`retry_max` の `ge` は 0）。
+        # `max_results` は値域が 1 以上になったため 0 を指定できない（T078・契約 §2）。
+        pytest.param("retry_max", 0, id="zero"),
         pytest.param("published_after", "", id="empty-string"),
         pytest.param("cache_dir", "", id="empty-string-list"),
     ],
@@ -340,6 +343,110 @@ def test_explicit_values_beat_environment_after_load(monkeypatch: pytest.MonkeyP
 
     assert config.max_results == 3
     assert "max_results" in config.model_fields_set
+
+
+def test_the_three_levels_resolve_in_the_declared_order(monkeypatch: pytest.MonkeyPatch):
+    """既定値 < 環境変数 < 明示指定の順で確定する（SET-002 / SET-006）。
+
+    同じ 1 項目を 3 段階で与え、各段でどの値が残るかを 1 つのテストで固定する。
+    `load()` が戻した値に CLI が重ねる順序が逆になると、ここで落ちる。
+    """
+    assert Configuration.load(env_prefix="XTR").max_results == 5  # 既定値
+
+    monkeypatch.setenv("TR_MAX_RESULTS", "9")
+    from_env = Configuration.load(env_prefix="XTR")
+    assert from_env.max_results == 9  # 環境変数 > 既定値
+
+    explicit = from_env.model_copy(update={"max_results": 3})
+    assert explicit.max_results == 3  # 明示指定 > 環境変数
+
+
+#: `load()` が環境変数と `.env` から解決する 14 項目（SET-002）。
+#: `platform` / `output_format` / `sort_by` / `published_after` は CLI・Studio の
+#: 明示指定のみで決まる（env からは読まない。SET-005）。
+ENV_RESOLVED_FIELDS = frozenset(
+    {
+        "max_results",
+        "transcript_language",
+        "cache_dir",
+        "analysis_concurrency",
+        "retry_max",
+        "retry_wait_seconds",
+        "compression_threshold",
+        "compression_timeout_seconds",
+        "degrade_max_attempts",
+        "shrink_ratio",
+        "min_input_chars",
+        "self_review",
+        "include_intermediate",
+        "structured_method",
+    }
+)
+
+#: CLI・Studio からのみ与える項目（env からは読まない）。
+RUNTIME_ONLY_FIELDS = frozenset({"platform", "output_format", "sort_by", "published_after"})
+
+
+def test_load_does_not_mark_unresolved_fields_as_explicit(monkeypatch: pytest.MonkeyPatch):
+    """`load()` の `model_fields_set` は解決した 14 項目だけで、増えも減りもしない。
+
+    消費側は `providers/x.py` の `_explicit_setting`（同集合にある項目だけを
+    「明示指定」とみなす）。`model_validate(model_dump())` のような「全項目を明示
+    指定に変える」実装に置き換わると、CLI が渡していない項目まで確定値になり
+    SET-006（明示指定 > 環境変数）の意味が変わる。
+    """
+    assert Configuration().model_fields_set == set()  # 既定は「未指定」
+
+    monkeypatch.setenv("TR_MAX_RESULTS", "9")
+    from_env = Configuration.load(env_prefix="XTR")
+
+    assert from_env.model_fields_set == set(ENV_RESOLVED_FIELDS)
+    # CLI・Studio 専用の項目は「明示指定された」ことにしない
+    assert not (RUNTIME_ONLY_FIELDS & from_env.model_fields_set)
+
+    # 上書きは集合に 1 項目だけ足す（`_check_bounds` は集合を変えない）
+    explicit = configuration_module._check_bounds(
+        from_env.model_copy(update={"max_results": 3})
+    )
+    assert explicit.model_fields_set == set(ENV_RESOLVED_FIELDS) | {"max_results"}
+    # `_explicit_setting` から見た値は確定値と一致する（意味が壊れていない）
+    assert _explicit_setting(explicit, "max_results") == "3"
+    assert _explicit_setting(explicit, "max_results") == str(explicit.max_results)
+
+
+def test_max_results_declares_its_range_and_rejects_zero():
+    """`max_results` も値域を宣言する（0 を弾き、既存テストが使う値は通す。契約 §2）。
+
+    宣言は 2 つの経路で効く。生成時は Pydantic が `ValidationError` を送出し
+    （追加 11 項目と同じ規則）、CLI の上書きは `model_copy` が検証しないため
+    `_check_bounds` が `ConfigurationError` を送出する（実測に基づく）。
+    """
+    assert _declared_bounds("max_results") == (1, 100)
+
+    with pytest.raises(ValidationError):
+        Configuration(max_results=0)
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        configuration_module._check_bounds(
+            Configuration().model_copy(update={"max_results": 0})
+        )
+
+    assert excinfo.value.message == "設定が不正です: max_results=0（期待: 1 以上 100 以下の整数）"
+    # 既存テストが実際に使う値（1 / 2 / 3 / 5 / 10）と上限の 100 は通す（FR-035）
+    for value in (1, 2, 3, 5, 10, 100):
+        configuration_module._check_bounds(Configuration(max_results=value))
+
+
+def test_max_results_is_not_rounded_nor_replaced_by_a_default():
+    """値域外を丸めない・既定値に置換しない（FR-024 / SC-023）。"""
+    bad = Configuration().model_copy(update={"max_results": 101})
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        configuration_module._check_bounds(bad)
+
+    assert excinfo.value.field == "max_results"
+    assert excinfo.value.value == 101  # 丸めていない（100 にならない）
+    assert excinfo.value.value != Configuration().max_results  # 既定値でもない
 
 
 # --- パッケージの公開面（SET-012）------------------------------------------

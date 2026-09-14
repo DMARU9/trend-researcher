@@ -591,5 +591,85 @@ def test_us3_non_limit_error_is_not_degraded(cli_runner):
     assert "試した段数" not in result.stderr
 
 
+# ---------------------------------------------------------------------------
+# US5: 起動時拒否（FR-024 / SC-023 / settings-contract §3）
+# ---------------------------------------------------------------------------
+
+#: 値域外の `max_results` で期待する 1 行（`_expected` が宣言から組み立てる文言）。
+MAX_RESULTS_ZERO = "設定が不正です: max_results=0（期待: 1 以上 100 以下の整数）"
+MAX_RESULTS_TOO_LARGE = "設定が不正です: max_results=101（期待: 1 以上 100 以下の整数）"
+
+
+def test_out_of_range_max_results_is_rejected_before_any_node_runs(cli_module_runner):
+    """層 A / CLI 引数: 値域外は接続前に拒否し **exit 2**（丸めも置換もしない）。
+
+    層 A（`python -m trend_researcher` を直接起動）で検証するのは、拒否が環境変数
+    や境界モックの助けを借りずに成立すること、すなわち**外部接続より前**に完走する
+    ことの証拠になるためである（CLI-006）。
+    """
+    result = cli_module_runner("AI 動画のトレンド", "--platform", "x", "--max-results", "0")
+
+    assert result.exit_code == 2
+    assert MAX_RESULTS_ZERO in result.stderr
+    assert "Traceback" not in result.stderr
+    # 丸め（0 → 1）も既定値への置換（0 → 5）も起きていない
+    assert "max_results=0" in result.stderr
+    assert "max_results=5" not in result.stderr
+    # ノードは 1 つも走らない（走れば進捗の 1 行目が出る）
+    assert "[1/7]" not in result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [("0", MAX_RESULTS_ZERO), ("101", MAX_RESULTS_TOO_LARGE)],
+)
+def test_out_of_range_max_results_from_the_environment_is_rejected_too(
+    cli_module_runner, env_value, expected
+):
+    """層 A / 環境変数: env 経由の値域外も同じ経路で拒否する（settings-contract §3）。"""
+    result = cli_module_runner(
+        "AI 動画のトレンド", "--platform", "x", env={"TR_MAX_RESULTS": env_value}
+    )
+
+    assert result.exit_code == 2
+    assert expected in result.stderr
+    assert "Traceback" not in result.stderr
+    assert "[1/7]" not in result.stderr
+
+
+def test_out_of_range_max_results_does_not_call_the_llm(cli_runner):
+    """層 B / 境界モック: 拒否は LLM の呼び出しより前（FR-024 / SC-023）。
+
+    層 B は成功経路が exit 0 で完走するフィクスチャなので、`exit 2` と
+    `stdout == ""` が同時に成立することは「ノードが 1 つも走っていない」の
+    直接の証拠になる（1 つでも走れば進捗が stderr に出て、成功シナリオなら
+    レポートが stdout に出る）。
+    """
+    result = cli_runner(
+        "AI 動画のトレンドを3件教えて", "--platform", "x", "--max-results", "0", scenario="x_success"
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert MAX_RESULTS_ZERO in result.stderr
+    assert "[1/7]" not in result.stderr
+    assert "[補足]" not in result.stderr
+
+
+def test_a_valid_max_results_still_runs(cli_runner):
+    """境界の内側（1 と 100）は拒否しない（過剰な拒否をしない）。"""
+    for value in ("1", "100"):
+        result = cli_runner(
+            "AI 動画のトレンドを3件教えて",
+            "--platform",
+            "x",
+            "--max-results",
+            value,
+            scenario="x_success",
+        )
+        assert result.exit_code == 0, result.stderr
+
+
 
 

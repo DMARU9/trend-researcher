@@ -331,19 +331,19 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 ### Tests for User Story 5（憲法 原則 I により必須）⚠️
 
-- [ ] T073 [P] [US5] 設定の注入テストを作成する: `analysis_concurrency` を 1 / 2 にして同時実行数がそれぞれ 1 / 2 になる / `retry_max` が試行回数に反映される / `compression_threshold` が圧縮の発動を変える / `degrade_max_attempts` が段数に反映される（**すべて実行時設定から注入**され、コードに固定値が無い）。`tests/unit/test_analyze_content.py`（拡張）＋ `tests/unit/test_llm.py`（拡張）
-- [ ] T074 [P] [US5] 優先順位のテストを作成する: 環境変数と実行時指定が食い違うときに既定の優先順位（明示指定 > env > 既定値）に確定し、`model_fields_set` の意味が変わらない（`providers/x.py:48` が読む）。`tests/unit/test_configuration.py`（拡張）
-- [ ] T075 [P] [US5] 状態の解放テストを作成する: レポート確定後に `contexts[].text` / `thread_text` / `replies` と `candidates[].text` が空になる / **`contexts` のレコードは残る**（`tests/integration/test_full_flow.py:444` を壊さない）/ `report.candidates` の内容が保持される（解放がレポート組み立ての**後**）/ `analyses` / `common_themes` / `report` は解放されない。`tests/unit/test_compile_report.py`（拡張）
-- [ ] T076 [P] [US5] 中間データの切り替えテストを作成する: `include_intermediate = False`（既定）で `cache/` に新しいファイルが増えず `cache/report.json` の既存キーが**変更前と一致** / `True` で `compressed.json` / `degradations.json` / `failures.json` が増える / `cache_dir` 未指定なら何も書かない。`tests/unit/test_compile_report.py`（T075 と同じファイルに追記）
-- [ ] T077 [P] [US5] 起動時拒否のテストを作成する: 値域外の CLI 引数（`--max-results 0`）で stderr に「設定が不正です: max_results=0（期待: ...）」が出て **exit 2** / 丸めも既定値への置換もされない / **LLM が 1 回も呼ばれない**（ノード実行前） / env 経由の値域外も同じ。`tests/integration/test_cli_contract.py`（拡張）
+- [X] T073 [P] [US5] 設定の注入テストを作成する: `analysis_concurrency` を 1 / 2 にして同時実行数がそれぞれ 1 / 2 になる / `retry_max` が試行回数に反映される / `compression_threshold` が圧縮の発動を変える / `degrade_max_attempts` が段数に反映される（**すべて実行時設定から注入**され、コードに固定値が無い）。`tests/unit/test_analyze_content.py`（拡張）＋ `tests/unit/test_llm.py`（拡張）
+- [X] T074 [P] [US5] 優先順位のテストを作成する: 環境変数と実行時指定が食い違うときに既定の優先順位（明示指定 > env > 既定値）に確定し、`model_fields_set` の意味が変わらない（`providers/x.py:48` が読む）。`tests/unit/test_configuration.py`（拡張）
+- [X] T075 [P] [US5] 状態の解放テストを作成する: レポート確定後に `contexts[].text` / `thread_text` / `replies` と `candidates[].text` が空になる / **`contexts` のレコードは残る**（`tests/integration/test_full_flow.py:444` を壊さない）/ `report.candidates` の内容が保持される（解放がレポート組み立ての**後**）/ `analyses` / `common_themes` / `report` は解放されない。`tests/unit/test_compile_report.py`（拡張）
+- [X] T076 [P] [US5] 中間データの切り替えテストを作成する: `include_intermediate = False`（既定）で `cache/` に新しいファイルが増えず `cache/report.json` の既存キーが**変更前と一致** / `True` で `compressed.json` / `degradations.json` / `failures.json` が増える / `cache_dir` 未指定なら何も書かない。`tests/unit/test_compile_report.py`（T075 と同じファイルに追記）
+- [X] T077 [P] [US5] 起動時拒否のテストを作成する: 値域外の CLI 引数（`--max-results 0`）で stderr に「設定が不正です: max_results=0（期待: ...）」が出て **exit 2** / 丸めも既定値への置換もされない / **LLM が 1 回も呼ばれない**（ノード実行前） / env 経由の値域外も同じ。`tests/integration/test_cli_contract.py`（拡張）
 
 ### Implementation for User Story 5
 
-- [ ] T078 [US5] 5 ノード（`parse_instruction` / `plan_search` / `analyze_content` / `extract_common` / `compile_report`）の設定参照を `Configuration.from_runnable_config(config)` 経由の値に統一する: `analysis_concurrency` を `asyncio.Semaphore(...)` に、`retry_max` / `retry_wait_seconds` を呼び出し境界に、`compression_threshold` / `compression_timeout_seconds` を圧縮に、`degrade_max_attempts` / `shrink_ratio` / `min_input_chars` を縮退に渡す。**コードに固定値を残さない**（FR-005 / FR-024 / FR-025）
-- [ ] T079 [US5] `src/trend_researcher/__main__.py` に起動時検証を追加する: 上書き適用後に T016 の再検証を呼び、`ConfigurationError` を捕捉して stderr に `message` を出し **exit 2**（`_parse_args` の失敗と同じ扱い）。検証は LLM・検索・ファイル読み書きの**前**に行う（FR-024 / SC-023）
-- [ ] T080 [US5] `src/trend_researcher/nodes/compile_report.py` に次を追加する: (a) `include_intermediate = True` なら `cache/compressed.json` / `degradations.json` / `failures.json` を書く（解放の**前**）、(b) レポート確定後に `contexts` / `candidates` の**中身を解放**する（順序: report 組み立て → 中間データ → 解放。T075 が固定）、(c) `note()` に内訳（圧縮・縮退・失敗の件数）を出す
-- [ ] T081 [US5] `extract_common` / `compile_report` が**生データを参照しない**ことを走査テストで固定する: `state.get("contexts")` / `candidates[..].text` を新しい用途で読み始めていないこと（既存の件数参照のみ許可）。`tests/unit/test_state.py`（新規）
-- [ ] T082 [US5] 変異探針を実行する: (a) 解放をレポート組み立ての**前**に移す → T075 が落ちる、(b) `contexts` を空リストにする → `tests/integration/test_full_flow.py:444` が落ちる、(c) `include_intermediate` の条件を反転する → T076 が落ちる、(d) `max_results` の `ge` を削る → T077 が落ちる、(e) `__main__.py` の再検証を削る → T077 が落ちる（exit 2 が exit 0 になる）、(f) `Semaphore` を `2` に固定する → T073 が落ちる
+- [X] T078 [US5] 5 ノード（`parse_instruction` / `plan_search` / `analyze_content` / `extract_common` / `compile_report`）の設定参照を `Configuration.from_runnable_config(config)` 経由の値に統一する: `analysis_concurrency` を `asyncio.Semaphore(...)` に、`retry_max` / `retry_wait_seconds` を呼び出し境界に、`compression_threshold` / `compression_timeout_seconds` を圧縮に、`degrade_max_attempts` / `shrink_ratio` / `min_input_chars` を縮退に渡す。**コードに固定値を残さない**（FR-005 / FR-024 / FR-025）
+- [X] T079 [US5] `src/trend_researcher/__main__.py` に起動時検証を追加する: 上書き適用後に T016 の再検証を呼び、`ConfigurationError` を捕捉して stderr に `message` を出し **exit 2**（`_parse_args` の失敗と同じ扱い）。検証は LLM・検索・ファイル読み書きの**前**に行う（FR-024 / SC-023）
+- [X] T080 [US5] `src/trend_researcher/nodes/compile_report.py` に次を追加する: (a) `include_intermediate = True` なら `cache/compressed.json` / `degradations.json` / `failures.json` を書く（解放の**前**）、(b) レポート確定後に `contexts` / `candidates` の**中身を解放**する（順序: report 組み立て → 中間データ → 解放。T075 が固定）、(c) `note()` に内訳（圧縮・縮退・失敗の件数）を出す
+- [X] T081 [US5] `extract_common` / `compile_report` が**生データを参照しない**ことを走査テストで固定する: `state.get("contexts")` / `candidates[..].text` を新しい用途で読み始めていないこと（既存の件数参照のみ許可）。`tests/unit/test_state.py`（新規）
+- [X] T082 [US5] 変異探針を実行する: (a) 解放をレポート組み立ての**前**に移す → T075 が落ちる、(b) `contexts` を空リストにする → `tests/integration/test_full_flow.py:444` が落ちる、(c) `include_intermediate` の条件を反転する → T076 が落ちる、(d) `max_results` の `ge` を削る → T077 が落ちる、(e) `__main__.py` の再検証を削る → T077 が落ちる（exit 2 が exit 0 になる）、(f) `Semaphore` を `2` に固定する → T073 が落ちる
 
 **Checkpoint**: US1〜US7 と US5 が独立して機能。既定の設定では
 `analysis_concurrency = 2` / `compression_threshold = 20000` が現行挙動と一致する。
@@ -450,6 +450,31 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 `providers/*.py` の `review_search_prompt` を**呼び出し順だけ**入れ替える必要がある
 （点検の入力を空にして、生成の入力と取り違えないようにする）。(e) は `prompts.py` の
 該当行が 1 箇所だけであることを `assert s.count(old) == 1` で確かめてから置換する。
+
+**US5（T082。`/tmp/probe_t082.py`。各探針は「変異 → 対象テスト → 復元 → sha256 照合」を
+1 プロセスで回す。探針は必ず**有効な Python のまま**戻す）**
+
+| # | 変異 | 落ちたテスト | 復元確認 |
+|---|---|---|---|
+| 8 | (a) 解放（`_release_raw_material`）を `ResearchReport` の組み立て**前**へ移す | `test_raw_text_is_released_after_the_report_is_built` / `test_the_release_is_not_visible_in_the_written_report`（2 failed / 32 passed）。レポートの候補が空になる | `compile_report.py` sha256 一致（`dcab8a14…`） |
+| 9 | (b) 返す `contexts` を空リストにする（`updates["contexts"] = []`） | `test_thread_fetch_failure_degrades_to_text_only`（1 failed / 23 deselected）。`test_full_flow.py` の `result["contexts"][0]` が `IndexError`／空になる | 同上 |
+| 10 | (c) `if configurable.include_intermediate:` を反転する | `test_failures_json_is_written_only_when_intermediate_is_enabled` / `test_intermediate_data_is_written_when_enabled` / `test_the_default_writes_no_new_files_and_keeps_the_report_keys`（3 failed / 31 passed） | 同上 |
+| 11 | (d) `max_results` の宣言から `ge=1` を削る | `test_out_of_range_max_results_is_rejected_before_any_node_runs` / `…_from_the_environment_is_rejected_too[0]` / `…[101]` / `…_does_not_call_the_llm`（4 failed / 2 passed / 56 deselected / 32.06 秒）。**exit 0 で完走**してしまう | `configuration.py` sha256 一致（`d4a723b4…`） |
+| 12 | (e) `__main__.py` の `settings = _check_bounds(settings)` を `pass` にする | `test_out_of_range_max_results_is_rejected_before_any_node_runs` / `…_does_not_call_the_llm`（2 failed / 4 passed / 56 deselected / 23.63 秒）。exit 2 ではなく **exit 1**（`ValidationError` が実行中の例外ハンドラに落ちる）＋ `[1/7] parse_instruction` が走る | `__main__.py` sha256 一致（`56f12079…`） |
+| 13 | (f) `asyncio.Semaphore(concurrency)` を `Semaphore(2)` に、開始行の `detail` を `"並列上限 2"` に固定する | `test_the_concurrency_limit_comes_from_the_configuration[1]` / `test_the_start_line_reports_the_configured_concurrency`（2 failed / 69 passed） | `analyze_content.py` sha256 一致（`201addee…`） |
+
+**探針で確かめた「落ち方の精度」**: (d) と (e) はどちらも「起動時拒否」を壊すが、
+**落ち方が違う**（(d) は検証そのものが無くなって exit 0、(e) は検証のタイミングが
+実行時へずれて exit 1 ＋ ノード走行）。(e) の失敗メッセージが `assert 1 == 2` である
+ことは、`_check_bounds` の呼び出しが「exit 2 で拒否する」ことの**直接の証拠**になる。
+(b) は spec が名指しした `test_full_flow.py` の assertion が落ちることを確認した。
+
+**US5 で踏んだ落とし穴（実装メモ §5 にも記録）**: 「state の値をその場で書き換えて解放する」
+版は、呼び出し元と共有している `Candidate` / `Context` まで空にする。統合テストの
+固定プール（`_X_POOL`）がまさにこれで、`tests/integration/test_full_flow.py` が
+**8 件失敗**（`analyze_content` が 0 件を要約）した。state から受け取った直後に写しを
+取る形に直して 24 passed に戻り、その後の探針 (a) も期待どおり落ちる（写しを取っても
+「解放 → レポート」の順序を逆にすれば候補が空になることは変わらないため）。
 
 **実装中に回した探針（T011 / T016、`configuration.py`。各 1 回で復元）**
 
@@ -586,10 +611,14 @@ golden を相手にしていないため。既定の入力（失敗 0 件）で�
 
 ### 4. 最終ゲート（T095）
 
-- `uv run pytest -q`: （記入）
-- `uv run ruff check .`: （記入）
-- `uv run mypy src`: （記入）
-- 抑制の追加: なし（`# noqa` 0 件 / `testpaths` 不変 / 除外設定の追加 0 件）
+**US5 のチェックポイント（Phase 9 完了時点。T095 で最終確認する）**
+
+- `uv run pytest -q`: **988 passed / カバレッジ 97.34% / 419.04 秒 / exit 0**（`fail_under = 90` を満たす）
+- `uv run ruff check .`: **All checks passed!**（0 件）
+- `uv run mypy src`: **Success: no issues found in 29 source files**（0 件）
+- 抑制の追加: なし（`# noqa` は `compile_report.py` / `plan_search.py` の既存 `# noqa: BLE001` のみ / `testpaths` 不変 / 除外設定の追加 0 件）
+- 統合テストの内訳: `tests/integration` 全体で **107 passed**（US5 で追加した起動時拒否 6 件を含む）
+
 
 ### 5. spec と実測のずれ（spec は変更しない）
 
@@ -599,7 +628,8 @@ golden を相手にしていないため。既定の入力（失敗 0 件）で�
 | ベースライン 547 passed / 95.29% | 601 passed / 96.65% / 49.10 秒（spec 002 完了分） | 記録のみ |
 | `nodes/analyze_content.py:65` の `source_text[:20000]` | 69 行目付近 | 実測どおりに実装 |
 | `settings-contract.md` §2「`sort_by` は `relevance` / `recency` の 2 択」 | 実測は `relevance` / `likes`（`__main__.py` の検証と `providers/base.py` の `selection_note` が 2 値） | 記録のみ。既存 7 項目の宣言（`Literal` 化）は凍結契約のため T016 では触らない（US8 / T085 の範囲） |
-| `settings-contract.md` §2「`max_results` は 1 以上（0 を弾く）」 | T016 時点では既存 7 項目に `ge` を足していないため 0 を通す（`tests/unit/test_configuration.py` の `test_falsy_values_are_treated_as_specified[max_results-0]` が green） | §6 の「申し送り」のとおり US8（T085）で宣言を足すときに再判定 |
+| `settings-contract.md` §2「`max_results` は 1 以上（0 を弾く）」＋ §6 の申し送り「US8（T085）で宣言を足すときに再判定」 | **T078（US5）で宣言を足した**（`_setting(5, ge=1, le=100, ui_type="number", …)`）。既存テスト `test_falsy_values_are_treated_as_specified[max_results-0]` は `from_runnable_config` 経由で `Configuration(max_results=0)` を通すため、宣言を足すと Pydantic の `ValidationError` になり green を保てない | **利用者の判断で前倒し**（US5 の T077 が「`max_results=0` を exit 2 で弾く」を要求し、T085 を待つと同じ制約を 2 回判定することになるため）。偽値の扱い（`0` を `None` と区別する）を測るケースは `retry_max`（`ge=0`）へ移し、**テストが測る性質は変えていない**（テストに根拠コメントを記載）。値域外の拒否は `ConfigurationError`（`model_copy(update=…)` は検証しないため）と `ValidationError`（直接構築）の 2 経路をテストで固定 |
+| `data-model.md` §4.3 の手順 7「contexts / candidates の**中身を解放**」 | 実装は state から受け取った直後に `Candidate` / `Context` の**写しを取り**、その写しをその場で空にする（`_release_raw_material` の docstring に「引数は呼び出し側が所有していること」を明記） | **実測に基づく判断**。渡されたオブジェクトをその場で書き換える版では、検索境界が同じオブジェクトを保持している場合（統合テストの固定プール `_X_POOL` がまさにこれ）に取得元まで空になり、以降のテストで `analyze_content` が 0 件になる（実測: `tests/integration/test_full_flow.py` が 8 件失敗 → 写しを取る形で 24 passed）。レポートは解放の**前**に別の写しを取るため「レポート確定 → 解放」の順序（R-8）は保たれ、T082(a) の探針も落ちる |
 | T016 の記述 `ConfigurationError(field, value, expected, message)` | 実装は `ConfigurationError(field, value, expected)` の 3 引数で `message` を**組み立てる**（属性としては `message` を持つ） | 契約 §3 の stderr 書式を属性から必ず再現するため、4 つ目を渡させない設計にした（記録のみ） |
 | T013 / T018(d)「`FakeModelFactory` が `trend_researcher.tools.compression.build_model` も差し替える」 | T024 で `tools/compression.py` を作成し、patch 対象に追加した（US1 の §3 の「T024 の申し送り」参照） | 完了 |
 | `spec.md` / `tasks.md` の「**取代**（生素材）」 | 「**縮退**」の意（表記ゆれ） | 実装・テスト・コメントは「縮退」に統一。spec / tasks は変更しない（記録のみ） |
@@ -615,6 +645,7 @@ golden を相手にしていないため。既定の入力（失敗 0 件）で�
 | T039「対応表の整合テスト」 | `tests/eval/axes.md` の**本文（表）**を読む走査テストも足した（`test_the_axes_table_documents_axes_constraints_and_defects`） | FR-074 は「1 つの対応表に記録する MUST」と定めるが、表は文章なので実装側へ観点・制約を足したときに黙って古くなる。観点と制約の識別子が表に現れること、実測済み欠陥が 6 件並んでいることを固定した |
 | R-21 の実測済み欠陥 6 件の「固定する方法」 | `tests/eval/axes.md` の §3 に、担当する US（US3 / US4）と固定するテストの内容を並べた。US6 の時点では #1〜#3・#6 の**実装**はまだ無い | 欠陥の一覧を 1 箇所に置くのが FR-074 / R-21 の要求で、移植しない判断は US3 / US4 の実装タスクでテストとして固定する（本フェーズでは「列挙と担当の明示」まで） |
 | 契約 §1 の表「テキスト形態（`plan_search` の生成・点検、圧縮）にも縮退あり」 | T052 で縮退を配線したのは `parse_instruction` / `analyze_content` / `extract_common` の 3 ノード（`degrade=options_for(...)`）。`plan_search` / `compile_report` はまだ渡していない | T052 の指示が「`tools/llm.py` に縮退を組み込む」で、ノード単位の配線は T078（US5）が 5 ノード分をまとめて担う。既定の入力では上限超過が起きないため**観測できる差は無い**（T050 の exit 0 ケースで実測）。T078 で残り 2 ノードに入れる |
+| 上記（US5 / T078 による決着） | `plan_search` の生成と点検を `tools/llm.py` の境界（`_invoke` → `invoke_text`）へ載せ、`degrade=options_for(configurable, NODE_PLAN_SEARCH)` を渡した。`compile_report` は LLM を呼ばない（描画とファイル書き出しのみ）ため配線対象が無い | これで縮退を持つのは 4 ノード。`plan_search` の点検は `except Exception`（`# noqa: BLE001`）で `DegradationError` も捕捉し、生成結果で継続して `note()` に 1 行出す（US7 の規則「点検が失敗したら生成結果で継続」と同じ経路）。`tools/llm.py` を通すノードのフェイクは `ainvoke` を実装する必要がある（`_SequencedLLM` に追加。境界は `asyncio.run(ainvoke_text(...))` を使う） |
 | 契約 §2 が列挙する Provider の追加属性は `required_query_count` のみ | 点検プロンプトも provider に置いた（`review_search_prompt` を Protocol ＋ X / YouTube に追加し、`prompts.py` に `X_REVIEW_SEARCH_PROMPT` / `YOUTUBE_REVIEW_SEARCH_PROMPT` を追加） | **意図的な追加**。コアは `platform == "..."` を書けない（原則 IV）ため、点検の文面（プラットフォームごとの件数・名詞の言い回し）は provider のフックにしか置けない。既存の 5 フック（`parse_instruction_prompt` 等）と同じ形なので、拡張点の増加ではなく同型の追加。`test_provider_exposes_the_full_interface` に `review_search_prompt` の型検査を足した（§6） |
 | 契約 §3 の節の一覧は「8 ＋ `COMPRESSION_PROMPT`」の 9 定数を対象とする | `test_prompts.py` は走査対象を `*_PROMPT` の命名で動的に集めるため、追加した 2 定数（点検）も**自動で対象になる**（計 11 定数） | 走査対象を定数名で固定すると追加時に静かに漏れる。命名で集めて「9 以上ある」ことを別テストで固定する形にした（`test_the_scan_covers_every_prompt_constant`）。点検プロンプトも FR-055〜058 の節を持つ必要があるため、対象に入るのが正しい |
 | T068「固定テンプレートの禁止語（『そのまま使う』等）」 | 禁止語は「テンプレートをそのまま」に固定した | 既存プロンプトには「〜の**まま**引用」「その**まま**貼れる」という**正しい**用法が多数あり、「そのまま使う」を含めると誤検出する。禁止したいのは「テンプレートをそのまま使う」という指示なので、語をそこに絞った（`test_no_prompt_orders_a_fixed_template`） |

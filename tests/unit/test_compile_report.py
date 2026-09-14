@@ -17,6 +17,9 @@ from trend_researcher.models import (
     AnalysisFinding,
     Candidate,
     CommonTheme,
+    CompressedSource,
+    Context,
+    Degradation,
     Failure,
     ResearchInstruction,
     ResearchReport,
@@ -409,3 +412,183 @@ def test_progress_messages_end_with_summary_and_rendered_markdown() -> None:
     assert len(messages) == 4
     assert messages[-2].content == "レポート完了: 2 件の候補を分析し、1 件の共通テーマを抽出しました。"
     assert messages[-1].content == _markdown(result["report"])
+
+
+# ---------------------------------------------------------------------------
+# US5: 状態の解放（FR-027 / R-8 / data-model §2.1・§4.3）
+# ---------------------------------------------------------------------------
+
+#: 既定で `cache/report.json` に載るキー（`ResearchReport` の全項目）。解放や中間
+#: データの追加でここが増えたら、既定の出力が変わったことになる（SC-026）。
+REPORT_JSON_KEYS = frozenset(
+    {"instruction", "generated_at", "candidates", "analyses", "common_themes", "sources", "notes"}
+)
+
+
+def _context(cid: str, **overrides: Any) -> Context:
+    base: dict[str, Any] = {
+        "id": cid,
+        "text": f"字幕{cid}",
+        "thread_text": f"スレッド{cid}",
+        "replies": [f"返信{cid}"],
+    }
+    base.update(overrides)
+    return Context(**base)
+
+
+def _released_state(tmp_path: Path | None = None) -> dict[str, Any]:
+    """生データ（`text` / `thread_text` / `replies`）を持つ入力 state。"""
+    state = _state(
+        candidates=[_candidate(1, text="本文1"), _candidate(2, text="本文2")],
+        contexts=[_context("t1"), _context("t2")],
+        analyses=[_analysis("t1")],
+        common_themes=[CommonTheme(theme="A", description="説明")],
+    )
+    if tmp_path is not None:
+        state["cache_dir"] = str(tmp_path)
+    return state
+
+
+def test_raw_text_is_released_after_the_report_is_built() -> None:
+    """生データの中身はレポート確定後に解放される（FR-027 / data-model §4.3）。
+
+    解放の**順序**も同時に固定する。レポートは `Candidate` を参照するため、
+    先に解放すると（`report.candidates` の中身が空になり）このテストが落ちる。
+    """
+    result = compile_report(_released_state(), _config())
+
+    (context,) = result["contexts"][:1]
+    assert context.id == "t1"  # レコードは残る（`contexts` を空にしない）
+    assert (context.text, context.thread_text, context.replies) == ("", "", [])
+
+    (candidate,) = result["candidates"][:1]
+    assert candidate.id == "t1"
+    assert candidate.text == ""
+    assert candidate.url == "https://example.test/1"  # 参照（url）は解放しない
+
+    # 解放はレポート組み立ての**後**（レポート側の中身は残る）
+    assert [c.text for c in result["report"].candidates] == ["本文1", "本文2"]
+
+
+def test_the_release_keeps_the_other_state_values() -> None:
+    """解放しても `analyses` / `common_themes` / `report` は触らない（§2.1）。"""
+    result = compile_report(_released_state(), _config())
+
+    # 前提: 解放そのものは起きている（起きていなければこのテストは空虚になる）
+    assert result["contexts"][0].text == ""
+    assert result["candidates"][0].text == ""
+
+    report = result["report"]
+    assert [a.summary for a in report.analyses] == ["要約t1"]
+    assert [t.theme for t in report.common_themes] == ["A"]
+    assert len(report.candidates) == 2
+
+
+def test_the_release_is_not_visible_in_the_written_report(tmp_path: Path) -> None:
+    """解放しても `cache/report.json` の候補は本文を保つ（書き込みは解放の前）。"""
+    result = compile_report(_released_state(tmp_path), _config())
+
+    assert result["candidates"][0].text == ""  # 前提: 解放は起きている
+    written = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    assert [c["text"] for c in written["candidates"]] == ["本文1", "本文2"]
+
+
+def test_the_release_does_not_add_the_contexts_key_when_absent() -> None:
+    """`contexts` を持たない入力に新しいキーを足さない（既定の出力を変えない）。"""
+    result = compile_report(_state(candidates=[_candidate(1)]), _config())
+
+    assert "contexts" not in result
+
+
+# ---------------------------------------------------------------------------
+# US5: 中間データの切り替え（FR-046 / SC-026 / 契約 §5）
+# ---------------------------------------------------------------------------
+
+
+def _intermediate_state(tmp_path: Path) -> dict[str, Any]:
+    return _state(
+        candidates=[_candidate(1)],
+        analyses=[_analysis("t1")],
+        compressed=[
+            CompressedSource(
+                source_id="t1", input_chars=25000, output_chars=9000, applied=True, reason="compressed"
+            )
+        ],
+        degradations=[
+            Degradation(
+                node_name="analyze_content",
+                stage=1,
+                before_chars=25000,
+                after_chars=22500,
+                reason="token_limit",
+                limit_known=False,
+            )
+        ],
+        failures=[_failure(1)],
+        cache_dir=str(tmp_path),
+    )
+
+
+def test_intermediate_data_is_written_when_enabled(tmp_path: Path) -> None:
+    """`include_intermediate` が真なら圧縮・縮退・失敗を書き出す（契約 §5）。"""
+    state = _intermediate_state(tmp_path)
+
+    compile_report(state, _config(include_intermediate=True))
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "compressed.json",
+        "degradations.json",
+        "failures.json",
+        "report.json",
+    ]
+    compressed = json.loads((tmp_path / "compressed.json").read_text(encoding="utf-8"))
+    degradations = json.loads((tmp_path / "degradations.json").read_text(encoding="utf-8"))
+    assert [c["source_id"] for c in compressed] == ["t1"]
+    assert [d["stage"] for d in degradations] == [1]
+
+
+def test_the_default_writes_no_new_files_and_keeps_the_report_keys(tmp_path: Path) -> None:
+    """既定（偽）では `cache/` のファイルが増えず、`report.json` の形も変わらない。"""
+    state = _intermediate_state(tmp_path)
+
+    result = compile_report(state, _config())
+
+    assert [p.name for p in tmp_path.iterdir()] == ["report.json"]
+    written = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    assert set(written) == REPORT_JSON_KEYS
+    assert written == result["report"].model_dump(mode="json")
+
+
+def test_no_intermediate_files_without_a_cache_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`cache_dir` が無ければ中間データも書かない（書き込みの判断は 1 か所）。"""
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        compile_report_module, "write_json", lambda *a, **k: calls.append((a, k))
+    )
+    state = _intermediate_state(Path("/tmp/does-not-matter"))
+    state["cache_dir"] = None
+
+    compile_report(state, _config(include_intermediate=True))
+
+    assert calls == []
+
+
+def test_the_breakdown_note_reports_compression_degradation_and_failures(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """内訳（圧縮・縮退・失敗の件数）を補足行に 1 行で出す（T080）。"""
+    compile_report(_intermediate_state(Path("/tmp/does-not-matter")), _config())
+
+    err = capsys.readouterr().err
+    assert err.count("[補足]") == 1
+    assert "圧縮 1 件" in err and "縮退 1 段" in err and "失敗 1 件" in err
+
+
+def test_no_breakdown_note_without_intermediate_data(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """内訳がすべて 0 なら補足行を出さない（既定の入力の stderr を変えない。FR-035）。"""
+    compile_report(_state(candidates=[_candidate(1)], analyses=[_analysis("t1")]), _config())
+
+    assert "[補足]" not in capsys.readouterr().err
+

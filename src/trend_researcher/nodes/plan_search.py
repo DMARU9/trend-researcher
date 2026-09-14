@@ -10,7 +10,8 @@ from trend_researcher.configuration import Configuration
 from trend_researcher.progress import NODE_PLAN_SEARCH, make_emitter
 from trend_researcher.providers import get_provider
 from trend_researcher.state import AgentState
-from trend_researcher.tools.llm import build_model
+from trend_researcher.tools.degradation import DegradeOptions, options_for
+from trend_researcher.tools.llm import build_model, invoke_text
 
 #: 年号。`\b` は日本語（CJK も `\w`）と数字の間で境界にならないため、`2024年` の
 #: 年号が残る。前後を「数字でない」条件で挟んで日本語に隣接する年号も拾う。
@@ -26,6 +27,31 @@ _PERIOD_RE = re.compile(
 
 #: 除去後に残る括弧・引用符・空白（`（2024年）` が空クエリになるようにする）。
 _STRIP_CHARS = "\"'（）() \t"
+
+
+def _invoke(
+    model: object,
+    prompt: str,
+    *,
+    configurable: Configuration,
+    env_prefix: str | None,
+) -> str:
+    """生成・点検の 1 呼び出し（再試行と縮退を設定値で行い、本文を文字列で返す）。
+
+    呼び出しの経路を `tools/llm.py` の境界 1 つにすると、再試行回数（`retry_max`）
+    ・待機（`retry_wait_seconds`）・縮退（`degrade_max_attempts` / `shrink_ratio` /
+    `min_input_chars`）の設定がこのノードにもそのまま効く（FR-005 / FR-010 / FR-015）。
+    """
+    degrade: DegradeOptions = options_for(configurable, NODE_PLAN_SEARCH)
+    result = invoke_text(
+        prompt,
+        model=model,
+        env_prefix=env_prefix,
+        retry_max=configurable.retry_max,
+        retry_wait_seconds=configurable.retry_wait_seconds,
+        degrade=degrade,
+    )
+    return result.content if hasattr(result, "content") else str(result)
 
 
 def _clean_query(query: str) -> str:
@@ -106,8 +132,9 @@ def plan_search(state: AgentState, config: RunnableConfig) -> dict:
 
     model = build_model("research", provider.env_prefix)
     prompt = provider.plan_search_prompt.format(topic=search_topic, date_hint=date_hint)
-    result = model.invoke(prompt)
-    raw = result.content if hasattr(result, "content") else str(result)
+    # 生成も呼び出し境界（再試行 ＋ 縮退）を通す。`model.invoke` を直に呼ぶと、
+    # 再試行回数・待機・縮退の設定がこのノードだけ効かない（FR-010 / FR-015 / T078）。
+    raw = _invoke(model, prompt, configurable=configurable, env_prefix=provider.env_prefix)
 
     queries = _parse_queries(raw)
 
@@ -124,8 +151,9 @@ def plan_search(state: AgentState, config: RunnableConfig) -> dict:
             review_prompt = provider.review_search_prompt.format(
                 topic=search_topic, queries="\n".join(queries)
             )
-            reviewed = model.invoke(review_prompt)
-            reviewed_raw = reviewed.content if hasattr(reviewed, "content") else str(reviewed)
+            reviewed_raw = _invoke(
+                model, review_prompt, configurable=configurable, env_prefix=provider.env_prefix
+            )
             queries = _apply_review(queries, _parse_queries(reviewed_raw), limit)
         except Exception as exc:  # noqa: BLE001 - 点検の失敗は生成結果で継続する（FR-051）
             reason = str(exc).strip() or type(exc).__name__

@@ -166,7 +166,14 @@ class Configuration(BaseModel):
         default="", description="対象プラットフォーム（未指定時は既定のプラットフォーム）"
     )
     output_format: str | None = Field(default=None, description="出力形式（markdown/json）。未設定時は LLM が判断。")
-    max_results: int = Field(default=5, description="解析対象件数")
+    max_results: int = _setting(
+        5,
+        ge=1,
+        le=100,
+        ui_type="number",
+        label="解析対象件数",
+        description="解析する候補の上限（1〜100）。値域外は起動時に拒否される",
+    )
     sort_by: str = Field(default="relevance", description="選定基準（relevance/likes）")
     transcript_language: str = Field(default="ja", description="字幕優先言語")
     cache_dir: str | None = Field(default=None, description="中間成果物の永続化先")
