@@ -16,6 +16,7 @@ import ast
 import asyncio
 import importlib
 import importlib.util
+import os
 import re
 import sys
 from collections.abc import Iterator, Mapping
@@ -528,3 +529,149 @@ def test_the_real_repository_head_resolves(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.delenv("TR_EVAL_COMMIT", raising=False)
 
     assert re.fullmatch(r"[0-9a-f]{7}", module.resolve_commit(None))
+
+
+# --- (h) 判定は出荷境界だけを使う（FR-045） -------------------------------
+
+
+def _llm_imported_names() -> set[str]:
+    """出荷の LLM 境界（`trend_researcher.tools.llm`）から取り込む名前。"""
+    return {
+        alias.name
+        for node in ast.walk(_tree())
+        if isinstance(node, ast.ImportFrom) and node.module == "trend_researcher.tools.llm"
+        for alias in node.names
+    }
+
+
+def test_the_entrypoint_never_builds_a_client_directly() -> None:
+    """`ChatOpenAI` を直接構築しない。構築と呼び出しは出荷の境界を経由する（FR-045）。
+
+    走査は AST で行う（docstring は「直接構築してはいけない」と説明するために
+    この名前を含むため、生のテキスト一致では判定しない）。
+    """
+    tree = _tree()
+    imported = _imported_modules(tree)
+    names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    attributes = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+
+    assert "ChatOpenAI" not in names | attributes
+    assert not any(name.split(".")[0] in {"openai", "langchain_openai"} for name in imported)
+    assert {"build_model", "ainvoke_structured"} <= _llm_imported_names()
+
+
+def test_the_judge_is_built_by_the_shipped_builder(monkeypatch: pytest.MonkeyPatch) -> None:
+    """判定モデルの構築は `tools/llm.py` の `build_model` に委ねる（FR-045 / FR-069）。"""
+    module = _load_entrypoint()
+    seen: dict[str, object] = {}
+    sentinel = object()
+
+    def fake_build_model(*, role: str, env_prefix: str | None = None) -> object:
+        seen["role"] = role
+        seen["env_prefix"] = env_prefix
+        seen["model"] = os.environ.get("TR_MODEL")
+        return sentinel
+
+    monkeypatch.setattr(module, "build_model", fake_build_model)
+    monkeypatch.delenv("TR_MODEL", raising=False)
+
+    assert module.build_judge("openai:judge", env_prefix="JUDGE") is sentinel
+    # 判定モデル名は `TR_MODEL` 経由でしか `build_model` へ渡らない（引数で渡す経路は無い）。
+    assert seen == {"role": "summary", "env_prefix": "JUDGE", "model": "openai:judge"}
+
+
+def test_the_previous_model_is_restored_after_building(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`TR_MODEL` は構築のあいだだけ置き、直後に元の値へ戻す（FR-069）。"""
+    module = _load_entrypoint()
+    monkeypatch.setattr(module, "build_model", lambda *, role, env_prefix=None: role)
+    monkeypatch.setenv("TR_MODEL", "openai:original")
+
+    module.build_judge("openai:judge")
+
+    assert os.environ["TR_MODEL"] == "openai:original"
+
+
+def test_no_model_variable_is_left_behind(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`TR_MODEL` が未設定なら、構築のあとも未設定のままにする（空文字を残さない）。"""
+    module = _load_entrypoint()
+    monkeypatch.setattr(module, "build_model", lambda *, role, env_prefix=None: role)
+    monkeypatch.delenv("TR_MODEL", raising=False)
+
+    module.build_judge("openai:judge")
+
+    assert "TR_MODEL" not in os.environ
+
+
+def test_the_previous_model_is_restored_when_building_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """構築が失敗しても `TR_MODEL` を置き去りにしない（`finally`。FR-069）。"""
+    module = _load_entrypoint()
+    monkeypatch.setenv("TR_MODEL", "openai:original")
+
+    def boom(*, role: str, env_prefix: str | None = None) -> object:
+        raise RuntimeError("構築失敗")
+
+    monkeypatch.setattr(module, "build_model", boom)
+
+    with pytest.raises(RuntimeError):
+        module.build_judge("openai:judge")
+
+    assert os.environ["TR_MODEL"] == "openai:original"
+
+
+def test_the_judge_keeps_the_connection_settings_of_the_shipped_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """実物の構築でも接続設定（base_url・セッションヘッダー）が付く（FR-045）。
+
+    `ChatOpenAI` を直接構築すると `OPENAI_BASE_URL` と `x-opencode-session` を
+    迂回するため、出荷の `build_model` を通すことが要件になっている。
+    """
+    module = _load_entrypoint()
+    monkeypatch.setenv("TR_MODEL", "openai:from-env")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.delenv("JUDGE_MODEL", raising=False)
+
+    model = module.build_judge("openai:judge", env_prefix="JUDGE")
+
+    assert getattr(model, "model_name", None) == "judge"  # `openai:` を外して渡っている
+    assert getattr(model, "openai_api_base", None) == "https://example.invalid/v1"
+    assert "x-opencode-session" in (getattr(model, "default_headers", None) or {})
+    assert os.environ["TR_MODEL"] == "openai:from-env"  # 構築のあとは元の値へ戻る
+
+
+def test_the_judge_call_goes_through_the_shipped_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """判定の呼び出しは `ainvoke_structured`（再試行・縮退・使用量の記録を持つ経路）を通る（FR-045）。"""
+    module = _load_entrypoint()
+    seen: dict[str, object] = {}
+    schema = ResearchInstruction
+    model = object()
+
+    async def fake_ainvoke_structured(
+        received_schema: object, prompt: str, **kwargs: object
+    ) -> object:
+        seen["schema"] = received_schema
+        seen["prompt"] = prompt
+        seen.update(kwargs)
+        return "評価結果"
+
+    monkeypatch.setattr(module, "ainvoke_structured", fake_ainvoke_structured)
+    settings = module.Configuration(
+        retry_max=7, retry_wait_seconds=0.5, structured_method="function_calling"
+    )
+
+    judge = module._judge_callable(model, settings)
+
+    assert asyncio.run(judge("本文を採点して", schema)) == "評価結果"
+    # 設定は `Configuration` の値がそのまま渡る（入口で再解釈しない）。
+    assert seen == {
+        "schema": schema,
+        "prompt": "本文を採点して",
+        "role": "summary",
+        "model": model,
+        "retry_max": 7,
+        "retry_wait_seconds": 0.5,
+        "method": "function_calling",
+    }
