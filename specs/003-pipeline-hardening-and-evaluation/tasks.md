@@ -96,7 +96,7 @@ SC-011 / SC-026）。
 
 - [X] T001 `plan.md` の「基準値のずれ」と Constitution Check に記録した基準値（**601 passed / カバレッジ 96.65% / `ruff` 0 件 / `mypy` 0 件 / 49.10 秒**）をブランチ `003-pipeline-hardening-and-evaluation` の作業ツリーで再現する（`uv run pytest -q`、`uv run ruff check .`、`uv run mypy src`、`git status --short`）。結果を作業ツリーの確認（`git status --short` が ` M .specify/feature.json` と `?? specs/003-pipeline-hardening-and-evaluation/` のみ）とともに本ファイルの「実装メモ §0」に記録する
 - [X] T002 [P] 遅いテストを把握して時間予算を確保する。`uv run pytest -q --no-cov --durations=15` を実行し、上位 15 件の所要時間を「実装メモ §2」に控える（SC-013 の 60 秒以内を守るため、追加するテスト群の上限を決める根拠にする）
-- [ ] T003 [P] オフライン制約を実測する。`env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB uv run pytest -q --no-cov` を実行し、認証情報なしでも **601 passed** のままであることを確認する（原則 II の安全網）
+- [X] T003 [P] オフライン制約を実測する。`env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB uv run pytest -q --no-cov` を実行し、認証情報なしでも **601 passed** のままであることを確認する（原則 II の安全網）
 - [ ] T004 [P] **設計の分岐点 1 を実測する**: 構造化出力が `json_schema` で通るかを、`uv run python -c` で `ChatOpenAI.with_structured_output(<Pydantic モデル>, method="json_schema")` の疎通を確認して確定する。通らなければ `Configuration.structured_method` の**既定を `function_calling` にする**（research §R-2 / 未解決事項 1）。「実装メモ §1」に記録
 - [ ] T005 [P] **設計の分岐点 2 を実測する**: 実際の上限超過応答の形（`status_code` / `exc.body` の構造 / メッセージの語彙）を採取し、`contracts/llm-invocation-contract.md` §5 の条件 3 の語彙を確定する（research §R-1 / 未解決事項 2）。テストは語彙に依存しない形（条件ごとの反例）で書く方針も同時に決める。「実装メモ §1」に記録
 - [ ] T006 [P] **設計の分岐点 3 を実測する**: `TR_EVAL_MODEL` の既定値（生成 `openai:mimo-v2.5` と同じで走るか、判定用の別名が必要か）を疎通で確定する（research §R-19 / 未解決事項 3）。「実装メモ §1」に記録
@@ -403,6 +403,7 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 | `uv run ruff check .` | 0 件（`All checks passed!`） | 2026-09-14 | 前回も 0 件 |
 | `uv run mypy src` | 0 件（`Success: no issues found in 27 source files`） | 2026-09-14 | 前回も 0 件・27 ファイル |
 | `git status --short` | 空（作業ツリー clean） | 2026-09-14 | spec の期待（` M .specify/feature.json` と `?? specs/003-.../`）とは**不一致**。spec 003 一式は `c06152e` で既にコミット済みのため未追跡にはならない。ブランチ名も spec の `003-pipeline-hardening-and-evaluation` ではなく現行の `specs/003-pipeline-hardening-and-evaluation` |
+| `env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB uv run pytest -q --no-cov`（T003） | **601 passed** / 47.17 秒 | 2026-09-14 | 認証情報を落としても green のまま（原則 II の安全網が機能）。本リポジトリには `.env`（git 管理外）があるが、テストは環境変数なしでも外部 I/O に到達しない |
 
 ### 1. 設計の分岐点の実測（T004〜T008）
 
