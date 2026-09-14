@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 
 from langchain.chat_models import init_chat_model
 
@@ -18,6 +19,30 @@ _ROLE_MAX_TOKENS: dict[str, int] = {
     "final": 10000,
     "compression": 8192,
 }
+
+#: 会話ごとに安定したセッション ID を要求するエンドポイント（OpenCode Go）向けの
+#: ヘッダー名。無いと 400 `MissingSessionID` が返る。
+_SESSION_HEADER = "x-opencode-session"
+
+#: プロセス内で使い回す既定のセッション ID。1 回の CLI 実行 = 1 会話なので、
+#: ノードごとに `build_model` が呼ばれても同じ値を使う（プロンプトキャッシュの
+#: ルーティングが会話単位で効くようにするため）。
+_DEFAULT_SESSION_ID: str | None = None
+
+
+def _session_headers(env_prefix: str | None) -> dict[str, str]:
+    """`x-opencode-session` ヘッダーを組み立てる。
+
+    値は `TR_SESSION_ID` → `{env_prefix}_SESSION_ID` の順で解決し、どちらも
+    未設定ならプロセス内で 1 つ生成して使い回す。
+    """
+    global _DEFAULT_SESSION_ID
+    session_id = resolve_env("SESSION_ID", default="", env_prefix=env_prefix)
+    if not session_id:
+        if _DEFAULT_SESSION_ID is None:
+            _DEFAULT_SESSION_ID = f"trend-researcher-{uuid.uuid4().hex}"
+        session_id = _DEFAULT_SESSION_ID
+    return {_SESSION_HEADER: session_id}
 
 
 def build_model(role: Role = "research", env_prefix: str | None = None):
@@ -47,6 +72,7 @@ def build_model(role: Role = "research", env_prefix: str | None = None):
         max_tokens=max_tokens,
         api_key=api_key,
         base_url=base_url,
+        default_headers=_session_headers(env_prefix),
         tags=["langsmith:nostream"],
         configurable_fields=("model", "max_tokens", "api_key"),
     )
