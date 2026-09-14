@@ -675,3 +675,165 @@ def test_the_judge_call_goes_through_the_shipped_helper(monkeypatch: pytest.Monk
         "retry_wait_seconds": 0.5,
         "method": "function_calling",
     }
+
+
+# --- (i) 中間データの記録（FR-046 / SC-026） -------------------------------
+
+
+def _intermediate_state() -> dict[str, object]:
+    """パイプラインの戻り値のうち、中間データの項目を持つ最小の写し。"""
+    from trend_researcher.models import AnalysisFinding, CompressedSource, Degradation, Failure
+
+    return {
+        "search_queries": ["オタク 困りごと", "推し活 大変"],
+        "analyses": [AnalysisFinding(id="x1", summary="要約")],
+        "compressed": [
+            CompressedSource(
+                source_id="x1",
+                input_chars=24000,
+                output_chars=1200,
+                applied=True,
+                reason="compressed",
+            )
+        ],
+        "degradations": [
+            Degradation(
+                node_name="analyze_content",
+                stage=1,
+                before_chars=1116,
+                after_chars=1004,
+                reason="token_limit",
+                limit_known=True,
+            )
+        ],
+        "failures": [
+            Failure(kind="analysis", id="x2", error_type="DegradationError", message="上限超過")
+        ],
+    }
+
+
+def _dataset_of(*ids: str) -> ModuleType:
+    """`id` だけを持つ最小のデータセット（`_generate` の入力を組み立てる）。"""
+    module = _load_entrypoint()
+    return module.datasets.Dataset.model_validate(
+        {"name": "tr-basic", "entries": [{"id": key, "prompt": f"指示 {key}"} for key in ids]}
+    )
+
+
+def _report() -> ResearchReport:
+    return ResearchReport(instruction=ResearchInstruction(raw_text="指示"))
+
+
+def test_the_run_asks_the_pipeline_for_intermediate_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """実走は中間データを有効にして走り、戻り値の 5 項目を結果へ写す（FR-046）。
+
+    固定するのは (1) 実行時設定に `include_intermediate` が入ること（切り替えの
+    配線）(2) 戻り値の「採用したクエリ・素材長・解析件数・縮退・失敗」が記録に
+    写ること。生データ自体は解放されるため、長さの記録が唯一の観測になる。
+    """
+    module = _load_entrypoint()
+    state = _intermediate_state()
+    seen: list[Mapping[str, object]] = []
+
+    async def fake_ainvoke(
+        initial: Mapping[str, object], config: Mapping[str, object]
+    ) -> dict[str, object]:
+        seen.append(config)
+        return {"report": _report(), "usage": [_usage(120, 30, 150)], **state}
+
+    monkeypatch.setattr(module.trend_researcher, "ainvoke", fake_ainvoke)
+    collected: list[dict[str, object]] = []
+
+    _, usage = asyncio.run(
+        module._generate(
+            _dataset_of("a"),
+            module.Configuration(),
+            overrides={},
+            platform="x",
+            provider=module.get_provider("x"),
+            intermediate=collected,
+        )
+    )
+
+    # (1) 中間データの切り替えが実行時設定に入っている（既定は偽のまま。FR-046）
+    configurable = seen[0]["configurable"]
+    assert isinstance(configurable, Mapping)
+    assert configurable["include_intermediate"] is True
+    assert module.Configuration().include_intermediate is False
+    # 圧縮・縮退の記録は切り替えに依らず状態に載る（写し漏れが無いこと）
+    assert usage["calls"] == 1
+    # (2) 状態の中間データがそのまま記録になる
+    assert collected == [records.intermediate_entry("a", state)]
+    (entry,) = collected
+    assert entry["queries"] == ["オタク 困りごと", "推し活 大変"]
+    assert entry["analyses"] == 1
+    assert entry["compressed"][0]["input_chars"] == 24000  # 素材長（圧縮前）
+    assert entry["compressed"][0]["output_chars"] == 1200  # 解析に渡した長さ
+    assert entry["degradations"][0]["node_name"] == "analyze_content"
+    assert entry["failures"][0]["kind"] == "analysis"
+
+
+def test_a_failed_entry_records_no_intermediate_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """生成そのものが失敗した件は中間データも無い（レコードは空の記事として残る）。"""
+    module = _load_entrypoint()
+
+    async def fake_ainvoke(*args: object, **kwargs: object) -> dict[str, object]:
+        raise RuntimeError("接続に失敗しました")
+
+    monkeypatch.setattr(module.trend_researcher, "ainvoke", fake_ainvoke)
+    collected: list[dict[str, object]] = []
+
+    generated, usage = asyncio.run(
+        module._generate(
+            _dataset_of("a"),
+            module.Configuration(),
+            overrides={},
+            platform="x",
+            provider=module.get_provider("x"),
+            intermediate=collected,
+        )
+    )
+
+    assert [row["article"] for row in generated] == [""]
+    assert collected == []
+    assert usage == {}
+
+
+def test_the_intermediate_data_reaches_the_result_row(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """実走の本体が中間データを実行の行へ渡す（配線ごと固定する。FR-046）。"""
+    module = _load_entrypoint()
+    state = _intermediate_state()
+
+    async def fake_ainvoke(*args: object, **kwargs: object) -> dict[str, object]:
+        return {"report": _report(), "usage": [_usage(1, 2, 3)], **state}
+
+    async def fake_ascore_report(*args: object, **kwargs: object) -> dict[str, object]:
+        return {"axes": [], "overall_quality": None, "axis_order": [], "excluded_axes": []}
+
+    monkeypatch.setattr(module.trend_researcher, "ainvoke", fake_ainvoke)
+    monkeypatch.setattr(module.evaluators, "ascore_report", fake_ascore_report)
+    monkeypatch.setattr(module, "build_judge", lambda *a, **kw: object())
+    monkeypatch.setattr(module, "resolve_commit", lambda value: "abc1234")
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+    args = module.build_parser().parse_args(
+        ["--platform", "x", "--config", str(config_path), "--out", str(tmp_path / "out")]
+    )
+
+    assert asyncio.run(module.run_evaluation(args)) == 0
+
+    written = sorted((tmp_path / "out").glob("*.jsonl"))
+    assert len(written) == 1
+    result = records.load_result(written[0])
+    expected_ids = [entry.id for entry in module.datasets.load_dataset().entries]
+    assert [entry["id"] for entry in result["intermediate"]] == expected_ids
+    assert result["intermediate"][0]["queries"] == ["オタク 困りごと", "推し活 大変"]
+    assert result["intermediate"][0]["compressed"][0]["input_chars"] == 24000
+    # レコードの行は 3 項目のまま（中間データは実行の行に載る。FR-071）
+    assert [record.id for record in records.load_records(written[0])] == expected_ids

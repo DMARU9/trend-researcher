@@ -48,6 +48,7 @@ def _run(
     axes: Sequence[dict[str, Any]] | None = None,
     usage: dict[str, Any] | None = None,
     scores: Mapping[str, Any] | None = None,
+    intermediate: Sequence[Mapping[str, Any]] | None = None,
 ) -> records.RunContext:
     """1 回の評価実行の文脈（保存済みの結果を組み立てる）。"""
     dataset = datasets.load_dataset(DATASET)
@@ -72,6 +73,7 @@ def _run(
         usage=usage
         or {"calls": 8, "prompt_tokens": 1200, "completion_tokens": 800, "total_tokens": 2000},
         scores=scores or {},
+        intermediate=intermediate or (),
     )
 
 
@@ -395,3 +397,108 @@ def test_a_broken_dataset_is_rejected(tmp_path: Path) -> None:
     empty.write_text(json.dumps({"name": "tr-empty", "entries": []}), encoding="utf-8")
     with pytest.raises(datasets.DatasetError, match="指示がありません"):
         datasets.load_dataset("tr-empty", fixtures_dir=tmp_path)
+
+
+# --- 中間データの記録（FR-046 / SC-026） ------------------------------------
+
+
+def _state_with_intermediate() -> dict[str, Any]:
+    """パイプラインの戻り値（状態）のうち、中間データの項目を持つ最小の写し。"""
+    from trend_researcher.models import AnalysisFinding, CompressedSource, Degradation, Failure
+
+    return {
+        "search_queries": ["オタク 困りごと", "推し活 大変"],
+        "analyses": [AnalysisFinding(id="x1", summary="要約"), AnalysisFinding(id="x2")],
+        "compressed": [
+            CompressedSource(
+                source_id="x1",
+                input_chars=24000,
+                output_chars=1200,
+                applied=True,
+                reason="compressed",
+            ),
+            CompressedSource(
+                source_id="x2", input_chars=900, output_chars=900, applied=False, reason="timeout"
+            ),
+        ],
+        "degradations": [
+            Degradation(
+                node_name="analyze_content",
+                stage=1,
+                before_chars=1116,
+                after_chars=1004,
+                reason="token_limit",
+                limit_known=True,
+            )
+        ],
+        "failures": [
+            Failure(kind="analysis", id="x3", error_type="DegradationError", message="上限超過")
+        ],
+    }
+
+
+def test_the_intermediate_data_is_projected_from_the_state() -> None:
+    """状態の中間データを、結果から確認できる形へ写す（FR-046）。
+
+    「採用したクエリ」「素材長（圧縮の前後の文字数）」「解析件数」「縮退」「失敗」が
+    そのまま読めること（生データは解放されるため、長さなどのメタデータが唯一の観測）。
+    """
+    entry = records.intermediate_entry("a", _state_with_intermediate())
+
+    assert entry["id"] == "a"
+    assert entry["queries"] == ["オタク 困りごと", "推し活 大変"]
+    assert entry["analyses"] == 2
+    assert [(c["source_id"], c["input_chars"], c["output_chars"]) for c in entry["compressed"]] == [
+        ("x1", 24000, 1200),
+        ("x2", 900, 900),
+    ]
+    assert entry["compressed"][1]["reason"] == "timeout"
+    assert [(d["node_name"], d["stage"], d["before_chars"], d["after_chars"]) for d in entry["degradations"]] == [
+        ("analyze_content", 1, 1116, 1004)
+    ]
+    assert [(f["kind"], f["error_type"]) for f in entry["failures"]] == [("analysis", "DegradationError")]
+    # JSON へ書ける形（`model_dump` 済み）であること。`ensure_ascii=False` で 1 行になる。
+    assert json.loads(json.dumps(entry, ensure_ascii=False)) == entry
+
+
+def test_a_state_without_intermediate_data_records_empty_items() -> None:
+    """中間データを持たない状態でも記録は組み立てられる（項目が無ければ空）。"""
+    empty = records.intermediate_entry("a", {})
+
+    assert empty == {
+        "id": "a",
+        "queries": [],
+        "analyses": 0,
+        "compressed": [],
+        "degradations": [],
+        "failures": [],
+    }
+    # 形が違う（並びでない・写像でない）値は採らない。結果の記録自体は壊さない。
+    junk = records.intermediate_entry(
+        "b", {"search_queries": "クエリ", "analyses": None, "compressed": [1, "x"], "failures": 3}
+    )
+    assert junk["queries"] == []
+    assert junk["analyses"] == 0
+    assert junk["compressed"] == []
+    assert junk["failures"] == []
+
+
+def test_the_run_line_carries_the_intermediate_data(tmp_path: Path) -> None:
+    """中間データは実行の行に載る（レコードの行の 3 項目は変えない。FR-046 / FR-071）。"""
+    entry = records.intermediate_entry("a", _state_with_intermediate())
+    path, _ = records.write_result(_run(intermediate=[entry]), _records("baseline"), out_dir=tmp_path)
+
+    result = records.load_result(path)
+    assert result["intermediate"] == [json.loads(json.dumps(entry, ensure_ascii=False))]
+    # 既定（渡さない）は空。先頭だけでなく、結果の形が安定していること。
+    default = records.RunContext(
+        dataset=result["dataset"],
+        dataset_fingerprint=result["dataset_fingerprint"],
+        config_name="baseline",
+        commit=COMMIT,
+        platform="x",
+        model=JUDGE_MODEL,
+        judge_model=JUDGE_MODEL,
+        judge_model_is_generator=True,
+    )
+    assert default.to_dict(records=0, articles_empty=0)["intermediate"] == []

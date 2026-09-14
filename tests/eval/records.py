@@ -46,6 +46,16 @@ UNKNOWN = "不明"
 #: 使用量の項目（FR-042 / FR-061）。
 USAGE_KEYS: tuple[str, ...] = ("calls", "prompt_tokens", "completion_tokens", "total_tokens")
 
+#: 中間データの項目（FR-046）。採用したクエリ・素材長（圧縮の前後）・解析件数・
+#: 縮退・部分失敗。既定の実行では状態に現れないため、記録も空になる。
+INTERMEDIATE_KEYS: tuple[str, ...] = (
+    "queries",
+    "analyses",
+    "compressed",
+    "degradations",
+    "failures",
+)
+
 
 class ResultError(Exception):
     """結果ファイルを読み書きできない。"""
@@ -139,6 +149,8 @@ class RunContext:
     usage: Mapping[str, Any] = field(default_factory=dict)
     #: レコードごとの採点（レコードの識別子で結び付ける。FR-039 / FR-071）。
     scores: Mapping[str, Any] = field(default_factory=dict)
+    #: 中間データ（実走 1 件につき 1 要素。`intermediate_entry` の写し。FR-046）。
+    intermediate: Sequence[Mapping[str, Any]] = field(default_factory=tuple)
 
     @property
     def filename(self) -> str:
@@ -169,9 +181,54 @@ class RunContext:
             "overall_quality": self.overall_quality,
             "scores": {key: dict(value) for key, value in self.scores.items()},
             "usage": dict(self.usage),
+            "intermediate": [dict(entry) for entry in self.intermediate],
             "records": records,
             "articles_empty": articles_empty,
         }
+
+
+def intermediate_entry(entry_id: str, state: Mapping[str, Any]) -> dict[str, Any]:
+    """1 件の実走が残した中間データを、結果から確認できる形へ写す（FR-046）。
+
+    写すのはパイプラインの戻り値（状態）が持つ 5 項目である。
+
+    - `queries`: 採用した検索クエリ（`plan_search` が確定した並び）
+    - `analyses`: 解析件数（解析結果の数）
+    - `compressed`: 圧縮の記録（**素材長**。`input_chars` → `output_chars` と理由）
+    - `degradations`: 縮退の記録（ノード・段・縮小の前後）
+    - `failures`: 部分失敗の記録（段・対象・種別・理由）
+
+    生素材そのものは写さない。`compile_report` が確定後に解放するため（FR-027 /
+    SC-010）、長さのようなメタデータが唯一の観測になる。項目が無い・形が違う状態
+    （既定の実行で中間データを残さない場合）でも記録は空の項目で組み立て、結果の
+    書き込みを止めない。
+    """
+    return {
+        "id": entry_id,
+        "queries": [
+            item for item in _sequence(state.get("search_queries")) if isinstance(item, str)
+        ],
+        "analyses": len(_sequence(state.get("analyses"))),
+        "compressed": _records(state.get("compressed")),
+        "degradations": _records(state.get("degradations")),
+        "failures": _records(state.get("failures")),
+    }
+
+
+def _sequence(value: object) -> list[Any]:
+    """並び（`str` / `bytes` を除く）だけを `list` にして返す。"""
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return list(value)
+    return []
+
+
+def _records(value: object) -> list[dict[str, Any]]:
+    """記録の並びを JSON へ書ける形にする（モデルと写像だけを採る）。"""
+    return [
+        item.model_dump(mode="json") if isinstance(item, BaseModel) else dict(item)
+        for item in _sequence(value)
+        if isinstance(item, (BaseModel, Mapping))
+    ]
 
 
 def record_line(record: Mapping[str, Any] | Record) -> str:

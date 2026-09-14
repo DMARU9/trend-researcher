@@ -6,6 +6,12 @@
 `render_report`）、`subprocess` で CLI を起動しない（中間データは戻り値にしか
 現れないため。FR-046 / FR-065）。
 
+生成は実行時設定 `include_intermediate` を**有効にして**走り（FR-046。`cache_dir`
+は載せないので一時ファイルは作らず、evaluation-contract §2 の「結果の JSONL のみを
+書く」を守る）、戻り値の中間データ（採用したクエリ・素材長（圧縮の前後）・解析件数・
+縮退・部分失敗）を**実行の行**へ写す。生素材そのものは確定後に解放されるため
+（FR-027 / SC-010）、長さなどのメタデータが唯一の観測になる。
+
 初期状態に載せるのは CLI と同じ最小の 3 項目（`messages` 1 件 / `platform` /
 明示指定時の `max_results`）に限る。CLI の引数解釈（`--since` の解析など）は
 再実装しない（FR-065）。
@@ -243,8 +249,14 @@ async def run_evaluation(args: argparse.Namespace) -> int:
     saved: list[Path] = []
     empty_total = 0
     for name, overrides in plan_configs(args):
+        intermediate: list[dict[str, Any]] = []
         generated, usage = await _generate(
-            dataset, settings, overrides=overrides, platform=platform, provider=provider
+            dataset,
+            settings,
+            overrides=overrides,
+            platform=platform,
+            provider=provider,
+            intermediate=intermediate,
         )
         judged = {
             row["id"]: await evaluators.ascore_report(
@@ -270,6 +282,8 @@ async def run_evaluation(args: argparse.Namespace) -> int:
                 overall_quality=aggregated["overall_quality"],
                 usage=records.usage_summary(usage),
                 scores=judged,
+                # 中間データは実行の行に載せる（レコードの行は 3 項目のまま。FR-046 / FR-071）
+                intermediate=intermediate,
             ),
             generated,
             out_dir=args.out,
@@ -325,6 +339,8 @@ async def _judge_only(
         # 生成をやり直していないため、使用量は保存済みの値を引き継ぐ（FR-042）。
         usage=context.get("usage", {}),
         scores=judged,
+        # 中間データも同じ（生データの解放後は再取得できない。FR-046）
+        intermediate=context.get("intermediate", []),
     )
     written, count = records.write_result(
         run, saved_records, out_dir=target.parent, overwrite=False
@@ -342,10 +358,22 @@ async def _generate(
     overrides: Mapping[str, Any],
     platform: str,
     provider: Any,
+    intermediate: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
-    """データセットの全指示を生成する（1 件の失敗で全体を止めない）。"""
+    """データセットの全指示を生成する（1 件の失敗で全体を止めない）。
+
+    中間データは `intermediate` に追記する（省略すると集めない）。既存の呼び出し
+    契約（戻り値の 2 項目）を変えないため、戻り値ではなく受け皿で返す（FR-035）。
+    """
     configuration = settings.model_copy(
-        update={**overrides, "platform": platform, "output_format": "markdown"}
+        update={
+            **overrides,
+            "platform": platform,
+            "output_format": "markdown",
+            # 中間データ（採用クエリ・素材長・解析件数・縮退・失敗）を戻り値から
+            # 読めるようにする（FR-046）。`cache_dir` は載せないのでファイルは増えない。
+            "include_intermediate": True,
+        }
     )
     runnable_config = {"configurable": configuration.model_dump()}
     usage: dict[str, int] = {}
@@ -372,6 +400,10 @@ async def _generate(
             if report is not None:
                 article = render_report(report, provider)
             _add_usage(usage, result.get("usage"))
+            if intermediate is not None:
+                # 採用クエリ・素材長・解析件数・縮退・失敗（FR-046）。生データは
+                # 解放済みなので、長さの記録が唯一の観測になる。
+                intermediate.append(records.intermediate_entry(entry.id, result))
         generated.append({"id": entry.id, "prompt": entry.prompt, "article": article})
     return generated, usage
 
