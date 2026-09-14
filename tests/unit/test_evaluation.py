@@ -438,6 +438,56 @@ def test_the_axes_table_documents_axes_constraints_and_defects() -> None:
     assert len(re.findall(r"^\| [1-6] \|", defects, flags=re.MULTILINE)) == 6
 
 
+def _table_rows(section_marker: str, *, cells: int, key_index: int) -> list[list[str]]:
+    """`axes.md` の節の表の行を列へ分解する（見出し行・区切り行は除く）。
+
+    節の終わりは**行頭**の `## ` で見る。表のセルには `## 概要` のような見出しの
+    文言が入っているため、文字列の出現で切ると表の途中で切れてしまう。
+
+    データ行だけを拾うため、識別子の列（`key_index`）がバッククォートで始まる行に
+    限る。ここを緩めると、見出し行を「観点」として数えてしまう。
+    """
+    lines = (EVAL_DIR / "axes.md").read_text(encoding="utf-8").splitlines()
+    start = next(index for index, line in enumerate(lines) if line.startswith(section_marker))
+    rows: list[list[str]] = []
+    for line in lines[start + 1 :]:
+        if line.startswith("## "):
+            break
+        if not line.startswith("|"):
+            continue
+        row = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(row) == cells and row[key_index].startswith("`"):
+            rows.append(row)
+    return rows
+
+
+def test_the_axes_table_pins_the_constraints_of_each_axis() -> None:
+    """§1 の「測る制約」列が実装（`AXIS_CONSTRAINTS`）と**両方向で**一致する（FR-048 / FR-074）。
+
+    識別子が表に現れることだけを見ると、列を取り違えても（`citation_count` と
+    `citation_context` を入れ替えても）緑のままになる。観点ごとの集合として固定する。
+    """
+    rows = _table_rows("## 1. 観点の対応表", cells=7, key_index=1)
+    measured = {row[1].strip("`"): set(re.findall(r"`([^`]+)`", row[5])) for row in rows}
+
+    assert set(measured) == {spec.axis for spec in evaluators.AXIS_SPECS} | {"correctness"}
+    for axis, constraints in judge_prompts.AXIS_CONSTRAINTS.items():
+        assert measured[axis] == set(constraints), f"{axis} の測る制約が表と一致しない"
+    # 対象外の観点はどの制約も測らない（表でも「—」）。
+    assert measured["correctness"] == set()
+
+
+def test_the_constraints_table_pins_the_axes_of_each_constraint() -> None:
+    """§2 の「測る観点」列が `AXIS_CONSTRAINTS` の**逆写像**と一致する（FR-048 / FR-074）。"""
+    rows = _table_rows("## 2. プロンプトの制約との対応", cells=4, key_index=0)
+    measured = {row[0].strip("`"): set(re.findall(r"`([^`]+)`", row[3])) for row in rows}
+
+    assert set(measured) == set(judge_prompts.CONSTRAINTS)
+    for axis, constraints in judge_prompts.AXIS_CONSTRAINTS.items():
+        for constraint in constraints:
+            assert axis in measured[constraint], f"{constraint} の測る観点に {axis} が無い"
+
+
 # --- 比較（FR-041 / SC-016） ----------------------------------------------
 
 
