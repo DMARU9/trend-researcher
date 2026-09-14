@@ -152,11 +152,14 @@ class _FakeLLM:
         content: str | None,
         prompts: list[str] | None = None,
         structured: Any | None = None,
+        raise_error: BaseException | None = None,
     ) -> None:
         self.node = node
         self.content = content
         #: 構造化出力の応答（`None` なら必ず `OutputParserException`）。
         self.structured = structured
+        #: 呼び出し時に送出する例外（`invoke` / `ainvoke` / 構造化の両方）。
+        self.raise_error = raise_error
         # 同一ノードの複数インスタンスで共有できるよう、外部からリストを注入できる
         self.prompts: list[str] = prompts if prompts is not None else []
 
@@ -166,6 +169,8 @@ class _FakeLLM:
 
     def _next(self, prompt: str) -> _FakeMessage:
         self.record(prompt)
+        if self.raise_error is not None:
+            raise self.raise_error
         if self.content is None:
             raise AssertionError(
                 f"fake_model_factory: ノード {self.node} の応答が指定されていません。"
@@ -202,6 +207,11 @@ class FakeModelFactory:
         #: ノードごとの `env_prefix` 記録。各ノードが provider の接頭辞を渡して
         #: いるか（コアが接頭辞を組み立てていないか）を観測できる。
         self.env_prefix_log: dict[str, list[str | None]] = {}
+        #: 圧縮（`tools/compression.py` の `build_model`）のプロンプト記録。
+        #: 分析の記録と混ぜない（混ざると分析側の断言が誤って緑になる）。
+        self.compression_prompts: list[str] = []
+        #: 圧縮の呼び出し（role, env_prefix）の記録。
+        self.compression_calls: list[tuple[str, str | None]] = []
 
     def _build_model(
         self, node: str, content: str | None, structured: Any | None
@@ -219,17 +229,45 @@ class FakeModelFactory:
 
         return _build
 
+    def _build_compression(
+        self, content: str | None, error: BaseException | None
+    ) -> Callable[..., _FakeLLM]:
+        """`tools/compression.py` の `build_model` の差し替えを作る。
+
+        `compression` を指定していないのに圧縮が呼ばれたら落とす。黙って分析用の
+        応答を返すと、想定外の圧縮呼び出し（呼び出し回数の増加）を検出できない。
+        """
+
+        def _build(role: str = "compression", env_prefix: str | None = None) -> _FakeLLM:
+            self.compression_calls.append((role, env_prefix))
+            if error is not None:
+                return _FakeLLM(
+                    "compression", None, self.compression_prompts, raise_error=error
+                )
+            if content is None:
+                raise AssertionError(
+                    "fake_model_factory: 圧縮の応答が指定されていません。"
+                    "install(..., compression=...) で指定します。"
+                )
+            return _FakeLLM("compression", content, self.compression_prompts)
+
+        return _build
+
     @contextmanager
     def install(
         self,
         responses: dict[str, str],
         *,
         structured: dict[str, Any] | None = None,
+        compression: str | None = None,
+        compression_error: BaseException | None = None,
     ) -> Iterator[FakeModelFactory]:
         """`responses` のノードだけ応答を注入した状態を作る。
 
         `structured` を渡すと、そのノードの `with_structured_output()` だけが
-        成功する（他のノードは `OutputParserException` のまま）。
+        成功する（他のノードは `OutputParserException` のまま）。`compression` は
+        `tools/compression.py` が構築するモデル（長文素材の圧縮）の応答で、
+        `compression_error` を渡すとその呼び出しだけが失敗する（FR-003 の入力）。
         """
         structured = structured or {}
         unknown = (set(responses) | set(structured)) - set(LLM_NODES)
@@ -239,6 +277,8 @@ class FakeModelFactory:
         self.models = {}
         self.prompt_log = {}
         self.env_prefix_log = {}
+        self.compression_prompts = []
+        self.compression_calls = []
         with ExitStack() as stack:
             for node in LLM_NODES:
                 content = responses.get(node)
@@ -249,6 +289,13 @@ class FakeModelFactory:
                         side_effect=self._build_model(node, content, structured_content),
                     )
                 )
+            # 圧縮のモデル構築も 1 経路に集約されている（FR-045）ため、ここも差し替える
+            stack.enter_context(
+                mock.patch(
+                    "trend_researcher.tools.compression.build_model",
+                    side_effect=self._build_compression(compression, compression_error),
+                )
+            )
             yield self
 
     def prompts_for(self, node: str) -> list[str]:

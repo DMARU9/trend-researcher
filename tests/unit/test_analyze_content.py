@@ -333,17 +333,32 @@ def test_prompt_uses_placeholder_when_source_text_is_empty(fake_model_factory):
     assert "（本文なし・メタデータのみ）" in fake_model_factory.prompts_for("analyze_content")[0]
 
 
-def test_source_text_is_truncated_at_twenty_thousand_chars(fake_model_factory):
-    # 位置ごとに異なる文字列にする（同一文字の繰り返しだと「切断された」ことを
+def test_over_threshold_source_is_compressed_not_silently_truncated(fake_model_factory):
+    """しきい値超過の素材は先頭だけで切り捨てず、**全体**を圧縮してから載せる。
+
+    旧 `test_source_text_is_truncated_at_twenty_thousand_chars` の置き換え。
+    FR-001 の MUST NOT「先頭のみを無言で切り捨ててはならない」により期待する
+    振る舞いが変わる唯一の既存テスト（実装メモ §6）。圧縮の入力には 25,005 文字の
+    **全体**が渡り、解析プロンプトには圧縮結果が載る（生素材は載らない）。
+    """
+    # 位置ごとに異なる文字列にする（同一文字の繰り返しだと「切られた」ことを
     # 部分文字列の有無で判定できない）。
     candidate = _candidate(1, text="".join(f"{i:05d}" for i in range(5000)))
-    _run(fake_model_factory, _STRUCTURED_RESPONSE, candidates=[candidate])
-    prompt = fake_model_factory.prompts_for("analyze_content")[0]
     source = _build_source_text(candidate, None)  # "[本文]\n" + 25000 字
     assert len(source) == 25005
-    assert source[:20000] in prompt
-    # 20000 文字を超える部分（`source[20000:]`）はプロンプトに載らない。
-    assert source[20000:] not in prompt
+
+    with fake_model_factory.install(
+        {"analyze_content": _STRUCTURED_RESPONSE}, compression=_COMPRESSION_RESPONSE
+    ):
+        analyze_content(_node_state(candidate), _config())
+
+    compression_prompt = fake_model_factory.compression_prompts[0]
+    assert source[:20000] in compression_prompt
+    assert source[20000:] in compression_prompt  # 後半も捨てない（FR-001）
+
+    analyze_prompt = fake_model_factory.prompts_for("analyze_content")[0]
+    assert _TAIL_KEYWORD in analyze_prompt  # 圧縮結果の固有語が載る
+    assert source[20000:] not in analyze_prompt  # 生素材は載らない
 
 
 # --- ノードの結線 ---------------------------------------------------------
@@ -385,6 +400,130 @@ def test_progress_reports_zero_when_no_candidates(fake_model_factory):
     assert [m.content for m in out["messages"]][-1] == (
         "[5/7] analyze_content ... 完了（0 件を要約）"
     )
+
+
+# --- 長文素材の圧縮（US1 / FR-001〜008 / SC-001〜004） ---------------------
+
+#: 圧縮の応答（`COMPRESSION_PROMPT` の出力契約: `<summary>` ＋ `<key_excerpts>`）
+_COMPRESSION_RESPONSE = (
+    "<summary>素材全体の要点。後半で「独自用語XYZ」が語られている。</summary>\n"
+    "<key_excerpts>- 独自用語XYZ は後半にのみ現れる</key_excerpts>"
+)
+
+#: 後半にだけ現れる固有語（旧実装の `source_text[:20000]` では落ちていた）
+_TAIL_KEYWORD = "独自用語XYZ"
+
+#: 既定のしきい値（20,000 文字）を超え、固有語が 20,000 文字より後にある素材
+_OVER_THRESHOLD_SOURCE = "埋め草" * 7000 + _TAIL_KEYWORD
+
+
+def _node_state(candidate: Candidate) -> dict[str, Any]:
+    return {"candidates": [candidate], "contexts": [], "platform": "x"}
+
+
+def test_compressed_source_reaches_the_analyze_prompt(fake_model_factory):
+    """しきい値超過の素材は圧縮されてから解析プロンプトに載る（FR-001 / FR-007）。
+
+    素材の**後半**にある固有語がプロンプトに現れること、逆に生素材（20,000 文字を
+    超える塊）がそのまま載っていないことの両方を見る。片方だけでは「圧縮せずに
+    全体を渡した」実装でも緑になる。
+    """
+    candidate = _candidate(1, text=_OVER_THRESHOLD_SOURCE)
+
+    with fake_model_factory.install(
+        {"analyze_content": _STRUCTURED_RESPONSE},
+        compression=_COMPRESSION_RESPONSE,
+    ):
+        out = analyze_content(_node_state(candidate), _config())
+
+    compression_prompts = fake_model_factory.compression_prompts
+    assert len(compression_prompts) == 1  # 素材 1 件につき 1 回（FR-001）
+    assert _TAIL_KEYWORD in compression_prompts[0]  # 素材全体を渡している（FR-001）
+
+    analyze_prompt = fake_model_factory.prompts_for("analyze_content")[0]
+    assert _TAIL_KEYWORD in analyze_prompt
+    assert _OVER_THRESHOLD_SOURCE not in analyze_prompt  # 生素材は載らない
+
+    records = out["compressed"]
+    assert len(records) == 1
+    assert (records[0].applied, records[0].reason) == (True, "compressed")
+    assert records[0].input_chars == len(_build_source_text(candidate, None))
+    assert records[0].output_chars <= 20000
+
+
+def test_below_threshold_source_is_passed_unchanged(fake_model_factory):
+    """しきい値以下では追加の呼び出しをせず、素材をそのまま渡す（FR-008 / SC-003）。"""
+    candidate = _candidate(1, text="短い本文")
+
+    with fake_model_factory.install({"analyze_content": _STRUCTURED_RESPONSE}):
+        out = analyze_content(_node_state(candidate), _config())
+
+    assert fake_model_factory.compression_prompts == []
+    assert "短い本文" in fake_model_factory.prompts_for("analyze_content")[0]
+    assert out["compressed"] == []
+
+
+def test_the_threshold_comes_from_the_configuration(fake_model_factory):
+    """しきい値は実行時設定から取る（FR-005。コードに固定値を持たない）。"""
+    candidate = _candidate(1, text="あ" * 1200)  # 本文の長さは 1205 文字（接頭辞込み）
+
+    with fake_model_factory.install(
+        {"analyze_content": _STRUCTURED_RESPONSE}, compression=_COMPRESSION_RESPONSE
+    ):
+        triggered = analyze_content(_node_state(candidate), _config(compression_threshold=1000))
+        not_triggered = analyze_content(
+            _node_state(candidate), _config(compression_threshold=1205)
+        )
+
+    assert len(fake_model_factory.compression_prompts) == 1
+    assert triggered["compressed"] and not_triggered["compressed"] == []
+
+
+def test_compression_failure_keeps_the_analysis_running(fake_model_factory):
+    """圧縮がタイムアウトしても解析は続き、理由が記録される（FR-003 / FR-004）。"""
+    candidate = _candidate(1, text=_OVER_THRESHOLD_SOURCE)
+
+    with fake_model_factory.install(
+        {"analyze_content": _STRUCTURED_RESPONSE}, compression_error=TimeoutError()
+    ):
+        out = analyze_content(_node_state(candidate), _config())
+
+    assert len(out["analyses"]) == 1
+    records = out["compressed"]
+    assert [(r.applied, r.reason) for r in records] == [(False, "timeout")]
+    # 縮退は生素材を（先頭から）しきい値で切ったもの。素材全体は載らない。
+    prompt = fake_model_factory.prompts_for("analyze_content")[0]
+    assert "埋め草" in prompt
+    assert _TAIL_KEYWORD not in prompt
+    assert len(prompt) < len(_OVER_THRESHOLD_SOURCE)
+
+
+def test_progress_note_reports_how_many_were_compressed(
+    fake_model_factory, capsys: pytest.CaptureFixture[str]
+):
+    """圧縮した件数は追加の観測として stderr に 1 行で出す（FR-029 / D-3）。"""
+    candidates = [_candidate(1, text=_OVER_THRESHOLD_SOURCE), _candidate(2, text="短い本文")]
+
+    with fake_model_factory.install(
+        {"analyze_content": _STRUCTURED_RESPONSE}, compression=_COMPRESSION_RESPONSE
+    ):
+        analyze_content(
+            {"candidates": candidates, "contexts": [], "platform": "x"}, _config()
+        )
+
+    err = capsys.readouterr().err
+    assert "[補足]" in err
+    assert "1 件" in err
+
+
+def test_no_note_when_nothing_was_compressed(
+    fake_model_factory, capsys: pytest.CaptureFixture[str]
+):
+    """圧縮が 0 件なら追加行を出さない（既定入力の stderr を変えない。FR-035）。"""
+    with fake_model_factory.install({"analyze_content": _STRUCTURED_RESPONSE}):
+        analyze_content(_node_state(_candidate(1, text="短い本文")), _config())
+
+    assert "[補足]" not in capsys.readouterr().err
 
 
 class _TrackingLLM:

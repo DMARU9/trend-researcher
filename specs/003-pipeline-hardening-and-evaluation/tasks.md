@@ -151,17 +151,17 @@ US5（注入と拒否の挙動）と US8（宣言の検証と Studio）で**使�
 
 ### Tests for User Story 1（憲法 原則 I により必須）⚠️
 
-- [ ] T020 [P] [US1] 圧縮のテストを作成する: しきい値超過で**素材 1 件につき 1 回**呼ぶ / しきい値以下で**0 回** / 出力がしきい値以下に切り詰められる / 例外・タイムアウト・空応答で取代に切り替わり理由が `reason` に入る / `CompressedSource` の内容。`tests/unit/test_compression.py`（新規）
-- [ ] T021 [P] [US1] 解析への取り込みのテストを作成する: 圧縮後の素材が `provider.analyze_content_prompt` に渡る（**後半のキーワードがプロンプトに含まれる**）/ しきい値以下では素材がそのまま渡る / 圧縮の発生が `note()`（stderr）に出る。`tests/unit/test_analyze_content.py`（拡張）
-- [ ] T022 [P] [US1] 圧縮失敗時の完走テストを作成する: 圧縮が例外・タイムアウトでも解析が続き、**終了コード 0** でレポートが出る。`tests/integration/test_full_flow.py`（拡張。既存のシナリオの期待値は書き換えない）
+- [X] T020 [P] [US1] 圧縮のテストを作成する: しきい値超過で**素材 1 件につき 1 回**呼ぶ / しきい値以下で**0 回** / 出力がしきい値以下に切り詰められる / 例外・タイムアウト・空応答で取代に切り替わり理由が `reason` に入る / `CompressedSource` の内容。`tests/unit/test_compression.py`（新規）
+- [X] T021 [P] [US1] 解析への取り込みのテストを作成する: 圧縮後の素材が `provider.analyze_content_prompt` に渡る（**後半のキーワードがプロンプトに含まれる**）/ しきい値以下では素材がそのまま渡る / 圧縮の発生が `note()`（stderr）に出る。`tests/unit/test_analyze_content.py`（拡張）
+- [X] T022 [P] [US1] 圧縮失敗時の完走テストを作成する: 圧縮が例外・タイムアウトでも解析が続き、**終了コード 0** でレポートが出る。`tests/integration/test_full_flow.py`（拡張。既存のシナリオの期待値は書き換えない）
 
 ### Implementation for User Story 1
 
-- [ ] T023 [P] [US1] `src/trend_researcher/prompts.py` に `COMPRESSION_PROMPT` を追加する: 素材全体を入力に取り、`<summary>…</summary>` と `<key_excerpts>…</key_excerpts>` の 2 部を返す。**元の指示文をプロンプトに含める**（文脈を失わない。research §R-5）。停止条件と出力形式の節を持つ（FR-055 / FR-057）
-- [ ] T024 [P] [US1] `src/trend_researcher/tools/compression.py` を新規作成する: `compress_text(text, *, model, max_chars, timeout)`。`asyncio.wait_for(model.ainvoke(...), timeout=...)` で 1 回だけ呼び、`<summary>` / `<key_excerpts>` を抽出して連結し `max_chars` で切り詰める（FR-007）。失敗時は生素材を `max_chars` で切って返す。T008 の実測により、タグ抽出が必要ならこのモジュール内に専用実装を置く（`tools/parse.py` を一般化しない）
-- [ ] T025 [US1] `src/trend_researcher/nodes/analyze_content.py` の `source_text[:20000]`（実測: 69 行目付近）を**削除**し、`tools/compression.py` の圧縮経路に置き換える。しきい値とタイムアウトは `Configuration`（`from_runnable_config`）から取り、コードに固定値を書かない（FR-005 / FR-032。後続段が生データを参照しないので、圧縮はここで完結させる）
-- [ ] T026 [US1] `src/trend_researcher/nodes/analyze_content.py` で圧縮の結果を `state["compressed"]` に記録し、`ProgressEmitter.note()` に「圧縮した件数」を 1 行出す（`emit()` の文言は**変更しない**。FR-017 / FR-029 / D-3）。旧経路の互換分岐を残さない（原則 VI）
-- [ ] T027 [US1] 変異探針を実行する: (a) 圧縮の分岐を `pass` にする（`return text[:max_chars]` のみ）→ T020 が落ちる、(b) 切り詰めを削る → T020 の FR-007 のケースが落ちる、(c) 発動条件を `>=` に変える → T021 のしきい値ちょうどのケースが落ちる。それぞれ復元後にフルスイートを再実行する
+- [X] T023 [P] [US1] `src/trend_researcher/prompts.py` に `COMPRESSION_PROMPT` を追加する: 素材全体を入力に取り、`<summary>…</summary>` と `<key_excerpts>…</key_excerpts>` の 2 部を返す。**元の指示文をプロンプトに含める**（文脈を失わない。research §R-5）。停止条件と出力形式の節を持つ（FR-055 / FR-057）
+- [X] T024 [P] [US1] `src/trend_researcher/tools/compression.py` を新規作成する: `compress_text(text, *, model, max_chars, timeout)`。`asyncio.wait_for(model.ainvoke(...), timeout=...)` で 1 回だけ呼び、`<summary>` / `<key_excerpts>` を抽出して連結し `max_chars` で切り詰める（FR-007）。失敗時は生素材を `max_chars` で切って返す。T008 の実測により、タグ抽出が必要ならこのモジュール内に専用実装を置く（`tools/parse.py` を一般化しない）
+- [X] T025 [US1] `src/trend_researcher/nodes/analyze_content.py` の `source_text[:20000]`（実測: 69 行目付近）を**削除**し、`tools/compression.py` の圧縮経路に置き換える。しきい値とタイムアウトは `Configuration`（`from_runnable_config`）から取り、コードに固定値を書かない（FR-005 / FR-032。後続段が生データを参照しないので、圧縮はここで完結させる）
+- [X] T026 [US1] `src/trend_researcher/nodes/analyze_content.py` で圧縮の結果を `state["compressed"]` に記録し、`ProgressEmitter.note()` に「圧縮した件数」を 1 行出す（`emit()` の文言は**変更しない**。FR-017 / FR-029 / D-3）。旧経路の互換分岐を残さない（原則 VI）
+- [X] T027 [US1] 変異探針を実行する: (a) 圧縮の分岐を `pass` にする（`return text[:max_chars]` のみ）→ T020 が落ちる、(b) 切り詰めを削る → T020 の FR-007 のケースが落ちる、(c) 発動条件を `>=` に変える → T021 のしきい値ちょうどのケースが落ちる。それぞれ復元後にフルスイートを再実行する
 
 **Checkpoint**: US1 が単体で機能し、既定の入力（短い素材）では呼び出し回数も出力も不変。
 
@@ -476,6 +476,24 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 どちらにも該当しない。`tools/compression.py` / `tools/degradation.py` 相当の新規モジュールは
 未作成のため、T024 / US3 / US5 の各チェックポイントで同じ走査を再実行する。
 
+**実装中に回した探針（US1 / T027。各 1 回で復元）**
+
+対象: `src/trend_researcher/tools/compression.py`（探針前 `sha256 = 81377b03…`）
+
+| 変異 | 落ちたテスト | 復元確認 |
+|---|---|---|
+| 成功経路を `compressed = text[:max_chars]` に（圧縮せず先頭だけ返す） | `test_one_call_per_source_over_the_threshold` / `test_summary_and_excerpts_are_joined` / `test_truncation_keeps_the_excerpts_that_fit` / `test_a_response_without_tags_is_used_as_the_summary` / `test_over_threshold_source_is_compressed_not_silently_truncated` / `test_compressed_source_reaches_the_analyze_prompt`（**6 failed**） | sha256 一致 |
+| 成功応答の切り詰めを削る（`_to_compressed_text(response)[:max_chars]` → `[:max_chars]` なし） | `test_output_is_truncated_to_the_limit` / `test_truncation_keeps_the_excerpts_that_fit`（2 failed） | sha256 一致 |
+| 発動条件を `len(text) <= max_chars` → `< max_chars`（しきい値ちょうども対象に） | `test_exactly_at_the_threshold_makes_no_call` / `test_the_threshold_comes_from_the_configuration`（2 failed） | sha256 一致 |
+
+復元後: フルスイート **683 passed / 97.46% / 50.52 秒** で green に戻ることを確認済み。
+
+**T024 の申し送り（T018(d) の続き）**: `FakeModelFactory.install()` の patch 対象に
+`trend_researcher.tools.compression.build_model` を追加し、`tests/unit/test_fixtures.py` に
+4 テスト（差し替え・プロンプト記録の分離・失敗注入・**未指定時に即座に落ちる**）を追加した。
+`compression` を指定していないテストで圧縮が呼ばれた場合は `AssertionError` になるため、
+「黙って skip するフィクスチャ」にはなっていない。
+
 ### 4. 最終ゲート（T095）
 
 - `uv run pytest -q`: （記入）
@@ -493,7 +511,9 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 | `settings-contract.md` §2「`sort_by` は `relevance` / `recency` の 2 択」 | 実測は `relevance` / `likes`（`__main__.py` の検証と `providers/base.py` の `selection_note` が 2 値） | 記録のみ。既存 7 項目の宣言（`Literal` 化）は凍結契約のため T016 では触らない（US8 / T085 の範囲） |
 | `settings-contract.md` §2「`max_results` は 1 以上（0 を弾く）」 | T016 時点では既存 7 項目に `ge` を足していないため 0 を通す（`tests/unit/test_configuration.py` の `test_falsy_values_are_treated_as_specified[max_results-0]` が green） | §6 の「申し送り」のとおり US8（T085）で宣言を足すときに再判定 |
 | T016 の記述 `ConfigurationError(field, value, expected, message)` | 実装は `ConfigurationError(field, value, expected)` の 3 引数で `message` を**組み立てる**（属性としては `message` を持つ） | 契約 §3 の stderr 書式を属性から必ず再現するため、4 つ目を渡させない設計にした（記録のみ） |
-| T013 / T018(d)「`FakeModelFactory` が `trend_researcher.tools.compression.build_model` も差し替える」 | **`src/trend_researcher/tools/compression.py` は未作成**（T024 で追加される）。この時点で patch 対象に足すと `ModuleNotFoundError` になり、`fake_model_factory` を使う全テストが落ちる | 記録のみ。T018 では (a)(b)(c)(e)(f) を実装し、**(d) はモジュールを作る T024 で追加する**（下の「申し送り」参照） |
+| T013 / T018(d)「`FakeModelFactory` が `trend_researcher.tools.compression.build_model` も差し替える」 | T024 で `tools/compression.py` を作成し、patch 対象に追加した（US1 の §3 の「T024 の申し送り」参照） | 完了 |
+| `spec.md` / `tasks.md` の「**取代**（生素材）」 | 「**縮退**」の意（表記ゆれ） | 実装・テスト・コメントは「縮退」に統一。spec / tasks は変更しない（記録のみ） |
+| `compression_threshold` の値域（spec は明示なし） | T016 の宣言は `ge=1000` / `le=200000`（実測） | テストは 1,000 以上の値（1,000 / 1,205）で境界を作る。50 文字のような小さい値は `ConfigurationError` になり境界テストに使えない |
 
 ### 6. 更新または削除したテスト（FR-035 / SC-008）
 
@@ -507,6 +527,12 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 | `test_from_runnable_config_with_empty_config` / `test_from_runnable_config_with_none` | 変更なし（`DEFAULTS` を参照しているため自動追随） | 同上 |
 | `test_load_resolves_only_the_three_settings` → `test_load_resolves_the_three_settings_and_the_added_eleven` | 改名・拡張（env 経由の追加 5 項目と「読まない 3 項目」を同時に固定） | T016 で `load()` の解決対象が 3 → 14 項目になったため。SET-005 の趣旨（宣言と env 解決の対象を一致させる）は維持 |
 | `isolated_settings_env`（fixture） | `delenv` する env 名に追加 11 項目を追加 | 実 `.env` の値でテストが非決定的になるのを防ぐ |
+
+**更新（US1 / T025。期待値ではなく「振る舞いの契約」が変わった唯一の既存テスト）**
+
+| テスト | 変更 | 理由 |
+|---|---|---|
+| `test_source_text_is_truncated_at_twenty_thousand_chars` → `test_over_threshold_source_is_compressed_not_silently_truncated` | 改名・書き換え（「素材**全体**が圧縮の入力に渡る」「解析プロンプトには圧縮結果が載る」を固定する形に） | 旧テストは `source_text[:20000]` という**無言の切り捨て**を固定していたが、FR-001 の MUST NOT（先頭のみを無言で切り捨ててはならない）がこの振る舞いを禁じるため、期待値を維持できない（spec Assumptions の「観測可能な振る舞いを固定する既存テストは変更しない」の**唯一の例外**）。**削除せず置き換え**、新しい契約を固定し直した |
 
 **新規（値域・宣言の走査）**: `test_every_declared_field_has_a_description` /
 `test_added_fields_declare_defaults_and_ui_type` / `test_added_numeric_fields_declare_their_range` /
@@ -529,6 +555,8 @@ T016 の指示は「追加 11 項目の宣言」であるため既存 7 項目�
 追加し、併せて `tests/unit/test_fixtures.py` に「`compression.build_model` が差し替わっている」
 テストを足す（モジュールが存在しないうちに条件分岐で黙って skip する形にしない。
 静かに無効化されたフィクスチャは憲法 原則 I の「無効なテスト」と同じ欠陥クラス）。
+
+→ **完了（T024）**。実測は §3 の「T024 の申し送り」を参照。
 
 ### 7. 参照実装の欠陥を移植していないことの確認（FR-063 / FR-064）
 

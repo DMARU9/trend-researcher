@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from trend_researcher import nodes, providers
 from trend_researcher.configuration import Configuration
 from trend_researcher.models import Candidate, ResearchInstruction
-from trend_researcher.tools import x_search, youtube_search
+from trend_researcher.tools import compression, x_search, youtube_search
 from trend_researcher.tools.transcript import Transcript, fetch_transcript
 
 #: ノード名 → モジュール。`build_model` の差し替え状況を参照するために使う。
@@ -292,3 +292,57 @@ def test_sleep_spy_is_installed_without_requesting_the_fixture():
     """
     assert hasattr(asyncio.sleep, "sleeps")
     assert hasattr(asyncio.sleep, "total")
+
+
+# --- 圧縮の役割のフェイク（US1 / T018(d)） ----------------------------------
+
+
+def test_fake_model_factory_replaces_the_compression_build_model(fake_model_factory):
+    """`tools/compression.py` の `build_model` も差し替える（T018(d)）。"""
+    real = compression.build_model
+
+    with fake_model_factory.install(
+        {"analyze_content": "分析の応答"}, compression="<summary>圧縮の応答</summary>"
+    ):
+        assert compression.build_model is not real
+        model = compression.build_model("compression", "XTR")
+
+        assert model.invoke("圧縮プロンプト").content == "<summary>圧縮の応答</summary>"
+        assert fake_model_factory.compression_calls == [("compression", "XTR")]
+
+    assert compression.build_model is real  # 実行後は元に戻る
+
+
+def test_fake_model_factory_records_compression_prompts_separately(fake_model_factory):
+    """圧縮のプロンプトは分析の記録に混ぜない（混ざると分析側の断言が誤って緑になる）。"""
+    with fake_model_factory.install(
+        {"analyze_content": "分析の応答"}, compression="<summary>圧縮の応答</summary>"
+    ):
+        compression.build_model("compression", "XTR").invoke("圧縮プロンプト")
+
+        assert fake_model_factory.compression_prompts == ["圧縮プロンプト"]
+        assert fake_model_factory.prompts_for("analyze_content") == []
+
+
+def test_fake_model_factory_can_fail_the_compression_call(fake_model_factory):
+    """`compression_error` を渡すと圧縮の呼び出しだけが失敗する（FR-003 の入力）。"""
+    with fake_model_factory.install(
+        {"analyze_content": "分析の応答"}, compression_error=TimeoutError()
+    ):
+        model = compression.build_model("compression", "XTR")
+
+        with pytest.raises(TimeoutError):
+            model.invoke("圧縮プロンプト")
+
+
+def test_fake_model_factory_rejects_an_unexpected_compression_call(fake_model_factory):
+    """`compression` を指定していないのに圧縮が呼ばれたら即座に落とす。
+
+    黙って分析用の応答を返すと、想定外の圧縮呼び出し（呼び出し回数の増加）が
+    検出できない。
+    """
+    with (
+        fake_model_factory.install({"analyze_content": "分析の応答"}),
+        pytest.raises(AssertionError, match="compression"),
+    ):
+        compression.build_model("compression", "XTR")

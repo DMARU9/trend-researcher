@@ -603,3 +603,46 @@ def test_cli_passes_explicit_max_results_even_when_it_is_the_default(
     )
 
     assert captured["state"]["max_results"] == 5
+
+
+# --- 長文素材の圧縮（US1 / FR-003 / FR-004 / SC-004） ------------------------
+
+
+#: しきい値（20,000 文字）を超え、後半にだけ固有語を持つ本文
+_LONG_BODY = "埋め草" * 12000 + "後半の独自用語XYZ"
+
+
+def _long_text_responder(query: str, max_results: int = 5, **kwargs: Any) -> list[Candidate]:
+    """1 件だけしきい値超過の本文を返す（圧縮の発動条件を作る）。"""
+    pool = _candidates("x", max_results)
+    pool[0] = pool[0].model_copy(update={"text": _LONG_BODY})
+    return pool
+
+
+def test_compression_timeout_still_exits_zero_with_a_report(
+    fake_model_factory,
+    x_flow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """圧縮がタイムアウトしても解析は続き、終了コード 0 でレポートが出る（FR-003 / FR-004）。
+
+    長文素材の圧縮は「解析の前段で完結させる」設計なので、縮退しても
+    パイプラインの出口（レポートと終了コード）は変わらない。
+    """
+    search, _threads = x_flow
+    search.responds(_long_text_responder)
+    monkeypatch.setenv("TR_COMPRESSION_THRESHOLD", "20000")
+    output = tmp_path / "report.md"
+
+    with fake_model_factory.install(_X_RESPONSES, compression_error=TimeoutError()):
+        code = main_module.main(
+            ["オタクの困りごとを調査したい", "--platform", "x", "--output", str(output)]
+        )
+
+    assert code == 0
+    assert "要約です" in output.read_text(encoding="utf-8")
+    # 縮退した事実は追加の観測として stderr に 1 行だけ出る（FR-029）
+    err = capsys.readouterr().err
+    assert "[補足] 長文素材 1 件を圧縮（成功 0/1" in err

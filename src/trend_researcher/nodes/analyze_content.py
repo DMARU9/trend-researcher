@@ -8,11 +8,18 @@ import re
 from langchain_core.runnables import RunnableConfig
 
 from trend_researcher.configuration import Configuration
-from trend_researcher.models import AnalysisFinding, BlogAngle, Candidate, Context
+from trend_researcher.models import (
+    AnalysisFinding,
+    BlogAngle,
+    Candidate,
+    CompressedSource,
+    Context,
+)
 from trend_researcher.progress import NODE_ANALYZE_CONTENT, make_emitter
 from trend_researcher.providers import get_provider
 from trend_researcher.providers.base import Provider
 from trend_researcher.state import AgentState
+from trend_researcher.tools import compression
 from trend_researcher.tools.llm import build_model
 from trend_researcher.tools.parse import extract_list_items, extract_section
 
@@ -57,12 +64,31 @@ def _build_source_text(candidate: Candidate, context: Context | None) -> str:
 
 
 async def _analyze_one(
-    candidate: Candidate, source_text: str, provider: Provider
-) -> AnalysisFinding:
+    candidate: Candidate,
+    source_text: str,
+    provider: Provider,
+    *,
+    max_chars: int,
+    timeout: float,
+    instruction: str,
+) -> tuple[AnalysisFinding, CompressedSource | None]:
+    """1 件を解析する。返り値は `(解析結果, 圧縮の記録（無ければ None）)`。
+
+    圧縮はここで完結させる。後続段（`extract_common` / `compile_report`）は生の素材を
+    参照しないため、圧縮した本文を解析に渡して解析結果を残せば足りる（FR-026）。
+    """
     model = build_model("research", provider.env_prefix)
+    material, compressed = await compression.compress_source(
+        source_text,
+        env_prefix=provider.env_prefix,
+        max_chars=max_chars,
+        timeout=timeout,
+        instruction=instruction,
+        source_id=candidate.id,
+    )
     prompt = provider.analyze_content_prompt.format(
         title=candidate.author_handle or candidate.title or candidate.url,
-        transcript=source_text[:20000] or "（本文なし・メタデータのみ）",
+        transcript=material or "（本文なし・メタデータのみ）",
     )
     result = await model.ainvoke(prompt)
     text = result.content if hasattr(result, "content") else str(result)
@@ -87,27 +113,59 @@ async def _analyze_one(
         )
 
     key_points = [a.angle for a in angles] if angles else []
-    return AnalysisFinding(
-        id=candidate.id,
-        title=candidate.title,
-        summary=summary,
-        angles=angles,
-        key_points=key_points,
-        evidence=evidence,
+    return (
+        AnalysisFinding(
+            id=candidate.id,
+            title=candidate.title,
+            summary=summary,
+            angles=angles,
+            key_points=key_points,
+            evidence=evidence,
+        ),
+        compressed,
     )
 
 
 async def _analyze_all(
-    candidates: list[Candidate], contexts_by_id: dict[str, Context], provider: Provider
-) -> list[AnalysisFinding]:
+    candidates: list[Candidate],
+    contexts_by_id: dict[str, Context],
+    provider: Provider,
+    *,
+    max_chars: int,
+    timeout: float,
+    instruction: str,
+) -> tuple[list[AnalysisFinding], list[CompressedSource]]:
+    """全件を並列上限 2 で解析し、`(解析結果, 圧縮の記録)` を返す。"""
     sem = asyncio.Semaphore(2)
 
-    async def _bounded(cand: Candidate) -> AnalysisFinding:
+    async def _bounded(cand: Candidate) -> tuple[AnalysisFinding, CompressedSource | None]:
         source_text = _build_source_text(cand, contexts_by_id.get(cand.id))
         async with sem:
-            return await _analyze_one(cand, source_text, provider)
+            return await _analyze_one(
+                cand,
+                source_text,
+                provider,
+                max_chars=max_chars,
+                timeout=timeout,
+                instruction=instruction,
+            )
 
-    return await asyncio.gather(*[_bounded(c) for c in candidates])
+    outcomes = await asyncio.gather(*[_bounded(c) for c in candidates])
+    analyses = [finding for finding, _ in outcomes]
+    compressed = [record for _, record in outcomes if record is not None]
+    return analyses, compressed
+
+
+def _compression_note(records: list[CompressedSource]) -> str:
+    """圧縮の件数と縮小率の 1 行（FR-029。既存の進捗文言は変えない）。"""
+    applied = sum(1 for r in records if r.applied)
+    before = sum(r.input_chars for r in records)
+    after = sum(r.output_chars for r in records)
+    reduction = 1 - (after / before) if before else 0.0
+    return (
+        f"長文素材 {len(records)} 件を圧縮（成功 {applied}/{len(records)}、"
+        f"平均 {reduction:.1%} 削減）"
+    )
 
 
 def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
@@ -121,9 +179,27 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
     provider = get_provider(platform)
     candidates = state.get("candidates", [])
     contexts_by_id = {c.id: c for c in state.get("contexts", [])}
-    analyses = asyncio.run(_analyze_all(candidates, contexts_by_id, provider))
+    # 圧縮プロンプトへ載せる元の指示文（R-5）。無い実行（単体テスト）でも動くようにする。
+    instruction = getattr(state.get("instruction"), "raw_text", "") or ""
+    analyses, compressed = asyncio.run(
+        _analyze_all(
+            candidates,
+            contexts_by_id,
+            provider,
+            max_chars=configurable.compression_threshold,
+            timeout=configurable.compression_timeout_seconds,
+            instruction=instruction,
+        )
+    )
 
     emitter.emit(NODE_ANALYZE_CONTENT, "完了", detail=f"{len(analyses)} 件を要約")
+    if compressed:
+        # 追加の観測は `note()` に出す（`emit()` の書式と `messages` は不変。FR-030 / D-3）
+        emitter.note(_compression_note(compressed))
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
-    return {"analyses": analyses, "messages": progress_messages}
+    return {
+        "analyses": analyses,
+        "compressed": compressed,
+        "messages": progress_messages,
+    }
