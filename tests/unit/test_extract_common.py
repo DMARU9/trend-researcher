@@ -248,3 +248,98 @@ def test_progress_messages_report_the_theme_count(fake_model_factory: Any) -> No
 def test_progress_messages_report_zero_themes(fake_model_factory: Any) -> None:
     out = _run(fake_model_factory, "")
     assert "0 件の共通テーマ" in out["messages"][1].content
+
+
+# --- US2: 構造化出力とフォールバック（FR-009 / FR-011 / FR-012） ----------------
+
+#: 構造化出力で受け取る共通テーマ（`CommonThemes.themes`）。
+_STRUCTURED_THEMES: dict[str, Any] = {
+    "themes": [
+        {
+            "theme": "自動化",
+            "description": "どちらも自動化の話",
+            "supporting_ids": ["t1", "t2"],
+            "example_quotes": ["抜粋1"],
+        }
+    ]
+}
+
+
+def _run_structured(
+    fake_model_factory: Any,
+    *,
+    structured: dict[str, Any],
+    response: str = PROMPT_STYLE,
+    config: RunnableConfig | None = None,
+) -> dict[str, Any]:
+    """構造化出力を注入して 1 回実行する（テキスト応答も注入しておく）。"""
+    with fake_model_factory.install(
+        {"extract_common": response}, structured={"extract_common": structured}
+    ):
+        return extract_common(
+            {"analyses": _ANALYSES, "platform": "x"},
+            config if config is not None else _config(),
+        )
+
+
+def test_structured_output_is_used_as_is(fake_model_factory: Any, capsys: Any) -> None:
+    """構造化出力が成功したら、その内容がそのまま状態に入る（見出し解析は走らない）。"""
+    out = _run_structured(fake_model_factory, structured=_STRUCTURED_THEMES)
+
+    themes = out["common_themes"]
+    assert len(themes) == 1
+    assert themes[0].theme == "自動化"
+    assert themes[0].supporting_ids == ["t1", "t2"]
+    assert "[補足]" not in capsys.readouterr().err
+    # 正常系ではテキスト呼び出しを行わない
+    assert fake_model_factory.prompts_for("extract_common") == []
+    assert len(fake_model_factory.structured_prompts_for("extract_common")) == 1
+
+
+def test_structured_empty_themes_are_kept(fake_model_factory: Any) -> None:
+    """共通点なし（空リスト）も正常な結果として扱う（フォールバックしない）。"""
+    out = _run_structured(fake_model_factory, structured={"themes": []})
+
+    assert out["common_themes"] == []
+    assert "0 件の共通テーマ" in out["messages"][1].content
+
+
+def test_structured_failure_falls_back_to_the_heading_parser(
+    fake_model_factory: Any, capsys: Any
+) -> None:
+    """規定回数失敗したら見出し解析へ切り替え、補足行に残す（FR-011 / FR-012）。"""
+    out = _run(fake_model_factory, PROMPT_STYLE)
+
+    err = capsys.readouterr().err
+    assert (
+        "[補足] 構造化出力を取得できなかったため見出し解析へ切り替えました"
+        "（OutputParserException）" in err
+    )
+    themes = out["common_themes"]
+    assert [t.theme for t in themes] == ["自動化"]
+    # 決定的解析は「説明」の中身を丸ごと本文として扱う（既存の挙動を変えない）
+    assert "どちらも自動化の話をしている" in themes[0].description
+    assert themes[0].supporting_ids == ["t1", "t2"]
+    assert "抜粋A" in " ".join(themes[0].example_quotes)
+    # 試行回数 = 1 + retry_max（既定 3）。テキスト呼び出しはフォールバックの 1 回だけ
+    assert len(fake_model_factory.structured_prompts_for("extract_common")) == 3
+    assert len(fake_model_factory.prompts_for("extract_common")) == 1
+
+
+def test_fallback_extracts_quotes_with_the_existing_parsers(fake_model_factory: Any) -> None:
+    """フォールバックは既存の `extract_section` / `extract_list_items` の経路を通る。"""
+    out = _run(fake_model_factory, response=NESTED_STYLE)
+
+    themes = out["common_themes"]
+    assert themes[0].theme == "テーマA"
+    assert themes[0].description == "説明A"
+    assert themes[0].example_quotes == ["抜粋A1", "抜粋A2"]
+
+
+def test_fallback_does_not_add_progress_lines(fake_model_factory: Any) -> None:
+    """フォールバックは進捗行を増やさない（補足は stderr のみ。既定の出力は不変）。"""
+    out = _run(fake_model_factory, PROMPT_STYLE)
+
+    contents = [m.content for m in out["messages"]]
+    assert len(contents) == 2
+    assert not any("補足" in c or "構造化出力" in c for c in contents)

@@ -128,7 +128,7 @@ class _FakeStructuredRunnable:
         self.options = options
 
     def _parse(self, prompt: str) -> Any:
-        self._llm.record(prompt)
+        self._llm.record_structured(prompt)
         if self._llm.structured is None:
             raise OutputParserException(
                 f"{self._llm.node}: 構造化出力が設定されていません"
@@ -153,6 +153,7 @@ class _FakeLLM:
         prompts: list[str] | None = None,
         structured: Any | None = None,
         raise_error: BaseException | None = None,
+        structured_prompts: list[str] | None = None,
     ) -> None:
         self.node = node
         self.content = content
@@ -162,10 +163,23 @@ class _FakeLLM:
         self.raise_error = raise_error
         # 同一ノードの複数インスタンスで共有できるよう、外部からリストを注入できる
         self.prompts: list[str] = prompts if prompts is not None else []
+        #: 構造化出力（`with_structured_output`）のプロンプト記録。
+        #: **テキスト呼び出しの記録とは分ける**。US2 で構造化呼び出しが既定の
+        #: 経路に入ると、同じリストへ積む実装では凍結した「ノードごとの
+        #: テキスト呼び出し回数」（`test_frozen_contracts.py`）が壊れる。
+        self.structured_prompts: list[str] = (
+            structured_prompts if structured_prompts is not None else []
+        )
+        #: 構造化出力のオプション（`method=` などの引き渡し値）の記録。
+        self.structured_options: list[dict[str, Any]] = []
 
     def record(self, prompt: str) -> None:
-        """プロンプトを記録する（通常／構造化の両経路の唯一の入口）。"""
+        """テキスト呼び出しのプロンプトを記録する。"""
         self.prompts.append(prompt)
+
+    def record_structured(self, prompt: str) -> None:
+        """構造化呼び出しのプロンプトを記録する（試行回数を数えられる）。"""
+        self.structured_prompts.append(prompt)
 
     def _next(self, prompt: str) -> _FakeMessage:
         self.record(prompt)
@@ -186,6 +200,7 @@ class _FakeLLM:
 
     def with_structured_output(self, schema: type[BaseModel], **kwargs: Any) -> Any:
         """構造化出力のランを返す（既定では失敗する）。"""
+        self.structured_options.append({"schema": schema, **kwargs})
         return _FakeStructuredRunnable(self, schema, kwargs)
 
 
@@ -204,6 +219,8 @@ class FakeModelFactory:
         #: （例: analyze_content は候補ごとに呼ぶ）でも全件残すため、
         #: インスタンスごとのリストではなくノード単位で共有する。
         self.prompt_log: dict[str, list[str]] = {}
+        #: ノードごとの構造化出力の試行記録（テキスト呼び出しとは別に数える）。
+        self.structured_prompt_log: dict[str, list[str]] = {}
         #: ノードごとの `env_prefix` 記録。各ノードが provider の接頭辞を渡して
         #: いるか（コアが接頭辞を組み立てていないか）を観測できる。
         self.env_prefix_log: dict[str, list[str | None]] = {}
@@ -223,7 +240,13 @@ class FakeModelFactory:
                     f"fake_model_factory: ノード {node} の応答が指定されていません。"
                     "プロンプト本文によるディスパッチは行いません（LAYOUT-004-4）。"
                 )
-            model = _FakeLLM(node, content, self.prompt_log.setdefault(node, []), structured)
+            model = _FakeLLM(
+                node,
+                content,
+                self.prompt_log.setdefault(node, []),
+                structured,
+                structured_prompts=self.structured_prompt_log.setdefault(node, []),
+            )
             self.models[node] = model
             return model
 
@@ -276,6 +299,7 @@ class FakeModelFactory:
 
         self.models = {}
         self.prompt_log = {}
+        self.structured_prompt_log = {}
         self.env_prefix_log = {}
         self.compression_prompts = []
         self.compression_calls = []
@@ -299,9 +323,22 @@ class FakeModelFactory:
             yield self
 
     def prompts_for(self, node: str) -> list[str]:
-        """指定ノードの `build_model` に渡されたプロンプトの一覧（全インスタンス分）。"""
+        """指定ノードの `build_model` に渡されたプロンプトの一覧（全インスタンス分）。
+
+        構造化出力の試行は含まない（`structured_prompts_for` で数える）。
+        """
         instance = self.models.get(node)
         return list(instance.prompts) if instance else []
+
+    def structured_prompts_for(self, node: str) -> list[str]:
+        """指定ノードの構造化出力の試行プロンプトの一覧（試行ごとに 1 件）。"""
+        instance = self.models.get(node)
+        return list(instance.structured_prompts) if instance else []
+
+    def structured_options_for(self, node: str) -> list[dict[str, Any]]:
+        """指定ノードが `with_structured_output` に渡したオプション（`method=` 等）。"""
+        instance = self.models.get(node)
+        return list(instance.structured_options) if instance else []
 
     def env_prefixes_for(self, node: str) -> list[str | None]:
         """指定ノードが `build_model` に渡した `env_prefix` の一覧（呼び出し順）。"""

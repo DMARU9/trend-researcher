@@ -180,17 +180,17 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 ### Tests for User Story 2（憲法 原則 I により必須）⚠️
 
-- [ ] T028 [P] [US2] `tools/llm.py` の呼び出し境界のテストを作成する: 合計試行回数が `1 + retry_max`（既定 3）/ 待機が `retry_wait_seconds` 回だけ呼ばれる / スキーマ違反と一時エラーの両方が再試行対象 / `retry_max = 0` で再試行しない / 構造化出力の `method` が設定値になる / 上限超過は再試行**しない**（US3 の前提を先に固定）。`tests/unit/test_llm.py`（拡張）
-- [ ] T029 [P] [US2] `parse_instruction` のテストを作成する: 構造化出力が成功する経路で `ResearchInstruction` の**中身が既存の決定的解析と一致**する / 全回失敗で `extract_json_block` のフォールバックに落ちる / フォールバックが `note()` と中間データに残る。`tests/unit/test_parse_instruction.py`（拡張。既存の期待値は書き換えない）
-- [ ] T030 [P] [US2] `extract_common` のテストを作成する: 構造化出力の成功経路 / `extract_list_items` / `extract_section` へのフォールバック経路 / 0 件のときの挙動。`tests/unit/test_extract_common.py`（拡張）
+- [X] T028 [P] [US2] `tools/llm.py` の呼び出し境界のテストを作成する: 合計試行回数が `1 + retry_max`（既定 3）/ 待機が `retry_wait_seconds` 回だけ呼ばれる / スキーマ違反と一時エラーの両方が再試行対象 / `retry_max = 0` で再試行しない / 構造化出力の `method` が設定値になる / 上限超過は再試行**しない**（US3 の前提を先に固定）。`tests/unit/test_llm.py`（拡張）
+- [X] T029 [P] [US2] `parse_instruction` のテストを作成する: 構造化出力が成功する経路で `ResearchInstruction` の**中身が既存の決定的解析と一致**する / 全回失敗で `extract_json_block` のフォールバックに落ちる / フォールバックが `note()` と中間データに残る。`tests/unit/test_parse_instruction.py`（拡張。既存の期待値は書き換えない）
+- [X] T030 [P] [US2] `extract_common` のテストを作成する: 構造化出力の成功経路 / `extract_list_items` / `extract_section` へのフォールバック経路 / 0 件のときの挙動。`tests/unit/test_extract_common.py`（拡張）
 
 ### Implementation for User Story 2
 
-- [ ] T031 [US2] `src/trend_researcher/tools/llm.py` に構造化呼び出しの**単一経路**を追加する: `build_model(role, env_prefix).with_structured_output(Model, method=<structured_method>)` ＋ 再試行（`retry_max` / `retry_wait_seconds`。待機は `asyncio.sleep` を通す）＋ 上限超過以外の失敗の再試行。テキスト呼び出しにも同じ再試行を載せる。`ChatOpenAI` を直接構築しない（FR-045）
-- [ ] T032 [US2] `src/trend_researcher/nodes/parse_instruction.py` を構造化出力へ切り替え、全回失敗時に既存の `tools/parse.py` の経路へフォールバックする（正常系とフォールバックの**両方**をテストで固定。FR-012）。決定的事実解析（`_YEAR_RE` 等）は変更しない
-- [ ] T033 [US2] `src/trend_researcher/nodes/extract_common.py` を構造化出力へ切り替え、フォールバックを `extract_list_items` / `extract_section` にする
-- [ ] T034 [US2] `src/trend_researcher/nodes/analyze_content.py` の解析呼び出しを構造化出力へ切り替え、フォールバックを既存の `_parse_angles_table` にする（**既存のパーサを残す**。FR-012）
-- [ ] T035 [US2] 変異探針を実行する: (a) 再試行の待機を削る → T028 の待機回数のテストが落ちる、(b) フォールバックの分岐を削る（例外を送出する）→ T029 / T030 が落ちる、(c) `with_structured_output` を外す → T029 / T030 の成功経路が落ちる。復元後にフルスイートを再実行する
+- [X] T031 [US2] `src/trend_researcher/tools/llm.py` に構造化呼び出しの**単一経路**を追加する: `build_model(role, env_prefix).with_structured_output(Model, method=<structured_method>)` ＋ 再試行（`retry_max` / `retry_wait_seconds`。待機は `asyncio.sleep` を通す）＋ 上限超過以外の失敗の再試行。テキスト呼び出しにも同じ再試行を載せる。`ChatOpenAI` を直接構築しない（FR-045）
+- [X] T032 [US2] `src/trend_researcher/nodes/parse_instruction.py` を構造化出力へ切り替え、全回失敗時に既存の `tools/parse.py` の経路へフォールバックする（正常系とフォールバックの**両方**をテストで固定。FR-012）。決定的事実解析（`_YEAR_RE` 等）は変更しない
+- [X] T033 [US2] `src/trend_researcher/nodes/extract_common.py` を構造化出力へ切り替え、フォールバックを `extract_list_items` / `extract_section` にする
+- [X] T034 [US2] `src/trend_researcher/nodes/analyze_content.py` の解析呼び出しを構造化出力へ切り替え、フォールバックを既存の `_parse_angles_table` にする（**既存のパーサを残す**。FR-012）
+- [X] T035 [US2] 変異探針を実行する: (a) 再試行の待機を削る → T028 の待機回数のテストが落ちる、(b) フォールバックの分岐を削る（例外を送出する）→ T029 / T030 が落ちる、(c) `with_structured_output` を外す → T029 / T030 の成功経路が落ちる。復元後にフルスイートを再実行する
 
 **Checkpoint**: US1 と US2 が独立して機能。既定の入力（フェイクが構造化出力に失敗する）では
 フォールバック経路を通るため、呼び出し回数と出力は不変。
@@ -494,6 +494,20 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 `compression` を指定していないテストで圧縮が呼ばれた場合は `AssertionError` になるため、
 「黙って skip するフィクスチャ」にはなっていない。
 
+**実装中に回した探針（US2 / T035。各 1 回で復元）**
+
+対象: `src/trend_researcher/tools/llm.py`（探針前 `sha256 = 726959fe…`）、
+`nodes/{parse_instruction,extract_common,analyze_content}.py`
+
+| 変異 | 落ちたテスト | 復元確認 |
+|---|---|---|
+| (a) 再試行の待機を削る（`await asyncio.sleep(retry_wait_seconds)` → `pass`） | `test_text_call_is_retried_up_to_one_plus_retry_max` / `test_retry_stops_at_the_first_success` / `test_transient_and_schema_errors_are_retried[validation_error\|rate_limit_error\|connection_error\|TimeoutError]` / `test_structured_schema_violation_is_retried`（7 failed / 13 passed） | sha256 一致 |
+| (b) フォールバックの分岐を削る（3 ノードの `except Exception` を `except ZeroDivisionError` に） | `test_structured_failure_falls_back_and_is_reported` / `test_structured_failure_falls_back_to_the_heading_parser` / `test_structured_failure_uses_the_existing_parser` / `test_structured_output_matches_the_fallback_parse` ほか（94 failed / 71 passed） | sha256 一致（4 ファイル全一致） |
+| (c) `with_structured_output` を外す（`runnable = built`） | `test_topic_comes_from_structured_block` / `test_structured_output_matches_the_fallback_parse` / `test_structured_output_is_used_as_is` / `test_structured_empty_themes_are_kept` / `test_structured_method_comes_from_the_configuration` ほか（69 failed / 40 passed） | sha256 一致（`726959fe…`） |
+
+復元後: フルスイート **713 passed / 97.57% / 386.54 秒** で green に戻ることを確認済み
+（`ruff check .` → `All checks passed!` / `mypy src` → `Success: no issues found in 28 source files`）。
+
 ### 4. 最終ゲート（T095）
 
 - `uv run pytest -q`: （記入）
@@ -514,6 +528,10 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 | T013 / T018(d)「`FakeModelFactory` が `trend_researcher.tools.compression.build_model` も差し替える」 | T024 で `tools/compression.py` を作成し、patch 対象に追加した（US1 の §3 の「T024 の申し送り」参照） | 完了 |
 | `spec.md` / `tasks.md` の「**取代**（生素材）」 | 「**縮退**」の意（表記ゆれ） | 実装・テスト・コメントは「縮退」に統一。spec / tasks は変更しない（記録のみ） |
 | `compression_threshold` の値域（spec は明示なし） | T016 の宣言は `ge=1000` / `le=200000`（実測） | テストは 1,000 以上の値（1,000 / 1,205）で境界を作る。50 文字のような小さい値は `ConfigurationError` になり境界テストに使えない |
+| 契約 §3 の再試行対象の列挙（`OutputParserException` / `ValidationError` / `APIConnectionError` / `asyncio.TimeoutError`） | 実装は `RateLimitError` / `APITimeoutError` / `TimeoutError` も再試行する | **意図的な逸脱**。spec の US2 シナリオ 3 が「一時的なエラー」の再試行を要求しており、レート制限はその代表。列挙に無いことを理由に再試行しないと US2 の受け入れ基準を満たせない。契約 §3 の列挙は「下限」として読む（コードの `RETRYABLE_ERRORS` のコメントに根拠を書いた） |
+| T031「`build_model(role, env_prefix).with_structured_output(Model, method=…)`」 | 実装は境界関数に**任意の `model=` 引数**を足し、省略時のみ内部で `build_model` を呼ぶ | ノードが `trend_researcher.nodes.<node>.build_model` を patch する既存の差し替え点を残すため（フィクスチャはノード側の名前を patch する。境界側で無条件に構築するとテストのフェイクが効かない）。既定の入力では `model=None` なので挙動は同じ |
+| T033「`extract_common` を構造化出力へ」 | 構造化出力のルートは**オブジェクト**でなければならないため `models.py` に `CommonThemes`（`themes: list[CommonTheme]`）を追加した | リストをルートにすると `with_structured_output` が使えない（契約 §2）。`CommonTheme` 自体は既存のまま |
+| `with_structured_output` の戻り値 | `Any`（`Runnable[..., Any]`） | 上限を `cast("_ModelT", …)` で取り出す。`schema` に Pydantic モデルを渡している以上、実行時の値はそのインスタンス（`mypy` の `no-any-return` をここだけ明示的に落とす） |
 
 ### 6. 更新または削除したテスト（FR-035 / SC-008）
 
@@ -557,6 +575,14 @@ T016 の指示は「追加 11 項目の宣言」であるため既存 7 項目�
 静かに無効化されたフィクスチャは憲法 原則 I の「無効なテスト」と同じ欠陥クラス）。
 
 → **完了（T024）**。実測は §3 の「T024 の申し送り」を参照。
+
+**更新（US2 / T028・T034。フィクスチャの記録先と補足行の分離）**
+
+| テスト | 変更 | 理由 |
+|---|---|---|
+| `tests/unit/test_fixtures.py::test_fake_model_factory_structured_calls_are_recorded` | 期待を「構造化プロンプトは `structured_prompts_for()` に、テキストは `prompts_for()` に別々に記録される」に書き換え | T028〜T034 で 1 ノードが「構造化 1 回＋フォールバックでテキスト 1 回」を呼ぶようになり、`_FakeStructuredRunnable` が同じログに記録すると**凍結契約**（`tests/integration/test_frozen_contracts.py::test_default_text_call_counts_are_unchanged` / `test_full_flow.py`）の「既定の入力での LLM 呼び出し回数」が構造化の再試行で膨らむ。ログを分け、`prompts_for()` は「テキスト呼び出し」の意味に保った（元のテストの docstring もそう読める） |
+| `tests/unit/test_analyze_content.py::test_progress_note_reports_how_many_were_compressed` / `test_no_note_when_nothing_was_compressed` | 断言を**圧縮の補足行に限定**（`"[補足] 長文素材 1 件を圧縮（成功 1/1" in err` / `"長文素材" not in err`）。docstring に「US2 のフォールバック補足行とは別の契約」と明記 | US2 で既定の入力（フェイクは構造化出力に失敗する）でも `note()` が 1 行出るため、「`note()` が 0 行」を固定する旧断言は維持できない。**消したのは「この既定入力では常に 0 行」という前提だけ**で、圧縮が起きないときに出ない性質は新しい断言で固定し直した |
+| `tests/unit/test_llm.py` の `pytest.raises(BaseException)` | `# noqa: PT011` を削除（コメントは本文へ） | `PT011` は有効でないため `RUF100`（未使用の noqa）になる。抑制は増やさない（ゲート「`# noqa` 0 件」に合わせる） |
 
 ### 7. 参照実装の欠陥を移植していないことの確認（FR-063 / FR-064）
 

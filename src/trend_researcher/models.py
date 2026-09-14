@@ -114,6 +114,16 @@ class CommonTheme(BaseModel):
     example_quotes: list[str] = Field(default_factory=list)
 
 
+class CommonThemes(BaseModel):
+    """`extract_common` の構造化出力（複数の共通テーマを 1 応答で受ける）。
+
+    構造化出力はルートがオブジェクトでなければならない（配列をルートにできない）
+    ため、`themes` を 1 段挟んで受ける。空リストは正常（共通点なし）。
+    """
+
+    themes: list[CommonTheme] = Field(default_factory=list)
+
+
 class ResearchReport(BaseModel):
     """最終アウトプット。"""
 

@@ -13,7 +13,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from trend_researcher.models import OutputFormat
+from trend_researcher.models import OutputFormat, ResearchInstruction
 from trend_researcher.nodes.parse_instruction import (
     _extract_count_from_text,
     _extract_published_after_from_text,
@@ -422,3 +422,117 @@ def test_progress_messages_report_topic_and_count(fake_model_factory: Any) -> No
         "[1/7] parse_instruction ... 開始",
         '[1/7] parse_instruction ... 完了（トピック: "LLM のトピック" / 件数: 20）',
     ]
+
+
+# --- US2: 構造化出力とフォールバック（FR-009 / FR-011 / FR-012） ----------------
+#
+# 正常系（構造化出力が成功）とフォールバック（決定的解析）の**両方**を固定する。
+
+#: 構造化出力で受け取る指示。`raw_text` はスキーマが必須とするため埋めるが、
+#: ノードは状態から組み立てるため使わない（値が混ざらないことを下のテストで見る）。
+_STRUCTURED_INSTRUCTION: dict[str, Any] = {
+    "raw_text": "（LLM が返した指示文。ノードは使わない）",
+    "topic": "LLM のトピック",
+    "max_results": 3,
+    "output": {"format": "json"},
+}
+
+
+def _run_structured(
+    fake_model_factory: Any,
+    raw: str,
+    *,
+    structured: dict[str, Any],
+    response: str = LLM_JSON,
+    config: RunnableConfig | None = None,
+) -> dict[str, Any]:
+    """構造化出力を注入して 1 回実行する（テキスト応答も注入しておく）。"""
+    node_state: dict[str, Any] = {"messages": [HumanMessage(content=raw)], "platform": "x"}
+    with fake_model_factory.install(
+        {"parse_instruction": response}, structured={"parse_instruction": structured}
+    ):
+        return parse_instruction(node_state, config if config is not None else _config())
+
+
+def test_structured_output_matches_the_fallback_parse(
+    fake_model_factory: Any, capsys: Any
+) -> None:
+    """構造化出力が成功しても、同じ値なら既存の解析と同一の `ResearchInstruction`。
+
+    LLM の推定で決まってよいのは `topic` / `max_results` / `output_format` だけ。
+    `raw_text` / `platform` / `published_after` / `sort_by` は状態・Configuration・
+    自然言語から決まる（構造化出力の値で揺れない）。
+    """
+    raw = "AI 動画の動向を調べたい"
+
+    structured_out = _run_structured(
+        fake_model_factory, raw, structured=_STRUCTURED_INSTRUCTION
+    )
+    assert "[補足]" not in capsys.readouterr().err
+
+    fallback_out = _run(fake_model_factory, raw)
+
+    assert structured_out["instruction"] == fallback_out["instruction"]
+    assert structured_out["instruction"].raw_text == raw
+    assert structured_out["instruction"].platform == "x"
+
+
+def test_structured_failure_falls_back_and_is_reported(
+    fake_model_factory: Any, capsys: Any
+) -> None:
+    """規定回数失敗したら JSON ブロック解析へ切り替え、補足行に残す（FR-011 / FR-012）。"""
+    out = _run(fake_model_factory, "AI 動画の動向を調べたい")
+
+    err = capsys.readouterr().err
+    assert (
+        "[補足] 構造化出力を取得できなかったため簡易解析へ切り替えました"
+        "（OutputParserException）" in err
+    )
+    # フォールバックでも LLM の値は使える（既存の優先順位規則はそのまま）
+    assert out["instruction"].topic == "LLM のトピック"
+    # 試行回数 = 1 + retry_max（既定 3）。テキスト呼び出しは 1 回だけ
+    assert len(fake_model_factory.structured_prompts_for("parse_instruction")) == 3
+    assert len(fake_model_factory.prompts_for("parse_instruction")) == 1
+
+
+def test_fallback_does_not_add_progress_lines(fake_model_factory: Any) -> None:
+    """フォールバックは進捗行を増やさない（補足は stderr のみ。既定の出力は不変）。"""
+    out = _run(fake_model_factory, "AI 動画の動向を調べたい")
+
+    contents = [m.content for m in out["messages"]]
+    assert len(contents) == 2
+    assert not any("補足" in c or "構造化出力" in c for c in contents)
+
+
+def test_retry_max_zero_makes_a_single_structured_attempt(fake_model_factory: Any) -> None:
+    """`retry_max = 0` では 1 回で確定し、失敗なら即フォールバックする（FR-010 / FR-024）。"""
+    node_state: dict[str, Any] = {
+        "messages": [HumanMessage(content="AI 動画の動向を調べたい")],
+        "platform": "x",
+    }
+    with fake_model_factory.install({"parse_instruction": LLM_PLAIN}):
+        out = parse_instruction(node_state, _config(retry_max=0))
+
+    assert len(fake_model_factory.structured_prompts_for("parse_instruction")) == 1
+    assert out["instruction"].topic == "AI 動画の動向を調べたい"
+
+
+def test_fallback_with_a_plain_response_uses_the_raw_text(fake_model_factory: Any) -> None:
+    """JSON ブロックが無い応答にフォールバックしたら、トピックは指示本文になる。"""
+    out = _run(fake_model_factory, "AI 動画の動向を調べたい", response=LLM_PLAIN)
+
+    assert out["instruction"].topic == "AI 動画の動向を調べたい"
+
+
+def test_structured_method_comes_from_the_configuration(fake_model_factory: Any) -> None:
+    """`structured_method` の設定値が境界まで届く（既定値と同じでも配線を固定する）。"""
+    _run_structured(
+        fake_model_factory,
+        "AI 動画の動向を調べたい",
+        structured=_STRUCTURED_INSTRUCTION,
+        config=_config(structured_method="function_calling"),
+    )
+
+    options = fake_model_factory.structured_options_for("parse_instruction")
+    assert options and options[0]["method"] == "function_calling"
+    assert options[0]["schema"] is ResearchInstruction

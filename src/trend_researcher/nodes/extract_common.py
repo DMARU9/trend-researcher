@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
 from trend_researcher.configuration import Configuration
-from trend_researcher.models import AnalysisFinding, CommonTheme
+from trend_researcher.models import AnalysisFinding, CommonTheme, CommonThemes
 from trend_researcher.progress import NODE_EXTRACT_COMMON, make_emitter
 from trend_researcher.providers import get_provider
 from trend_researcher.state import AgentState
-from trend_researcher.tools.llm import build_model
+from trend_researcher.tools.llm import build_model, invoke_structured, invoke_text
 from trend_researcher.tools.parse import extract_list_items, extract_section
 
 
@@ -38,15 +39,51 @@ def extract_common(state: AgentState, config: RunnableConfig) -> dict:
     analyses = state.get("analyses", [])
     model = build_model("research", provider.env_prefix)
     prompt = provider.extract_common_prompt.format(analyses=_format_analyses(analyses))
-    result = model.invoke(prompt)
-    text = result.content if hasattr(result, "content") else str(result)
-
-    themes = _parse_themes(text, [a.id for a in analyses])
+    themes, fallback_note = _extract_themes(
+        prompt, model=model, configurable=configurable, ids=[a.id for a in analyses]
+    )
+    if fallback_note:
+        # 進捗行（`messages`）ではなく補足行に出す（D-3 / FR-029）。
+        emitter.note(fallback_note)
 
     emitter.emit(NODE_EXTRACT_COMMON, "完了", detail=f"{len(themes)} 件の共通テーマ")
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
     return {"common_themes": themes, "messages": progress_messages}
+
+
+def _extract_themes(
+    prompt: str, *, model: Any, configurable: Configuration, ids: list[str]
+) -> tuple[list[CommonTheme], str]:
+    """LLM の応答から共通テーマを得る（構造化出力 → 全失敗なら見出し解析）。
+
+    戻り値は `(テーマの一覧, 補足行)`。補足行はフォールバックしたときだけ空でない。
+    規定回数を使い切ったら**例外を送出せず**既存の `tools/parse.py` の経路
+    （`_parse_themes` 経由の `extract_section` / `extract_list_items`）へ切り替える
+    （FR-011 / FR-012）。空のリストは正常（共通点なし）。
+    """
+    try:
+        structured = invoke_structured(
+            CommonThemes,
+            prompt,
+            model=model,
+            retry_max=configurable.retry_max,
+            retry_wait_seconds=configurable.retry_wait_seconds,
+            method=configurable.structured_method,
+        )
+    except Exception as exc:  # noqa: BLE001 - 応答の失敗はすべてフォールバックで継続する（FR-011）
+        text = invoke_text(
+            prompt,
+            model=model,
+            retry_max=configurable.retry_max,
+            retry_wait_seconds=configurable.retry_wait_seconds,
+        )
+        content = text.content if hasattr(text, "content") else str(text)
+        return _parse_themes(content, ids), (
+            "構造化出力を取得できなかったため見出し解析へ切り替えました"
+            f"（{type(exc).__name__}）"
+        )
+    return list(structured.themes), ""
 
 
 def _split_sections(text: str) -> list[list[str]]:

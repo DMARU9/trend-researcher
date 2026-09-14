@@ -243,16 +243,19 @@ def test_fake_model_factory_structured_output_requires_the_configured_schema(
 
 
 def test_fake_model_factory_structured_calls_are_recorded(fake_model_factory):
-    """構造化出力のプロンプトも同じ記録に残る（呼び出し回数を数えられる）。"""
+    """構造化出力の試行は**専用の記録**に残る（テキスト呼び出しと混ざらない）。
+
+    US2 で構造化呼び出しが既定の経路に入ると、同じリストへ積む実装では凍結した
+    「ノードごとのテキスト呼び出し回数」（`tests/integration/test_frozen_contracts.py`）
+    が壊れる。試行回数は `structured_prompts_for` で数える。
+    """
     with fake_model_factory.install({"plan_search": "q1"}, structured={"plan_search": INSTRUCTION}):
         model = nodes.plan_search.build_model("research")
         model.with_structured_output(ResearchInstruction).invoke("構造化プロンプト")
         model.invoke("通常プロンプト")
 
-        assert fake_model_factory.prompts_for("plan_search") == [
-            "構造化プロンプト",
-            "通常プロンプト",
-        ]
+        assert fake_model_factory.structured_prompts_for("plan_search") == ["構造化プロンプト"]
+        assert fake_model_factory.prompts_for("plan_search") == ["通常プロンプト"]
 
 
 def test_fake_model_factory_rejects_unknown_structured_node(fake_model_factory):

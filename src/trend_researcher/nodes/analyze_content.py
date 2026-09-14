@@ -20,7 +20,7 @@ from trend_researcher.providers import get_provider
 from trend_researcher.providers.base import Provider
 from trend_researcher.state import AgentState
 from trend_researcher.tools import compression
-from trend_researcher.tools.llm import build_model
+from trend_researcher.tools.llm import ainvoke_structured, ainvoke_text, build_model
 from trend_researcher.tools.parse import extract_list_items, extract_section
 
 
@@ -63,6 +63,33 @@ def _build_source_text(candidate: Candidate, context: Context | None) -> str:
     return "\n\n".join(parts)
 
 
+async def _structured_finding(
+    prompt: str,
+    *,
+    model: object,
+    retry_max: int,
+    retry_wait_seconds: float,
+    method: str,
+) -> AnalysisFinding | None:
+    """構造化出力で 1 件を解析する（規定回数を使い切ったら `None`）。
+
+    例外は送出しない。`None` を返して呼び出し側を既存の決定的解析へ切り替える
+    （FR-011 / FR-012）。`AnalysisFinding` の `id` / `title` は素材（候補）が正
+    なので、ここでは上書きしない（呼び出し側で揃える）。
+    """
+    try:
+        return await ainvoke_structured(
+            AnalysisFinding,
+            prompt,
+            model=model,
+            retry_max=retry_max,
+            retry_wait_seconds=retry_wait_seconds,
+            method=method,
+        )
+    except Exception:  # noqa: BLE001 - 失敗は決定的解析で継続する（FR-011）
+        return None
+
+
 async def _analyze_one(
     candidate: Candidate,
     source_text: str,
@@ -71,8 +98,11 @@ async def _analyze_one(
     max_chars: int,
     timeout: float,
     instruction: str,
-) -> tuple[AnalysisFinding, CompressedSource | None]:
-    """1 件を解析する。返り値は `(解析結果, 圧縮の記録（無ければ None）)`。
+    retry_max: int,
+    retry_wait_seconds: float,
+    method: str,
+) -> tuple[AnalysisFinding, CompressedSource | None, bool]:
+    """1 件を解析する。返り値は `(解析結果, 圧縮の記録（無ければ None）, フォールバックしたか)`。
 
     圧縮はここで完結させる。後続段（`extract_common` / `compile_report`）は生の素材を
     参照しないため、圧縮した本文を解析に渡して解析結果を残せば足りる（FR-026）。
@@ -90,7 +120,28 @@ async def _analyze_one(
         title=candidate.author_handle or candidate.title or candidate.url,
         transcript=material or "（本文なし・メタデータのみ）",
     )
-    result = await model.ainvoke(prompt)
+    structured = await _structured_finding(
+        prompt,
+        model=model,
+        retry_max=retry_max,
+        retry_wait_seconds=retry_wait_seconds,
+        method=method,
+    )
+    if structured is not None:
+        # LLM には素材の識別子を渡していないため、`id` / `title` は候補から入れる
+        # （入れないとレポートの紐づけが壊れる）。他の項目はモデルの値をそのまま使う。
+        return (
+            structured.model_copy(update={"id": candidate.id, "title": candidate.title}),
+            compressed,
+            False,
+        )
+
+    result = await ainvoke_text(
+        prompt,
+        model=model,
+        retry_max=retry_max,
+        retry_wait_seconds=retry_wait_seconds,
+    )
     text = result.content if hasattr(result, "content") else str(result)
 
     summary = extract_section(text, "概要")
@@ -123,6 +174,7 @@ async def _analyze_one(
             evidence=evidence,
         ),
         compressed,
+        True,
     )
 
 
@@ -134,11 +186,14 @@ async def _analyze_all(
     max_chars: int,
     timeout: float,
     instruction: str,
-) -> tuple[list[AnalysisFinding], list[CompressedSource]]:
-    """全件を並列上限 2 で解析し、`(解析結果, 圧縮の記録)` を返す。"""
+    retry_max: int,
+    retry_wait_seconds: float,
+    method: str,
+) -> tuple[list[AnalysisFinding], list[CompressedSource], int]:
+    """全件を並列上限 2 で解析し、`(解析結果, 圧縮の記録, フォールバック件数)` を返す。"""
     sem = asyncio.Semaphore(2)
 
-    async def _bounded(cand: Candidate) -> tuple[AnalysisFinding, CompressedSource | None]:
+    async def _bounded(cand: Candidate) -> tuple[AnalysisFinding, CompressedSource | None, bool]:
         source_text = _build_source_text(cand, contexts_by_id.get(cand.id))
         async with sem:
             return await _analyze_one(
@@ -148,12 +203,16 @@ async def _analyze_all(
                 max_chars=max_chars,
                 timeout=timeout,
                 instruction=instruction,
+                retry_max=retry_max,
+                retry_wait_seconds=retry_wait_seconds,
+                method=method,
             )
 
     outcomes = await asyncio.gather(*[_bounded(c) for c in candidates])
-    analyses = [finding for finding, _ in outcomes]
-    compressed = [record for _, record in outcomes if record is not None]
-    return analyses, compressed
+    analyses = [finding for finding, _, _ in outcomes]
+    compressed = [record for _, record, _ in outcomes if record is not None]
+    fallen_back = sum(1 for _, _, fell_back in outcomes if fell_back)
+    return analyses, compressed, fallen_back
 
 
 def _compression_note(records: list[CompressedSource]) -> str:
@@ -166,6 +225,11 @@ def _compression_note(records: list[CompressedSource]) -> str:
         f"長文素材 {len(records)} 件を圧縮（成功 {applied}/{len(records)}、"
         f"平均 {reduction:.1%} 削減）"
     )
+
+
+def _fallback_note(count: int) -> str:
+    """解析のフォールバック件数の 1 行（FR-029。既存の進捗文言は変えない）。"""
+    return f"構造化出力を取得できなかったため見出し表の解析へ切り替えました（{count} 件）"
 
 
 def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
@@ -181,7 +245,7 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
     contexts_by_id = {c.id: c for c in state.get("contexts", [])}
     # 圧縮プロンプトへ載せる元の指示文（R-5）。無い実行（単体テスト）でも動くようにする。
     instruction = getattr(state.get("instruction"), "raw_text", "") or ""
-    analyses, compressed = asyncio.run(
+    analyses, compressed, fallen_back = asyncio.run(
         _analyze_all(
             candidates,
             contexts_by_id,
@@ -189,6 +253,9 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
             max_chars=configurable.compression_threshold,
             timeout=configurable.compression_timeout_seconds,
             instruction=instruction,
+            retry_max=configurable.retry_max,
+            retry_wait_seconds=configurable.retry_wait_seconds,
+            method=configurable.structured_method,
         )
     )
 
@@ -196,6 +263,9 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
     if compressed:
         # 追加の観測は `note()` に出す（`emit()` の書式と `messages` は不変。FR-030 / D-3）
         emitter.note(_compression_note(compressed))
+    if fallen_back:
+        # 同じく補足行。件数で 1 行にまとめる（候補ごとに 1 行出すと既定の入力で増えすぎる）
+        emitter.note(_fallback_note(fallen_back))
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
     return {

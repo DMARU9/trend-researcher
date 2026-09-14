@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
@@ -12,7 +13,7 @@ from trend_researcher.models import OutputFormat, OutputSpec, ResearchInstructio
 from trend_researcher.progress import NODE_PARSE_INSTRUCTION, make_emitter
 from trend_researcher.providers import get_provider
 from trend_researcher.state import AgentState
-from trend_researcher.tools.llm import build_model
+from trend_researcher.tools.llm import build_model, invoke_structured, invoke_text
 from trend_researcher.tools.parse import extract_json_block
 
 # 期間ラベル（数字+月以外）を投稿日下限の相対日数に変換するマッピング。
@@ -146,9 +147,11 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     raw = content if isinstance(content, str) else str(content)
     model = build_model("research", provider.env_prefix)
     prompt = provider.parse_instruction_prompt.format(instruction=raw)
-    result = model.invoke(prompt)
-    text = result.content if hasattr(result, "content") else str(result)
-    parsed = extract_json_block(text) or {}
+    parsed, fallback_note = _parse_with_llm(prompt, model=model, configurable=configurable)
+    if fallback_note:
+        # 進捗行（`messages`）ではなく補足行に出す。既定の入力の `messages` と
+        # レポートを変えないための区別（D-3 / FR-029）。
+        emitter.note(fallback_note)
 
     topic = str(parsed.get("topic", "")).strip() or raw
     # 件数: ユーザー入力（state）> Configuration > 自然言語 > LLM
@@ -196,3 +199,55 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
     return {"instruction": instruction, "messages": progress_messages}
+
+
+# --- LLM 呼び出し（US2: 構造化出力 → 失敗時に既存の解析へフォールバック） ---------
+
+
+def _structured_to_parsed(instruction: ResearchInstruction) -> dict[str, Any]:
+    """構造化出力を `extract_json_block` と同じ形の辞書へ写す。
+
+    写すのは `topic` / `max_results` / `output.format` の 3 つだけ。他の項目
+    （`raw_text` / `platform` / `published_after` / `sort_by`）は決定的解析
+    （状態・Configuration・自然言語）が正であり、LLM の推定で上書きしない
+    （FR-011）。キーの形を揃えることで、正常系もフォールバックも同じ優先順位
+    規則（state > Configuration > 自然言語 > LLM）をそのまま通る。
+    """
+    return {
+        "topic": instruction.topic,
+        "max_results": instruction.max_results,
+        "output_format": instruction.output.format.value,
+    }
+
+
+def _parse_with_llm(
+    prompt: str, *, model: Any, configurable: Configuration
+) -> tuple[dict[str, Any], str]:
+    """LLM の応答から解析結果を得る（構造化出力 → 全失敗なら JSON ブロック抽出）。
+
+    戻り値は `(解析結果, 補足行)`。補足行はフォールバックしたときだけ空でない。
+    規定回数を使い切ったら**例外を送出せず**既存の `tools/parse.py` の経路へ
+    切り替える（FR-011 / FR-012）。
+    """
+    try:
+        structured = invoke_structured(
+            ResearchInstruction,
+            prompt,
+            model=model,
+            retry_max=configurable.retry_max,
+            retry_wait_seconds=configurable.retry_wait_seconds,
+            method=configurable.structured_method,
+        )
+    except Exception as exc:  # noqa: BLE001 - 応答の失敗はすべてフォールバックで継続する（FR-011）
+        text = invoke_text(
+            prompt,
+            model=model,
+            retry_max=configurable.retry_max,
+            retry_wait_seconds=configurable.retry_wait_seconds,
+        )
+        content = text.content if hasattr(text, "content") else str(text)
+        return extract_json_block(content) or {}, (
+            "構造化出力を取得できなかったため簡易解析へ切り替えました"
+            f"（{type(exc).__name__}）"
+        )
+    return _structured_to_parsed(structured), ""

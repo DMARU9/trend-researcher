@@ -16,10 +16,11 @@ from typing import Any
 from unittest import mock
 
 import pytest
+from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 
-from trend_researcher.models import Candidate, Context
+from trend_researcher.models import AnalysisFinding, Candidate, Context
 from trend_researcher.nodes.analyze_content import (
     _build_source_text,
     _parse_angles_table,
@@ -78,15 +79,21 @@ def _run(
     config: RunnableConfig | None = None,
     candidates: list[Candidate] | None = None,
     contexts: list[Context] | None = None,
+    structured: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """`analyze_content` をノード単位注入で 1 回実行し、出力 state を返す。"""
+    """`analyze_content` をノード単位注入で 1 回実行し、出力 state を返す。
+
+    `structured` を渡すと構造化出力が成功する（省略時は必ず失敗し、US2 の
+    フォールバック経路を通る）。
+    """
     node_state: dict[str, Any] = {
         "candidates": [_candidate(1)] if candidates is None else candidates,
         "contexts": [] if contexts is None else contexts,
     }
     if platform is not None:
         node_state["platform"] = platform
-    with fake_model_factory.install({"analyze_content": response}):
+    injected = {} if structured is None else {"analyze_content": structured}
+    with fake_model_factory.install({"analyze_content": response}, structured=injected):
         return analyze_content(node_state, _config() if config is None else config)
 
 
@@ -512,18 +519,22 @@ def test_progress_note_reports_how_many_were_compressed(
         )
 
     err = capsys.readouterr().err
-    assert "[補足]" in err
-    assert "1 件" in err
+    # US2 のフォールバックの補足行と混同しないよう、圧縮の文言で固定する
+    assert "[補足] 長文素材 1 件を圧縮（成功 1/1" in err
 
 
 def test_no_note_when_nothing_was_compressed(
     fake_model_factory, capsys: pytest.CaptureFixture[str]
 ):
-    """圧縮が 0 件なら追加行を出さない（既定入力の stderr を変えない。FR-035）。"""
+    """圧縮が 0 件なら圧縮の追加行を出さない（既定入力の stderr を変えない。FR-035）。
+
+    US2 で「構造化出力のフォールバック」の補足行も出るようになったため、このテストは
+    圧縮の補足行に限定して確認する（フォールバックの補足行は別の契約）。
+    """
     with fake_model_factory.install({"analyze_content": _STRUCTURED_RESPONSE}):
         analyze_content(_node_state(_candidate(1, text="短い本文")), _config())
 
-    assert "[補足]" not in capsys.readouterr().err
+    assert "長文素材" not in capsys.readouterr().err
 
 
 class _TrackingLLM:
@@ -531,12 +542,17 @@ class _TrackingLLM:
 
     `FakeModelFactory` のフェイクは即座に応答を返すため同時実行数が観測できない。
     差し替える境界（`build_model`）は R-7 と同じで、計測用の実装だけをここに置く。
+    構造化出力は常に失敗させ、計測対象をテキスト呼び出し（フォールバック）に
+    絞る。
     """
 
     def __init__(self) -> None:
         self.calls = 0
         self.in_flight = 0
         self.max_in_flight = 0
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        raise OutputParserException("計測用フェイクは構造化出力を返さない")
 
     async def ainvoke(self, prompt: str) -> AIMessage:
         self.calls += 1
@@ -559,3 +575,114 @@ def test_parallelism_is_capped_at_two():
     assert tracking.calls == 5
     assert tracking.max_in_flight == 2
     assert len(out["analyses"]) == 5
+
+
+# --- US2: 構造化出力とフォールバック（FR-009 / FR-011 / FR-012） -------------
+
+#: 構造化出力で受け取る解析結果。`id` / `title` は候補が正なので上書きされる。
+_STRUCTURED_FINDING: dict[str, Any] = {
+    "id": "（LLM が返した id。候補の id で上書きされる）",
+    "title": "（LLM が返したタイトル）",
+    "summary": "モデルが返した要約",
+    "angles": [
+        {"angle": "入門解説", "value": "初心者に刺さる", "key_phrase": "「モデルA」"},
+        {"angle": "失敗談", "value": "共感を呼ぶ", "key_phrase": "「モデルB」"},
+    ],
+    "key_points": ["入門解説", "失敗談"],
+    "evidence": ["「モデルの引用」"],
+}
+
+
+def test_structured_finding_is_used_with_the_candidate_identity(
+    fake_model_factory: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """構造化出力が成功したらその内容を使い、`id` / `title` だけ候補で揃える。
+
+    LLM には素材の識別子を渡していないため、`id` を上書きしないとレポートの
+    紐づけが壊れる（`compile_report` は候補と解析を id で突き合わせる）。
+    """
+    out = _run(
+        fake_model_factory,
+        _STRUCTURED_RESPONSE,
+        candidates=[_candidate(1)],
+        structured=_STRUCTURED_FINDING,
+    )
+
+    finding = out["analyses"][0]
+    assert finding.summary == "モデルが返した要約"
+    assert finding.id == "t1"
+    assert finding.title == ""
+    assert [a.angle for a in finding.angles] == ["入門解説", "失敗談"]
+    assert finding.key_points == ["入門解説", "失敗談"]
+    assert finding.evidence == ["「モデルの引用」"]
+    # 成功時は決定的解析を走らせない（テキスト呼び出し 0 回）
+    assert fake_model_factory.prompts_for("analyze_content") == []
+    assert len(fake_model_factory.structured_prompts_for("analyze_content")) == 1
+    assert "[補足]" not in capsys.readouterr().err
+
+
+def test_structured_output_keeps_candidate_id_for_every_candidate(fake_model_factory: Any) -> None:
+    """複数件でも `id` は候補ごとに揃う（同じ id が並ぶとレポートが壊れる）。"""
+    candidates = [_candidate(1), _candidate(2), _candidate(3)]
+
+    out = _run(
+        fake_model_factory,
+        _STRUCTURED_RESPONSE,
+        candidates=candidates,
+        structured=_STRUCTURED_FINDING,
+    )
+
+    assert [f.id for f in out["analyses"]] == ["t1", "t2", "t3"]
+
+
+def test_structured_failure_uses_the_existing_parser(
+    fake_model_factory: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """規定回数失敗したら見出し表の解析へ切り替え、件数を補足行に残す（FR-011）。"""
+    out = _run(fake_model_factory, _STRUCTURED_RESPONSE, candidates=[_candidate(1)])
+
+    err = capsys.readouterr().err
+    assert (
+        "[補足] 構造化出力を取得できなかったため見出し表の解析へ切り替えました（1 件）" in err
+    )
+    finding = out["analyses"][0]
+    assert finding.summary == "ブログでどう扱えるかの観点でまとめた要約。"
+    assert [a.angle for a in finding.angles] == ["入門解説", "失敗談"]
+    # 試行回数 = 1 + retry_max（既定 3）。テキスト呼び出しはフォールバックの 1 回だけ
+    assert len(fake_model_factory.structured_prompts_for("analyze_content")) == 3
+    assert len(fake_model_factory.prompts_for("analyze_content")) == 1
+
+
+def test_fallback_note_counts_every_candidate(fake_model_factory: Any) -> None:
+    """フォールバックは候補ごとに 1 行ではなく、まとめて 1 行にする。"""
+    candidates = [_candidate(i) for i in range(1, 4)]
+
+    with fake_model_factory.install({"analyze_content": _STRUCTURED_RESPONSE}):
+        analyze_content(
+            {"candidates": candidates, "contexts": [], "platform": "x"}, _config()
+        )
+
+    assert len(fake_model_factory.prompts_for("analyze_content")) == 3
+
+
+def test_fallback_does_not_add_progress_lines(fake_model_factory: Any) -> None:
+    """フォールバックは進捗行を増やさない（補足は stderr のみ。既定の出力は不変）。"""
+    out = _run(fake_model_factory, _STRUCTURED_RESPONSE, candidates=[_candidate(1)])
+
+    contents = [m.content for m in out["messages"]]
+    assert len(contents) == 2
+    assert not any("補足" in c or "構造化出力" in c for c in contents)
+
+
+def test_structured_method_comes_from_the_configuration(fake_model_factory: Any) -> None:
+    """`structured_method` の設定値が境界まで届く（既定値と同じでも配線を固定する）。"""
+    _run(
+        fake_model_factory,
+        _STRUCTURED_RESPONSE,
+        config=_config(structured_method="function_calling"),
+        structured=_STRUCTURED_FINDING,
+    )
+
+    options = fake_model_factory.structured_options_for("analyze_content")
+    assert options and options[0]["method"] == "function_calling"
+    assert options[0]["schema"] is AnalysisFinding

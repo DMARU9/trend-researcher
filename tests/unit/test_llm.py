@@ -13,14 +13,24 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import httpx
+import openai
 import pytest
+from pydantic import BaseModel, ValidationError
 
 from trend_researcher import config as config_module
-from trend_researcher.tools.llm import build_model
+from trend_researcher.tools.llm import (
+    ainvoke_structured,
+    ainvoke_text,
+    build_model,
+    invoke_structured,
+    invoke_text,
+)
 
 #: モデル解決に影響する環境変数。テストごとに全消しする。
 _ENV_KEYS = ("TR_MODEL", "XTR_MODEL", "YTR_MODEL", "OPENAI_API_KEY", "OPENAI_BASE_URL")
@@ -115,3 +125,247 @@ def test_env_loading_is_invoked_through_the_shared_loader(
     _model_name()
 
     assert calls == [tmp_path / ".env"]
+
+
+# --- 呼び出し境界（US2 / FR-009 / FR-010 / SC-005）-------------------------
+#
+# 固定する契約（contracts/llm-invocation-contract.md §3）:
+#   - 試行回数は `1 + retry_max`（既定 `retry_max = 2` なので 3 回）
+#   - 待機は `asyncio.sleep` を通す（`retry_wait_seconds` を再試行のたびに 1 回）
+#   - 再試行の対象は「スキーマ違反 / 一時的なエラー（ネットワーク・レート制限・
+#     タイムアウト）」。上限超過（4xx）と設定ミス系は対象外（US3 の縮退へ渡す）
+#   - `asyncio.CancelledError` は再試行せずそのまま伝える
+#   - 構造化出力の `method` は呼び出し側が指定した値（既定 `json_schema`）
+
+
+class _Sample(BaseModel):
+    """`ValidationError` を実測で作るための最小モデル。"""
+
+    value: int
+
+
+def _validation_error() -> ValidationError:
+    """実際に投げられた `ValidationError` を返す（自作の例外は本物と挙動がずれる）。"""
+    try:
+        _Sample.model_validate({})
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("ValidationError が発生しなかった")
+
+
+def _request() -> httpx.Request:
+    return httpx.Request("POST", "https://example.test/v1/chat/completions")
+
+
+def _rate_limit_error() -> Exception:
+    return openai.RateLimitError(
+        message="429 Too Many Requests",
+        response=httpx.Response(429, request=_request()),
+        body=None,
+    )
+
+
+def _connection_error() -> Exception:
+    return openai.APIConnectionError(request=_request())
+
+
+def _context_length_error() -> Exception:
+    """上限超過（400）を模す。再試行の対象外であることを固定する（US3 の前提）。"""
+    return openai.BadRequestError(
+        message="This endpoint's maximum context length is 1048576 tokens.",
+        response=httpx.Response(400, request=_request()),
+        body={"error": {"code": "context_length_exceeded"}},
+    )
+
+
+class _StubRunnable:
+    """`ainvoke` の代役。`outcomes` を順に返し、例外なら投げる。"""
+
+    def __init__(self, outcomes: list[Any]) -> None:
+        self._outcomes = outcomes
+        self.calls = 0
+        self.prompts: list[Any] = []
+
+    async def ainvoke(self, prompt: Any) -> Any:
+        self.prompts.append(prompt)
+        outcome = self._outcomes[min(self.calls, len(self._outcomes) - 1)]
+        self.calls += 1
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+class _StubModel:
+    """`build_model` の代役（テキスト・構造化の両経路を同じ runnable で受ける）。"""
+
+    def __init__(self, outcomes: list[Any]) -> None:
+        self.runnable = _StubRunnable(outcomes)
+        self.options: dict[str, Any] = {}
+
+    async def ainvoke(self, prompt: Any) -> Any:
+        return await self.runnable.ainvoke(prompt)
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> _StubRunnable:
+        self.options = {"schema": schema, **kwargs}
+        return self.runnable
+
+
+def _patch_model(outcomes: list[Any]) -> tuple[_StubModel, Any]:
+    """`build_model` を差し替えたスタブモデルと、その patch を返す。"""
+    model = _StubModel(outcomes)
+    return model, mock.patch("trend_researcher.tools.llm.build_model", return_value=model)
+
+
+def test_text_call_is_retried_up_to_one_plus_retry_max(no_retry_sleep: Any) -> None:
+    """合計試行回数は `1 + retry_max`、待機は再試行のたびに 1 回（既定 3 回試行）。"""
+    model, patch = _patch_model([_connection_error()])
+    with patch, pytest.raises(openai.APIConnectionError):
+        asyncio.run(
+            ainvoke_text(
+                "prompt", env_prefix=None, retry_max=2, retry_wait_seconds=1.0
+            )
+        )
+
+    assert model.runnable.calls == 3
+    assert no_retry_sleep.sleeps == [1.0, 1.0]
+
+
+def test_retry_max_zero_does_not_retry(no_retry_sleep: Any) -> None:
+    """`retry_max = 0` は 1 回だけ試す（待機もしない）。"""
+    model, patch = _patch_model([_connection_error()])
+    with patch, pytest.raises(openai.APIConnectionError):
+        asyncio.run(
+            ainvoke_text("prompt", env_prefix=None, retry_max=0, retry_wait_seconds=5.0)
+        )
+
+    assert model.runnable.calls == 1
+    assert no_retry_sleep.sleeps == []
+
+
+def test_retry_stops_at_the_first_success(no_retry_sleep: Any) -> None:
+    """再試行で成功したらその時点で打ち切る（待機は失敗した回数だけ）。"""
+    model, patch = _patch_model([_validation_error(), _Sample(value=1)])
+    with patch:
+        result = asyncio.run(
+            ainvoke_text("prompt", env_prefix=None, retry_max=2, retry_wait_seconds=0.5)
+        )
+
+    assert result == _Sample(value=1)
+    assert model.runnable.calls == 2
+    assert no_retry_sleep.sleeps == [0.5]
+
+
+@pytest.mark.parametrize(
+    "error_factory",
+    [_validation_error, _rate_limit_error, _connection_error, TimeoutError],
+)
+def test_transient_and_schema_errors_are_retried(
+    error_factory: Any, no_retry_sleep: Any
+) -> None:
+    """スキーマ違反・レート制限・ネットワーク断・タイムアウトは再試行の対象。"""
+    model, patch = _patch_model([error_factory()])
+    # 例外型は各 factory が決めるため `BaseException` で受けて後段で型を確かめる。
+    with patch, pytest.raises(BaseException) as excinfo:
+        asyncio.run(
+            ainvoke_text("prompt", env_prefix=None, retry_max=1, retry_wait_seconds=1.0)
+        )
+
+    assert model.runnable.calls == 2
+    assert isinstance(excinfo.value, type(error_factory()))
+    assert len(no_retry_sleep.sleeps) == 1
+
+
+def test_context_length_error_is_not_retried(no_retry_sleep: Any) -> None:
+    """上限超過（4xx）は再試行しない（US3 の縮退へ渡す前提を先に固定する）。"""
+    model, patch = _patch_model([_context_length_error()])
+    with patch, pytest.raises(openai.BadRequestError):
+        asyncio.run(
+            ainvoke_text("prompt", env_prefix=None, retry_max=2, retry_wait_seconds=1.0)
+        )
+
+    assert model.runnable.calls == 1
+    assert no_retry_sleep.sleeps == []
+
+
+def test_cancellation_is_not_retried(no_retry_sleep: Any) -> None:
+    """`CancelledError` は再試行せず伝える（キャンセルを握り潰すとグラフが止まらない）。"""
+    model, patch = _patch_model([asyncio.CancelledError()])
+    with patch, pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            ainvoke_text("prompt", env_prefix=None, retry_max=2, retry_wait_seconds=1.0)
+        )
+
+    assert model.runnable.calls == 1
+    assert no_retry_sleep.sleeps == []
+
+
+def test_structured_call_returns_the_validated_schema_instance() -> None:
+    """構造化出力はスキーマで検証済みのインスタンスを返す。"""
+    model, patch = _patch_model([_Sample(value=7)])
+    with patch:
+        result = asyncio.run(
+            ainvoke_structured(
+                _Sample,
+                "prompt",
+                env_prefix=None,
+                retry_max=2,
+                retry_wait_seconds=1.0,
+            )
+        )
+
+    assert result == _Sample(value=7)
+    assert model.options == {"schema": _Sample, "method": "json_schema"}
+
+
+def test_structured_call_uses_the_configured_method() -> None:
+    """`method` は設定値（`structured_method`）が境界まで届く。"""
+    model, patch = _patch_model([_Sample(value=1)])
+    with patch:
+        asyncio.run(
+            ainvoke_structured(
+                _Sample,
+                "prompt",
+                env_prefix=None,
+                retry_max=0,
+                retry_wait_seconds=0.0,
+                method="function_calling",
+            )
+        )
+
+    assert model.options["method"] == "function_calling"
+
+
+def test_structured_schema_violation_is_retried(no_retry_sleep: Any) -> None:
+    """スキーマ違反も再試行し、規定回数内に成功すれば値が返る。"""
+    model, patch = _patch_model([_validation_error(), _validation_error(), _Sample(value=3)])
+    with patch:
+        result = asyncio.run(
+            ainvoke_structured(
+                _Sample,
+                "prompt",
+                env_prefix=None,
+                retry_max=2,
+                retry_wait_seconds=1.0,
+            )
+        )
+
+    assert result == _Sample(value=3)
+    assert model.runnable.calls == 3
+    assert no_retry_sleep.sleeps == [1.0, 1.0]
+
+
+def test_sync_wrappers_use_the_same_path() -> None:
+    """同期入口（同期ノード用）も同じ経路・同じ回数で動く。"""
+    model, patch = _patch_model([_connection_error(), "text"])
+    with patch:
+        assert invoke_text("prompt", env_prefix=None, retry_max=1, retry_wait_seconds=0.0) == (
+            "text"
+        )
+
+    assert model.runnable.calls == 2
+
+    model, patch = _patch_model([_Sample(value=9)])
+    with patch:
+        assert invoke_structured(
+            _Sample, "prompt", env_prefix=None, retry_max=1, retry_wait_seconds=0.0
+        ) == _Sample(value=9)
