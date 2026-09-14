@@ -120,7 +120,7 @@ US5（注入と拒否の挙動）と US8（宣言の検証と Studio）で**使�
 
 ### Tests for Foundational（憲法 原則 I により必須）⚠️
 
-- [ ] T009 [P] 凍結契約の回帰テストを作成する（**実装より先に書き、赤にならないことを確認する**。現状の挙動をそのまま固定するため green になるのが正しい）: 既定の入力で stdout が byte 一致 / 進捗行の文言と行数が不変 / `analyze_content` と `extract_common` の呼び出し回数が不変 / `report.notes` の既存要素が不変。`tests/integration/test_frozen_contracts.py`
+- [X] T009 [P] 凍結契約の回帰テストを作成する（**実装より先に書き、赤にならないことを確認する**。現状の挙動をそのまま固定するため green になるのが正しい）: 既定の入力で stdout が byte 一致 / 進捗行の文言と行数が不変 / `analyze_content` と `extract_common` の呼び出し回数が不変 / `report.notes` の既存要素が不変。`tests/integration/test_frozen_contracts.py`
 - [ ] T010 [P] 新規モデルと状態フィールドのテストを作成する: `CompressedSource` / `Degradation` / `Failure` / `ModelUsage` の必須項目と不変条件（`after_chars < before_chars` 等）、`AgentState` に 4 フィールドが載ること、`usage` が `Annotated[..., operator.add]` で**並列結果を連結**すること。`tests/unit/test_models.py`（拡張）
 - [ ] T011 [P] `Configuration` の宣言と値域の走査テストを作成する: 全項目に `description` があること、`ge` / `le` / `Literal` の宣言が期待どおりであること、`x_oap_ui_config` が付いていること、`ConfigurationError` のメッセージに項目名・入力値・期待する値域が入ること。`tests/unit/test_configuration.py`（拡張）
 - [ ] T012 [P] `ProgressEmitter.note()` のテストを作成する: stderr に 1 行（書式 `[補足] ...`）を書き、**`get_messages()` が増えない**こと、`emit()` の既存書式と `messages` の内容が不変であること。`tests/unit/test_progress.py`（拡張）
