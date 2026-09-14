@@ -18,6 +18,8 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=5.0.0",
+    # 並列実行（SC-013 の 60 秒。テストは 1 件も削らずに計算資源を足す）
+    "pytest-xdist>=3.5.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     # 構造解析ツール（script/analyze_structure.py）

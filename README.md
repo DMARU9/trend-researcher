@@ -21,12 +21,20 @@ uv sync --extra dev
 変更を提出する前に、次の 3 つがすべて通ることを確認します（`.specify/memory/constitution.md`）。
 
 ```bash
-uv run pytest -q      # テスト（ネットワーク・認証情報不要で完走する）＋行カバレッジ計測
-uv run ruff check .   # Lint
-uv run mypy src       # 型チェック
+uv run pytest -q -n auto   # テスト（ネットワーク・認証情報不要で完走する）＋行カバレッジ計測
+uv run ruff check .        # Lint
+uv run mypy src            # 型チェック
 ```
 
-`uv run pytest -q` は同時に行カバレッジを計測し、対象範囲の**合計が 90% を下回ると非ゼロ終了**します
+`uv run pytest -q -n auto` の `-n auto` は `pytest-xdist` による**並列実行**です（開発用の追加依存。
+実行時依存は増えていません）。テストを 1 件も削らず、期待値も書き換えずに **60 秒以内**を満たします。
+
+| 実行方法 | 実測（2026-09-15。1,102 件 / カバレッジ 97.64%） |
+|---|---|
+| `uv run pytest -q -n auto`（既定のゲート） | **34.2〜34.4 秒**（並列 16。`/usr/bin/time` の総計 36.5〜36.7 秒） |
+| `uv run pytest -q`（直列） | 93.63 秒（総計 96.0 秒） |
+
+`uv run pytest -q -n auto` は同時に行カバレッジを計測し、対象範囲の**合計が 90% を下回ると非ゼロ終了**します
 （`pyproject.toml` の `[tool.coverage.report] fail_under = 90`）。未実行行は
 `--cov-report=term-missing` で表示されるため、そのまま追記できます。
 
