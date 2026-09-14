@@ -122,7 +122,7 @@ US5（注入と拒否の挙動）と US8（宣言の検証と Studio）で**使�
 
 - [X] T009 [P] 凍結契約の回帰テストを作成する（**実装より先に書き、赤にならないことを確認する**。現状の挙動をそのまま固定するため green になるのが正しい）: 既定の入力で stdout が byte 一致 / 進捗行の文言と行数が不変 / `analyze_content` と `extract_common` の呼び出し回数が不変 / `report.notes` の既存要素が不変。`tests/integration/test_frozen_contracts.py`
 - [X] T010 [P] 新規モデルと状態フィールドのテストを作成する: `CompressedSource` / `Degradation` / `Failure` / `ModelUsage` の必須項目と不変条件（`after_chars < before_chars` 等）、`AgentState` に 4 フィールドが載ること、`usage` が `Annotated[..., operator.add]` で**並列結果を連結**すること。`tests/unit/test_models.py`（拡張）
-- [ ] T011 [P] `Configuration` の宣言と値域の走査テストを作成する: 全項目に `description` があること、`ge` / `le` / `Literal` の宣言が期待どおりであること、`x_oap_ui_config` が付いていること、`ConfigurationError` のメッセージに項目名・入力値・期待する値域が入ること。`tests/unit/test_configuration.py`（拡張）
+- [X] T011 [P] `Configuration` の宣言と値域の走査テストを作成する: 全項目に `description` があること、`ge` / `le` / `Literal` の宣言が期待どおりであること、`x_oap_ui_config` が付いていること、`ConfigurationError` のメッセージに項目名・入力値・期待する値域が入ること。`tests/unit/test_configuration.py`（拡張）
 - [ ] T012 [P] `ProgressEmitter.note()` のテストを作成する: stderr に 1 行（書式 `[補足] ...`）を書き、**`get_messages()` が増えない**こと、`emit()` の既存書式と `messages` の内容が不変であること。`tests/unit/test_progress.py`（拡張）
 - [ ] T013 [P] テスト境界のフェイクを検証するテストを作成する: `_FakeLLM` が `with_structured_output` と `usage_metadata` を持つこと、`FakeModelFactory` が `trend_researcher.tools.compression.build_model` も差し替えること、`no_retry_sleep` が `tools.llm.asyncio.sleep` を対象にすること（既存の「フィクスチャが実際に patch しているか」検証の延長）。`tests/unit/test_fixtures.py`（拡張）
 
@@ -130,7 +130,7 @@ US5（注入と拒否の挙動）と US8（宣言の検証と Studio）で**使�
 
 - [X] T014 [P] `src/trend_researcher/models.py` に 4 型を追加する: `CompressedSource` / `Degradation` / `Failure` / `ModelUsage`（data-model.md §3 の表どおり。既存フィールドの削除・改名をしない）
 - [X] T015 [P] `src/trend_researcher/state.py` の `AgentState` に 4 フィールドを追加する: `compressed` / `degradations` / `failures`（通常フィールド）、`usage`（`Annotated[list[ModelUsage], operator.add]`）。`AgentInputState` は**変更しない**（US6 の実走は 3 項目のみを使う）
-- [ ] T016 `src/trend_researcher/configuration.py` に次の 3 つを追加する（T007 の実測結果に従う）: (a) 追加 11 項目の宣言（`ge` / `le` / `Literal` / `description` / `json_schema_extra={"x_oap_ui_config": ...}`。値域は `data-model.md` §1.1 と `research.md` §R-20 の表）、(b) `ConfigurationError(field, value, expected, message)`、(c) 上書き適用後の再検証（`_check_bounds` または `model_validate` のうち `model_fields_set` を保つ方）。`resolve_env` と `load()` の解決順は**変えない**
+- [X] T016 `src/trend_researcher/configuration.py` に次の 3 つを追加する（T007 の実測結果に従う）: (a) 追加 11 項目の宣言（`ge` / `le` / `Literal` / `description` / `json_schema_extra={"x_oap_ui_config": ...}`。値域は `data-model.md` §1.1 と `research.md` §R-20 の表）、(b) `ConfigurationError(field, value, expected, message)`、(c) 上書き適用後の再検証（`_check_bounds` または `model_validate` のうち `model_fields_set` を保つ方）。`resolve_env` と `load()` の解決順は**変えない**
 - [ ] T017 [P] `src/trend_researcher/progress.py` の `ProgressEmitter` に `note(text)` を追加する: stderr に `[補足] {text}` を 1 行書き、`self._messages` へは**積まない**。`NODE_ORDER` と `emit` は変更しない
 - [ ] T018 [P] テスト境界のフェイクを拡張する: (a) `tests/conftest.py` の `_FakeLLM` に `with_structured_output(schema, **kwargs)` を追加し既定で `OutputParserException` を送出するランを返す、(b) `FakeModelFactory.install(responses, *, structured=None)` を追加（`structured` 指定時は成功するラン）、(c) `_FakeMessage` に `usage_metadata`（既定 `None`）、(d) patch 対象に `trend_researcher.tools.compression` を追加、(e) `no_retry_sleep` の対象に `tools.llm.asyncio.sleep` を追加し `autouse` にする、(f) `tests/integration/cli_harness.py` の `_FakeLLM` にも同じ 2 つを追加する
 - [ ] T019 `tests/unit/test_platform_scan.py` を実行して規則 (a)+(b) が**0 件のまま**であることを確認し、新規モジュール（`tools/compression.py` / `tools/degradation.py` / `usage.py` 相当）と `Configuration` の追加が走査に引っかからないことを確かめる（原則 IV）。引っかかった場合は走査テストではなく**ソース側を直す**（FR-035）
@@ -429,6 +429,18 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 | 1 | `return_exceptions=True` を外す | （記入） | （記入） |
 | … | （quickstart.md §5 の 20 件） | | |
 
+**実装中に回した探針（T011 / T016、`configuration.py`。各 1 回で復元）**
+
+| 変異 | 落ちたテスト | 復元確認 |
+|---|---|---|
+| `retry_max` の宣言から `x_oap_ui_config` を削る（`_setting` を素の `Field` に置換） | `test_added_fields_declare_the_studio_ui_config`（+ `test_added_fields_declare_defaults_and_ui_type`。2 failed） | sha256 一致 |
+| `analysis_concurrency` の `ge=1` を削る | `test_load_raises_configuration_error_for_out_of_range_env` ほか 3 failed | sha256 一致 |
+| `ConfigurationError` を `Exception` 直系にする | `test_configuration_error_is_a_value_error`（1 failed） | sha256 一致 |
+| `_check_bounds` を素通し（先頭で `return settings`）にする | `test_check_bounds_rejects_a_bad_override` ほか 3 failed | sha256 一致 |
+
+復元確認: `sha256` の前後一致（`12d9fa5e…`）+ 復元後にフルスイートを 1 回再実行し
+**641 passed / 96.92%** で green に戻ることを確認済み。
+
 ### 4. 最終ゲート（T095）
 
 - `uv run pytest -q`: （記入）
@@ -443,11 +455,38 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 | `src/trend_researcher/` 26 モジュール | 27 ファイル / 2,736 行（`__init__.py` の数え方） | 記録のみ |
 | ベースライン 547 passed / 95.29% | 601 passed / 96.65% / 49.10 秒（spec 002 完了分） | 記録のみ |
 | `nodes/analyze_content.py:65` の `source_text[:20000]` | 69 行目付近 | 実測どおりに実装 |
+| `settings-contract.md` §2「`sort_by` は `relevance` / `recency` の 2 択」 | 実測は `relevance` / `likes`（`__main__.py` の検証と `providers/base.py` の `selection_note` が 2 値） | 記録のみ。既存 7 項目の宣言（`Literal` 化）は凍結契約のため T016 では触らない（US8 / T085 の範囲） |
+| `settings-contract.md` §2「`max_results` は 1 以上（0 を弾く）」 | T016 時点では既存 7 項目に `ge` を足していないため 0 を通す（`tests/unit/test_configuration.py` の `test_falsy_values_are_treated_as_specified[max_results-0]` が green） | §6 の「申し送り」のとおり US8（T085）で宣言を足すときに再判定 |
+| T016 の記述 `ConfigurationError(field, value, expected, message)` | 実装は `ConfigurationError(field, value, expected)` の 3 引数で `message` を**組み立てる**（属性としては `message` を持つ） | 契約 §3 の stderr 書式を属性から必ず再現するため、4 つ目を渡させない設計にした（記録のみ） |
 
 ### 6. 更新または削除したテスト（FR-035 / SC-008）
 
-- （記入）該当なしが目標。更新が必要になった場合は、そのテストが「内部構造（呼び出し回数）を
-  固定しているもの」であるかを確認し、`spec.md` の Assumptions の範囲でのみ行う。
+**更新（T011 / T016。すべて「フィールドの一覧」を固定する内部構造テストで、既定値の意味と
+契約は不変）**
+
+| テスト | 変更 | 理由 |
+|---|---|---|
+| `test_defaults_cover_every_declared_field` / `test_model_json_schema_declares_all_fields` | `DEFAULTS` を 7 → 18 項目に拡張 | T016 で宣言が 11 項目増えたため。既定値の意味は変えていない |
+| `test_from_runnable_config_uses_configurable_values` | 期待 dict を `DEFAULTS \| {上書き 7 項目}` に変更 | 同上（`model_dump()` の比較が全項目を見るため） |
+| `test_from_runnable_config_with_empty_config` / `test_from_runnable_config_with_none` | 変更なし（`DEFAULTS` を参照しているため自動追随） | 同上 |
+| `test_load_resolves_only_the_three_settings` → `test_load_resolves_the_three_settings_and_the_added_eleven` | 改名・拡張（env 経由の追加 5 項目と「読まない 3 項目」を同時に固定） | T016 で `load()` の解決対象が 3 → 14 項目になったため。SET-005 の趣旨（宣言と env 解決の対象を一致させる）は維持 |
+| `isolated_settings_env`（fixture） | `delenv` する env 名に追加 11 項目を追加 | 実 `.env` の値でテストが非決定的になるのを防ぐ |
+
+**新規（値域・宣言の走査）**: `test_every_declared_field_has_a_description` /
+`test_added_fields_declare_defaults_and_ui_type` / `test_added_numeric_fields_declare_their_range` /
+`test_added_fields_reject_out_of_range_values` / `test_structured_method_is_a_literal_choice` /
+`test_added_fields_declare_the_studio_ui_config` / `test_expected_text_follows_the_declaration`（6 分岐）
+
+**新規（`ConfigurationError`）**: `test_configuration_error_names_the_field_value_and_range` /
+`test_configuration_error_is_a_value_error` / `test_load_raises_configuration_error_for_out_of_range_env` /
+`test_load_rejects_a_non_numeric_env_value` / `test_load_rejects_a_non_boolean_env_value` /
+`test_load_rejects_an_unknown_structured_method` / `test_check_bounds_accepts_valid_settings` /
+`test_check_bounds_preserves_model_fields_set` / `test_check_bounds_rejects_a_bad_override`
+
+**申し送り（T016 では触らない）**: `settings-contract.md` §2 は `max_results` に `ge=1` を要求するが、
+T016 の指示は「追加 11 項目の宣言」であるため既存 7 項目には値域を足していない。
+`test_falsy_values_are_treated_as_specified[max_results-0]` は green のまま（実測）。
+既存 7 項目に宣言を足すのは US8（T085）の範囲で、そのときにこのテストの要否を再判定する。
 
 ### 7. 参照実装の欠陥を移植していないことの確認（FR-063 / FR-064）
 
