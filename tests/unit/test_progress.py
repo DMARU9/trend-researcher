@@ -166,3 +166,85 @@ def test_emitted_index_follows_the_current_node_order(monkeypatch: pytest.Monkey
         "[2/3] fetch ... 開始",
         "[3/3] compile_report ... 開始",
     ]
+
+
+# --- `note()`（追加の観測の唯一の入口。FR-029 / D-3 / tasks §2）---------------
+
+
+def test_note_writes_one_supplementary_line():
+    """出力形式は `[補足] {text}` の 1 行（進捗の書式とは別系統）。"""
+    stream = io.StringIO()
+    emitter = ProgressEmitter(stream=stream)
+
+    emitter.note("圧縮した 2 件")
+
+    assert stream.getvalue() == "[補足] 圧縮した 2 件\n"
+
+
+def test_note_defaults_to_stderr(capsys):
+    """既定の出力先は stderr（stdout はレポート専用。CLI-002-1）。"""
+    emitter = ProgressEmitter()
+
+    emitter.note("縮退した 1 件")
+
+    captured = capsys.readouterr()
+    assert captured.err == "[補足] 縮退した 1 件\n"
+    assert captured.out == ""
+
+
+def test_note_does_not_grow_the_messages():
+    """`note()` は状態（`messages`）へ積まない（D-3。レポートと契約を汚さない）。
+
+    ここが `emit()` と同じ蓄積経路になると、既定の入力でも `messages` の内容が
+    変わり、凍結した契約（`tests/integration/test_frozen_contracts.py`）が壊れる。
+    """
+    emitter = ProgressEmitter(stream=io.StringIO())
+    emitter.emit("parse_instruction", "開始")
+    before = [message.content for message in emitter.get_messages()]
+
+    emitter.note("失敗 1 件")
+
+    assert [message.content for message in emitter.get_messages()] == before
+
+
+def test_note_does_not_consume_a_step():
+    """`note()` は進捗の番号を進めない（補足は段ではない）。"""
+    stream = io.StringIO()
+    emitter = ProgressEmitter(stream=stream)
+
+    emitter.emit("parse_instruction", "開始")
+    emitter.note("補足")
+    emitter.emit("plan_search", "開始")
+
+    assert stream.getvalue().splitlines() == [
+        "[1/7] parse_instruction ... 開始",
+        "[補足] 補足",
+        "[2/7] plan_search ... 開始",
+    ]
+
+
+def test_note_does_not_change_the_emit_format():
+    """`emit()` の書式は `note()` を足しても 1 文字も変わらない（FR-017）。"""
+    stream = io.StringIO()
+    emitter = ProgressEmitter(stream=stream)
+
+    emitter.note("補足")
+    emitter.emit("parse_instruction", "完了", detail="トピック: X")
+
+    assert stream.getvalue().splitlines() == [
+        "[補足] 補足",
+        "[1/7] parse_instruction ... 完了（トピック: X）",
+    ]
+
+
+def test_note_keeps_emit_messages_unchanged():
+    """`note()` を挟んでも `emit()` が積む内容は同じ（書式の凍結）。"""
+    stream = io.StringIO()
+    emitter = ProgressEmitter(stream=stream)
+
+    emitter.note("補足")
+    emitter.emit("search", "完了", detail="3 件を選定")
+
+    assert [message.content for message in emitter.get_messages()] == [
+        "[3/7] search ... 完了（3 件を選定）"
+    ]
