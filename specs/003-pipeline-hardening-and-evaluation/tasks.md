@@ -242,18 +242,18 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 ### Tests for User Story 3（憲法 原則 I により必須）⚠️
 
-- [ ] T047 [P] [US3] 検出器のテストを作成する: 4 条件のそれぞれを満たす入力で `True` / 条件 3 を満たさない `400` で `False` / **除外条件（`invalid model` / `invalid api key` / `unsupported`）で `False`** / 上限超過以外の例外（接続エラー・認証失敗）で `False`。`tests/unit/test_degradation.py`（新規）
-- [ ] T048 [P] [US3] 縮小のテストを作成する: 段数が `degrade_max_attempts` を超えない / 各段で入力長が `shrink_ratio` 分だけ短くなる / 停止条件（縮小しない・`min_input_chars` 未満）で打ち切る / 未知モデルでも縮退が成立し `limit_known = False` が記録される / `Degradation` の内容。`tests/unit/test_degradation.py`（T047 と同じファイルに追記）
-- [ ] T049 [P] [US3] 縮退の連携テストを作成する: 上限超過は再試行**せず**縮退へ渡る / 縮小後の呼び出しで成功したら `Degradation` が 1 件記録され実行が成功する / 段数を使い切ったら例外が送出される（→ exit 1）。`tests/unit/test_llm.py`（拡張）
-- [ ] T050 [P] [US3] CLI のテストを作成する: 縮退を使い切ったときに stderr に理由（試した段数・縮小前後の長さ）が出て **exit 1**、上限超過以外のエラーも exit 1、上限超過で縮退が成功した場合は exit 0。`tests/integration/test_cli_contract.py`（拡張）
+- [X] T047 [P] [US3] 検出器のテストを作成する: 4 条件のそれぞれを満たす入力で `True` / 条件 3 を満たさない `400` で `False` / **除外条件（`invalid model` / `invalid api key` / `unsupported`）で `False`** / 上限超過以外の例外（接続エラー・認証失敗）で `False`。`tests/unit/test_degradation.py`（新規）
+- [X] T048 [P] [US3] 縮小のテストを作成する: 段数が `degrade_max_attempts` を超えない / 各段で入力長が `shrink_ratio` 分だけ短くなる / 停止条件（縮小しない・`min_input_chars` 未満）で打ち切る / 未知モデルでも縮退が成立し `limit_known = False` が記録される / `Degradation` の内容。`tests/unit/test_degradation.py`（T047 と同じファイルに追記）
+- [X] T049 [P] [US3] 縮退の連携テストを作成する: 上限超過は再試行**せず**縮退へ渡る / 縮小後の呼び出しで成功したら `Degradation` が 1 件記録され実行が成功する / 段数を使い切ったら例外が送出される（→ exit 1）。`tests/unit/test_llm.py`（拡張）
+- [X] T050 [P] [US3] CLI のテストを作成する: 縮退を使い切ったときに stderr に理由（試した段数・縮小前後の長さ）が出て **exit 1**、上限超過以外のエラーも exit 1、上限超過で縮退が成功した場合は exit 0。`tests/integration/test_cli_contract.py`（拡張）
 
 ### Implementation for User Story 3
 
-- [ ] T051 [US3] `src/trend_researcher/tools/degradation.py` を新規作成する: `is_token_limit_exceeded(exc)`（`contracts/llm-invocation-contract.md` §5 の 4 条件。`isinstance` ベースで `body` は dict / str の両方を扱う）/ `get_model_token_limit(model)` / `shrink(text, ratio)` / `next_ladder(...)`（停止条件つき）。**参照実装の文字列依存の判定を移植しない**（FR-063 / FR-064 / research §R-1）
-- [ ] T052 [US3] `src/trend_researcher/tools/llm.py` に縮退を組み込む: 上限超過と判定されたら再試行せず、`degrade_max_attempts` 段まで入力を縮小して呼び直す。段ごとに `Degradation` を状態へ返し、使い切ったら理由つきの例外を送出する。無効な引数をモデルへ渡す経路を作らない（FR-063）
-- [ ] T053 [US3] `src/trend_researcher/__main__.py` で縮退の使い切りを扱う: 理由（試した段数・縮小前後の長さ）を stderr に出して **exit 1**。既存の例外ハンドリング（TimeoutError → exit 1 / その他 → exit 1）の分岐を壊さない
-- [ ] T054 [US3] 縮退を `ProgressEmitter.note()` に 1 行で出す（段数・縮小前後の長さ。FR-017 / FR-029）。`emit()` の文言は変更しない
-- [ ] T055 [US3] 変異探針を実行する: (a) 検出器の除外条件（条件 4）を削る → T047 の反例が落ちる、(b) `shrink_ratio` を `1.0` にする → T048 / T049 が落ちる、(c) 停止条件 2 を削る → T048 が落ちる、(d) 上限超過を再試行に回す → T049 が落ちる
+- [X] T051 [US3] `src/trend_researcher/tools/degradation.py` を新規作成する: `is_token_limit_exceeded(exc)`（`contracts/llm-invocation-contract.md` §5 の 4 条件。`isinstance` ベースで `body` は dict / str の両方を扱う）/ `get_model_token_limit(model)` / `shrink(text, ratio)` / `next_ladder(...)`（停止条件つき）。**参照実装の文字列依存の判定を移植しない**（FR-063 / FR-064 / research §R-1）
+- [X] T052 [US3] `src/trend_researcher/tools/llm.py` に縮退を組み込む: 上限超過と判定されたら再試行せず、`degrade_max_attempts` 段まで入力を縮小して呼び直す。段ごとに `Degradation` を状態へ返し、使い切ったら理由つきの例外を送出する。無効な引数をモデルへ渡す経路を作らない（FR-063）
+- [X] T053 [US3] `src/trend_researcher/__main__.py` で縮退の使い切りを扱う: 理由（試した段数・縮小前後の長さ）を stderr に出して **exit 1**。既存の例外ハンドリング（TimeoutError → exit 1 / その他 → exit 1）の分岐を壊さない
+- [X] T054 [US3] 縮退を `ProgressEmitter.note()` に 1 行で出す（段数・縮小前後の長さ。FR-017 / FR-029）。`emit()` の文言は変更しない
+- [X] T055 [US3] 変異探針を実行する: (a) 検出器の除外条件（条件 4）を削る → T047 の反例が落ちる、(b) `shrink_ratio` を `1.0` にする → T048 / T049 が落ちる、(c) 停止条件 2 を削る → T048 が落ちる、(d) 上限超過を再試行に回す → T049 が落ちる
 
 **Checkpoint**: US1・US2・US6 と US3 が独立して機能。既定の入力（上限超過なし）では
 縮退が発生せず、呼び出し回数も出力も不変。
@@ -526,6 +526,23 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 復元後: フルスイート **779 passed / 97.57% / 386.65 秒** で green に戻ることを確認済み
 （`script/evaluate.py` と `tests/eval/` を含む。US6 の追加は既存テストの期待値を変えずに +66 件）。
 
+**実装中に回した探針（US3 / T055。各 1 回で復元）**
+
+対象: `src/trend_researcher/tools/degradation.py` / `src/trend_researcher/tools/llm.py`。
+探針は `/tmp/probe_t055.py`（各変異の前後で `sha256` を比較し、復元まで含めて自動化）。
+
+| 変異 | 落ちたテスト | 復元確認 |
+|---|---|---|
+| (a) 検出器の条件 4（除外語彙）を削る | `test_the_exclusion_words_win_over_the_metric`（5 パラメータ全部。5 failed / 44 passed） | sha256 一致 |
+| (b) 縮小率を `1.0` にする（`target = int(len(text) * 1.0)`） | `test_the_stage_count_follows_the_configuration` ほか T048 / `test_a_limit_error_is_degraded_instead_of_retried` ほか T049（16 failed / 61 passed） | sha256 一致 |
+| (c) 停止条件 (b)（縮小しない段で打ち切る）を削る | `test_the_ladder_stops_when_the_input_cannot_shrink`（1 failed / 48 passed） | sha256 一致 |
+| (d) 上限超過を再試行に回す（`APIStatusError` を `RETRYABLE_ERRORS` に足す） | `test_a_limit_error_is_degraded_instead_of_retried` / `test_the_shrunk_input_keeps_the_head_of_the_original` / `test_exhausting_the_ladder_raises_the_reason` / `test_a_limit_error_without_degrade_options_is_propagated` / `test_context_length_error_is_not_retried`（5 failed / 23 passed） | sha256 一致 |
+
+**探針で確かめた「落ち方の精度」**: (a) は除外の反例テスト**だけ**が落ち（44 passed）、
+(c) は停止条件のテスト**だけ**が落ちた（48 passed）。条件を 1 つ削ったときに、その条件を
+見ているテストだけが落ちることを確認してから探針の証拠とした（無関係なテストが巻き添えで
+落ちる探針は「何を検出したのか」を言えない）。
+
 ### 4. 最終ゲート（T095）
 
 - `uv run pytest -q`: （記入）
@@ -556,6 +573,11 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 | T038(e)「初期状態に入れるキーが `messages` / `platform` / `max_results` のみ（AST で走査）」 | 実装は辞書リテラルで初期状態を組み立てる（`{"messages": …, "platform": …}` ＋ 明示指定時のみ `state["max_results"] = …`） | 走査を「辞書リテラルの文字列キー」と「`state[...] =` の文字列キー」の両方を拾う形にした（spec の指示は後者の想定）。意図（3 項目のみ）は不変で、4 番目のキーを足す変異で落ちることは T046(d) で確認済み |
 | T039「対応表の整合テスト」 | `tests/eval/axes.md` の**本文（表）**を読む走査テストも足した（`test_the_axes_table_documents_axes_constraints_and_defects`） | FR-074 は「1 つの対応表に記録する MUST」と定めるが、表は文章なので実装側へ観点・制約を足したときに黙って古くなる。観点と制約の識別子が表に現れること、実測済み欠陥が 6 件並んでいることを固定した |
 | R-21 の実測済み欠陥 6 件の「固定する方法」 | `tests/eval/axes.md` の §3 に、担当する US（US3 / US4）と固定するテストの内容を並べた。US6 の時点では #1〜#3・#6 の**実装**はまだ無い | 欠陥の一覧を 1 箇所に置くのが FR-074 / R-21 の要求で、移植しない判断は US3 / US4 の実装タスクでテストとして固定する（本フェーズでは「列挙と担当の明示」まで） |
+| 契約 §1 の表「テキスト形態（`plan_search` の生成・点検、圧縮）にも縮退あり」 | T052 で縮退を配線したのは `parse_instruction` / `analyze_content` / `extract_common` の 3 ノード（`degrade=options_for(...)`）。`plan_search` / `compile_report` はまだ渡していない | T052 の指示が「`tools/llm.py` に縮退を組み込む」で、ノード単位の配線は T078（US5）が 5 ノード分をまとめて担う。既定の入力では上限超過が起きないため**観測できる差は無い**（T050 の exit 0 ケースで実測）。T078 で残り 2 ノードに入れる |
+| T047「条件 3 を満たさない `400` で `False`」のうち `body` が**文字列**の場合 | 条件 3 は `body` の `code` / `type` を読むため、文字列の `body` は構造として満たせず `False` になる | 契約 §5 の条件 3 は「応答本文**または**メッセージに指標がある」だが、指標は `code == "context_length_exceeded"` か `type == "invalid_request_error"` を要求する。文字列から `getattr` で拾う実装は誤認を生む（FR-018）ため `False` を固定した（テストの docstring に根拠を明記） |
+| 契約 §6「既知モデルの初回は上限に収まる文字数」 | 実装は `(上限トークン − 10,000) × 1 文字`（`_CHARS_PER_TOKEN = 1` / `_OUTPUT_RESERVE_TOKENS = 10,000`） | 係数を安全側（1 トークン = 1 文字）に置く。日本語はトークンあたりの文字数が少なく、多めに見積もると上限を超えたまま呼ぶ。契約の文言は「収まる文字数」とのみ定めるため逸脱ではない |
+| 契約 §6「段数 最大 `degrade_max_attempts`（既定 3）」の数え方 | 実装は `max_attempts` 段（呼び出し回数は初回 ＋ 段数 = 最大 4 回）。`max_attempts=2` なら 2 段（3 回） | 契約の読みと同じ（「段」は縮小して呼び直した回数）。T049 の `test_exhausting_the_ladder_raises_the_reason` が `stages == 2` / `calls == 3` を固定している |
+| 検出器の `_EXCLUDED_WORDS` の判定順 | 除外語彙（条件 4）を条件 3 より**先**に見る（`unsupported` を含む `400` は指標があっても `False`） | 契約 §5 は「すべての条件を満たしたときだけ `True`」と定めるので順序は結果に影響しないが、早期に除外して無駄な照合をしない形にした。T055(a) で条件 4 を削ると反例テストが落ちることを実測 |
 
 ### 6. 更新または削除したテスト（FR-035 / SC-008）
 
@@ -641,10 +663,39 @@ T016 の指示は「追加 11 項目の宣言」であるため既存 7 項目�
 初期状態が 3 項目のみ（AST） / 既存 CLI の契約を汚さない（設定クラスに判定モデルを足さない） /
 判定モデルの解決順（引数 → `TR_EVAL_MODEL` → 既定）。
 
+**新規（上限超過の検出と縮小。`tests/unit/test_degradation.py`、49 件。US3 / T047・T048）**
+
+| 関心 | テスト |
+|---|---|
+| 条件 3 の第 1 経路 | `test_a_context_length_code_is_detected`（400 / 413） |
+| 条件 3 の第 2 経路と語彙 | `test_an_invalid_request_with_the_vocabulary_is_detected` / `test_the_vocabulary_variants_are_all_detected`（5 語彙） |
+| `body` が文字列 | `test_a_string_body_is_handled_without_reading_attributes`（構造が無いので `False`。属性で拾う実装は誤認する） |
+| 条件 3 を満たさない `400` | `test_a_400_without_a_token_metric_is_not_detected`（5 入力）/ `test_other_status_codes_are_not_detected`（5 値） |
+| 条件 4（除外語彙） | `test_the_exclusion_words_win_over_the_metric`（5 語彙。T055 (a) の標的） |
+| 上限超過以外の例外 | `test_non_limit_exceptions_are_not_detected`（5 型）/ `test_a_class_that_only_imitates_the_name_is_not_detected` / `test_a_renamed_subclass_of_the_real_exception_is_detected` |
+| 上限表の引き当て | `test_a_known_model_returns_its_token_limit` / `test_an_unknown_model_returns_none` |
+| 縮小 | `test_shrink_keeps_the_head_and_drops_the_tail` / `test_shrink_is_monotonic_for_the_configured_ratios` |
+| 段数と停止条件 | `test_the_ladder_does_not_exceed_the_max_attempts` / `test_the_stage_count_follows_the_configuration` / `test_each_stage_shrinks_by_the_ratio` / `test_the_ladder_stops_when_the_input_cannot_shrink`（T055 (c) の標的）/ `test_the_ladder_stops_below_the_minimum_input_length` / `test_the_minimum_input_length_is_inclusive` |
+| 既知 / 未知モデル | `test_a_known_model_uses_the_token_limit_for_the_first_stage` / `test_an_unknown_model_shrinks_by_the_ratio_and_records_limit_known_false` / `test_a_model_without_a_name_is_treated_as_unknown` |
+| 記録と理由 | `test_the_record_carries_the_node_stage_lengths_and_reason` / `test_the_reason_is_not_the_compression_reason`（FR-019） |
+
+**拡張（連携。`tests/unit/test_llm.py` +7 件 → 28 件。US3 / T049）**:
+上限超過は再試行せず縮小して呼び直す / 縮小後の入力は元の先頭を保つ / 段を使い切ったら理由つきの
+例外（段数と縮小前後の長さ）/ 縮小後の非上限エラーは伝播する / `degrade` 未指定なら従来どおり
+例外を伝える / 構造化出力でも同じ縮退 / `note()` は 1 行だけ / 縮退が無ければ `note()` は
+出ない（既定の入力の出力を変えない）。
+
+**拡張（CLI。`tests/integration/test_cli_contract.py` +3 件。US3 / T050）**:
+縮退を使い切ったら stderr に理由（ノード・試した段数・縮小前後の長さ）＋ `[エラー]` 1 行で
+**exit 1** / 縮小して成功したら **exit 0** で `[補足] 縮退: …` が 1 行 / 除外語彙を含む `400` は
+縮退せず exit 1（誤認の禁止）。ハーネス（`cli_harness.py`）に `degrade_success` /
+`degrade_exhausted` / `degrade_other_error` の 3 シナリオを追加し、`parse_instruction` の
+LLM だけを上限超過のダブルに差し替える（他ノードは既定の応答のまま）。
+
 ### 7. 参照実装の欠陥を移植していないことの確認（FR-063 / FR-064）
 
-- [ ] 検出器がクラス名・モジュール名の**文字列**に依存していない（`isinstance` ベース）
-- [ ] 上限テーブルの引き当てで未知モデルを例外にしていない（比率方式）
+- [X] 検出器がクラス名・モジュール名の**文字列**に依存していない（`isinstance` ベース。US3 / T051）
+- [X] 上限テーブルの引き当てで未知モデルを例外にしていない（比率方式。US3 / T051）
 - [ ] 無効なオプションをモデルへ渡す経路が無い
 - [ ] ツール契約の非対称が無い（件数契約を生成と点検の**両方**の後に適用）
 - [ ] 常に真になる条件分岐・到達しない `except` 節が無い

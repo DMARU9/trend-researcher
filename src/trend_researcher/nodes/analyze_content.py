@@ -20,6 +20,11 @@ from trend_researcher.providers import get_provider
 from trend_researcher.providers.base import Provider
 from trend_researcher.state import AgentState
 from trend_researcher.tools import compression
+from trend_researcher.tools.degradation import (
+    DegradationError,
+    DegradeOptions,
+    options_for,
+)
 from trend_researcher.tools.llm import ainvoke_structured, ainvoke_text, build_model
 from trend_researcher.tools.parse import extract_list_items, extract_section
 
@@ -70,22 +75,30 @@ async def _structured_finding(
     retry_max: int,
     retry_wait_seconds: float,
     method: str,
+    env_prefix: str | None,
+    degrade: DegradeOptions,
 ) -> AnalysisFinding | None:
     """構造化出力で 1 件を解析する（規定回数を使い切ったら `None`）。
 
     例外は送出しない。`None` を返して呼び出し側を既存の決定的解析へ切り替える
     （FR-011 / FR-012）。`AnalysisFinding` の `id` / `title` は素材（候補）が正
     なので、ここでは上書きしない（呼び出し側で揃える）。
+
+    例外なのが縮退の使い切りだけ。これは送出して実行を終わらせる（FR-015）。
     """
     try:
         return await ainvoke_structured(
             AnalysisFinding,
             prompt,
             model=model,
+            env_prefix=env_prefix,
             retry_max=retry_max,
             retry_wait_seconds=retry_wait_seconds,
             method=method,
+            degrade=degrade,
         )
+    except DegradationError:
+        raise
     except Exception:  # noqa: BLE001 - 失敗は決定的解析で継続する（FR-011）
         return None
 
@@ -101,6 +114,7 @@ async def _analyze_one(
     retry_max: int,
     retry_wait_seconds: float,
     method: str,
+    degrade: DegradeOptions,
 ) -> tuple[AnalysisFinding, CompressedSource | None, bool]:
     """1 件を解析する。返り値は `(解析結果, 圧縮の記録（無ければ None）, フォールバックしたか)`。
 
@@ -126,6 +140,8 @@ async def _analyze_one(
         retry_max=retry_max,
         retry_wait_seconds=retry_wait_seconds,
         method=method,
+        env_prefix=provider.env_prefix,
+        degrade=degrade,
     )
     if structured is not None:
         # LLM には素材の識別子を渡していないため、`id` / `title` は候補から入れる
@@ -139,8 +155,10 @@ async def _analyze_one(
     result = await ainvoke_text(
         prompt,
         model=model,
+        env_prefix=provider.env_prefix,
         retry_max=retry_max,
         retry_wait_seconds=retry_wait_seconds,
+        degrade=degrade,
     )
     text = result.content if hasattr(result, "content") else str(result)
 
@@ -189,8 +207,14 @@ async def _analyze_all(
     retry_max: int,
     retry_wait_seconds: float,
     method: str,
+    degrade: DegradeOptions,
 ) -> tuple[list[AnalysisFinding], list[CompressedSource], int]:
-    """全件を並列上限 2 で解析し、`(解析結果, 圧縮の記録, フォールバック件数)` を返す。"""
+    """全件を並列上限 2 で解析し、`(解析結果, 圧縮の記録, フォールバック件数)` を返す。
+
+    縮退の記録（`degrade`）は候補をまたいで共有する。1 ノード実行＝1 本の梯子
+    （FR-017）。並列実行なので、段のカウンタを候補ごとに増やすと上限が
+    候補数倍になってしまう。
+    """
     sem = asyncio.Semaphore(2)
 
     async def _bounded(cand: Candidate) -> tuple[AnalysisFinding, CompressedSource | None, bool]:
@@ -206,6 +230,7 @@ async def _analyze_all(
                 retry_max=retry_max,
                 retry_wait_seconds=retry_wait_seconds,
                 method=method,
+                degrade=degrade,
             )
 
     outcomes = await asyncio.gather(*[_bounded(c) for c in candidates])
@@ -245,6 +270,8 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
     contexts_by_id = {c.id: c for c in state.get("contexts", [])}
     # 圧縮プロンプトへ載せる元の指示文（R-5）。無い実行（単体テスト）でも動くようにする。
     instruction = getattr(state.get("instruction"), "raw_text", "") or ""
+    # 縮退（US3）は 1 ノード実行につき 1 つの梯子を使い、記録を状態へ返す（FR-017）
+    degrade = options_for(configurable, NODE_ANALYZE_CONTENT)
     analyses, compressed, fallen_back = asyncio.run(
         _analyze_all(
             candidates,
@@ -256,6 +283,7 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
             retry_max=configurable.retry_max,
             retry_wait_seconds=configurable.retry_wait_seconds,
             method=configurable.structured_method,
+            degrade=degrade,
         )
     )
 
@@ -271,5 +299,6 @@ def analyze_content(state: AgentState, config: RunnableConfig) -> dict:
     return {
         "analyses": analyses,
         "compressed": compressed,
+        "degradations": degrade.records,
         "messages": progress_messages,
     }

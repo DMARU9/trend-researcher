@@ -12,6 +12,11 @@ from trend_researcher.models import AnalysisFinding, CommonTheme, CommonThemes
 from trend_researcher.progress import NODE_EXTRACT_COMMON, make_emitter
 from trend_researcher.providers import get_provider
 from trend_researcher.state import AgentState
+from trend_researcher.tools.degradation import (
+    DegradationError,
+    DegradeOptions,
+    options_for,
+)
 from trend_researcher.tools.llm import build_model, invoke_structured, invoke_text
 from trend_researcher.tools.parse import extract_list_items, extract_section
 
@@ -38,9 +43,16 @@ def extract_common(state: AgentState, config: RunnableConfig) -> dict:
 
     analyses = state.get("analyses", [])
     model = build_model("research", provider.env_prefix)
+    # 縮退（US3）は 1 ノード実行につき 1 つの梯子を使い、記録を状態へ返す（FR-017）
+    degrade = options_for(configurable, NODE_EXTRACT_COMMON)
     prompt = provider.extract_common_prompt.format(analyses=_format_analyses(analyses))
     themes, fallback_note = _extract_themes(
-        prompt, model=model, configurable=configurable, ids=[a.id for a in analyses]
+        prompt,
+        model=model,
+        configurable=configurable,
+        ids=[a.id for a in analyses],
+        degrade=degrade,
+        env_prefix=provider.env_prefix,
     )
     if fallback_note:
         # 進捗行（`messages`）ではなく補足行に出す（D-3 / FR-029）。
@@ -49,11 +61,21 @@ def extract_common(state: AgentState, config: RunnableConfig) -> dict:
     emitter.emit(NODE_EXTRACT_COMMON, "完了", detail=f"{len(themes)} 件の共通テーマ")
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
-    return {"common_themes": themes, "messages": progress_messages}
+    return {
+        "common_themes": themes,
+        "degradations": degrade.records,
+        "messages": progress_messages,
+    }
 
 
 def _extract_themes(
-    prompt: str, *, model: Any, configurable: Configuration, ids: list[str]
+    prompt: str,
+    *,
+    model: Any,
+    configurable: Configuration,
+    ids: list[str],
+    degrade: DegradeOptions,
+    env_prefix: str | None,
 ) -> tuple[list[CommonTheme], str]:
     """LLM の応答から共通テーマを得る（構造化出力 → 全失敗なら見出し解析）。
 
@@ -61,22 +83,31 @@ def _extract_themes(
     規定回数を使い切ったら**例外を送出せず**既存の `tools/parse.py` の経路
     （`_parse_themes` 経由の `extract_section` / `extract_list_items`）へ切り替える
     （FR-011 / FR-012）。空のリストは正常（共通点なし）。
+
+    縮退（上限超過）を使い切った場合だけは例外を伝える（FR-015 の「終了コード 1」を
+    このフォールバックで飲み込むと、失敗が成功に化ける）。
     """
     try:
         structured = invoke_structured(
             CommonThemes,
             prompt,
             model=model,
+            env_prefix=env_prefix,
             retry_max=configurable.retry_max,
             retry_wait_seconds=configurable.retry_wait_seconds,
             method=configurable.structured_method,
+            degrade=degrade,
         )
+    except DegradationError:
+        raise
     except Exception as exc:  # noqa: BLE001 - 応答の失敗はすべてフォールバックで継続する（FR-011）
         text = invoke_text(
             prompt,
             model=model,
+            env_prefix=env_prefix,
             retry_max=configurable.retry_max,
             retry_wait_seconds=configurable.retry_wait_seconds,
+            degrade=degrade,
         )
         content = text.content if hasattr(text, "content") else str(text)
         return _parse_themes(content, ids), (

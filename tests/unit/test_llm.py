@@ -24,6 +24,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from trend_researcher import config as config_module
+from trend_researcher.tools.degradation import DegradationError, DegradeOptions
 from trend_researcher.tools.llm import (
     ainvoke_structured,
     ainvoke_text,
@@ -369,3 +370,194 @@ def test_sync_wrappers_use_the_same_path() -> None:
         assert invoke_structured(
             _Sample, "prompt", env_prefix=None, retry_max=1, retry_wait_seconds=0.0
         ) == _Sample(value=9)
+
+
+# --- 段階的縮退との連携（US3 / FR-015〜019 / contract §6） ------------------
+#
+# 固定する契約:
+#   - 上限超過と判定された呼び出しは**再試行しない**（縮退へ渡す。§3 / §6）
+#   - 縮小して呼び直し、成功したら `Degradation` が段の数だけ記録される
+#   - 段を使い切ったら `DegradationError`（理由に段数と縮小前後の長さ）を送出する
+#   - 縮退した事実は `ProgressEmitter.note()` に 1 行で出る（`emit()` は変更しない）
+
+
+def _degrade_options(**overrides: Any) -> DegradeOptions:
+    """検証用の縮退の設定（`Configuration` の既定値と同じ値から始める）。"""
+    values: dict[str, Any] = {
+        "node_name": "analyze_content",
+        "max_attempts": 3,
+        "shrink_ratio": 0.9,
+        "min_input_chars": 1000,
+    }
+    values.update(overrides)
+    return DegradeOptions(**values)
+
+
+#: 縮退の検証に使う入力（既定の `min_input_chars = 1000` で 3 段縮退できる長さ）
+_LONG_PROMPT = "x" * 10000
+
+
+def test_a_limit_error_is_degraded_instead_of_retried(no_retry_sleep: Any) -> None:
+    """上限超過は再試行せず、入力を縮めて呼び直す（`retry_max` を消費しない）。"""
+    options = _degrade_options()
+    model, patch = _patch_model([_context_length_error(), "text"])
+    with patch:
+        result = asyncio.run(
+            ainvoke_text(
+                _LONG_PROMPT,
+                env_prefix=None,
+                retry_max=2,
+                retry_wait_seconds=1.0,
+                degrade=options,
+            )
+        )
+
+    assert result == "text"
+    # 初回（上限超過）＋ 縮小後の 1 回。再試行の 3 回にはならない
+    assert model.runnable.calls == 2
+    assert no_retry_sleep.sleeps == []
+    assert len(options.records) == 1
+    assert options.records[0].before_chars == 10000
+    assert options.records[0].after_chars == 9000
+
+
+def test_the_shrunk_input_keeps_the_head_of_the_original() -> None:
+    """縮小した入力は元の入力の先頭（末尾を落とす。contract §6）。"""
+    options = _degrade_options(max_attempts=2)
+    model, patch = _patch_model([_context_length_error()])
+    with patch, pytest.raises(DegradationError):
+        asyncio.run(
+            ainvoke_text(
+                _LONG_PROMPT,
+                env_prefix=None,
+                retry_max=2,
+                retry_wait_seconds=0.0,
+                degrade=options,
+            )
+        )
+
+    prompts = model.runnable.prompts
+    assert [len(prompt) for prompt in prompts] == [10000, 9000, 8100]
+    assert prompts[1] == prompts[0][:9000]
+    assert prompts[2] == prompts[0][:8100]
+
+
+def test_exhausting_the_ladder_raises_the_reason() -> None:
+    """段を使い切ったら理由つきの例外を送出する（`__main__.py` が exit 1 にする）。"""
+    options = _degrade_options(max_attempts=2)
+    model, patch = _patch_model([_context_length_error()])
+    with patch, pytest.raises(DegradationError) as excinfo:
+        asyncio.run(
+            ainvoke_text(
+                _LONG_PROMPT,
+                env_prefix=None,
+                retry_max=2,
+                retry_wait_seconds=0.0,
+                degrade=options,
+            )
+        )
+
+    # 初回＋2 段。段数は `degrade_max_attempts` を超えない
+    assert model.runnable.calls == 3
+    assert excinfo.value.stages == 2
+    assert excinfo.value.before_chars == 10000
+    assert excinfo.value.after_chars == 8100
+    assert "上限超過のため生成できませんでした" in str(excinfo.value)
+    assert "試した段数: 2" in str(excinfo.value)
+    assert "縮小前: 10000 文字 → 縮小後: 8100 文字" in str(excinfo.value)
+
+
+def test_a_non_limit_error_on_a_shrunk_call_is_propagated() -> None:
+    """縮小後の呼び出しでも、上限超過以外の失敗はそのまま伝える（誤認の禁止）。"""
+    options = _degrade_options()
+    model, patch = _patch_model([_context_length_error(), _connection_error()])
+    with patch, pytest.raises(openai.APIConnectionError):
+        asyncio.run(
+            ainvoke_text(
+                _LONG_PROMPT,
+                env_prefix=None,
+                retry_max=0,
+                retry_wait_seconds=0.0,
+                degrade=options,
+            )
+        )
+
+    assert model.runnable.calls == 2
+    assert len(options.records) == 1
+
+
+def test_a_limit_error_without_degrade_options_is_propagated() -> None:
+    """縮退の設定が無い経路では従来どおり例外を伝える（既定の挙動を変えない）。"""
+    model, patch = _patch_model([_context_length_error()])
+    with patch, pytest.raises(openai.BadRequestError):
+        asyncio.run(
+            ainvoke_text(
+                _LONG_PROMPT,
+                env_prefix=None,
+                retry_max=2,
+                retry_wait_seconds=1.0,
+            )
+        )
+
+    assert model.runnable.calls == 1
+
+
+def test_a_structured_limit_error_is_degraded_too() -> None:
+    """構造化出力の経路でも同じ縮退が働く（§1 の 3 形態で挙動を揃える）。"""
+    options = _degrade_options()
+    model, patch = _patch_model([_context_length_error(), _Sample(value=5)])
+    with patch:
+        result = asyncio.run(
+            ainvoke_structured(
+                _Sample,
+                _LONG_PROMPT,
+                env_prefix=None,
+                retry_max=0,
+                retry_wait_seconds=0.0,
+                degrade=options,
+            )
+        )
+
+    assert result == _Sample(value=5)
+    assert model.runnable.calls == 2
+    assert len(options.records) == 1
+    assert options.records[0].after_chars == 9000
+
+
+def test_the_degradation_is_reported_once_as_a_note(capsys: pytest.CaptureFixture[str]) -> None:
+    """縮退は `note()` の 1 行で実行後に確認できる（段数・縮小前後の長さ。FR-017）。"""
+    options = _degrade_options()
+    _model, patch = _patch_model([_context_length_error(), "text"])
+    with patch:
+        asyncio.run(
+            ainvoke_text(
+                _LONG_PROMPT,
+                env_prefix=None,
+                retry_max=0,
+                retry_wait_seconds=0.0,
+                degrade=options,
+            )
+        )
+
+    err = capsys.readouterr().err
+    assert err.count("[補足]") == 1
+    assert "縮退" in err
+    assert "9000" in err
+    assert "[1/7]" not in err  # `emit()` は呼ばない（進捗の契約を変えない）
+
+
+def test_no_note_is_emitted_when_nothing_is_degraded(capsys: pytest.CaptureFixture[str]) -> None:
+    """縮退が起きない呼び出しでは補足行を出さない（既定の入力の出力を変えない）。"""
+    _model, patch = _patch_model(["text"])
+    with patch:
+        asyncio.run(
+            ainvoke_text(
+                _LONG_PROMPT,
+                env_prefix=None,
+                retry_max=0,
+                retry_wait_seconds=0.0,
+                degrade=_degrade_options(),
+            )
+        )
+
+    assert capsys.readouterr().err == ""

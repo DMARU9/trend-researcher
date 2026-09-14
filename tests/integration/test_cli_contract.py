@@ -527,5 +527,69 @@ def test_cli_001_05_write_failure_has_single_error_line(cli_runner, tmp_path):
     assert len(error_lines) == 1
 
 
+# --- US3 / FR-015〜019: 上限超過の検出と段階的縮退 -------------------------
+#
+# 固定する契約（contracts/llm-invocation-contract.md §6）:
+#   - 段を使い切ったら stderr に理由（試した段数・縮小前後の長さ）を出して **exit 1**
+#   - 上限超過以外のエラーは縮退せず、既存どおり exit 1（誤認の禁止。FR-018）
+#   - 縮小して成功したら exit 0（既定の入力の出力を変えない）
+
+#: 縮退の検証に使う長い指示。`min_input_chars`（既定 1000）を十分に超え、3 段縮退
+#: しても下限を下回らない長さにする（1 文字 = 1 トークン換算のプロンプト）。
+LONG_INSTRUCTION = "AI 動画のトレンドを調査してください。" * 120
+
+#: 縮退のシナリオで使う共通引数
+DEGRADE_ARGS = (LONG_INSTRUCTION, "--platform", "x", "--max-results", "3")
+
+
+def test_us3_degradation_exhausted_exits_one(cli_runner):
+    """US3 シナリオ 2 / FR-015: 縮退を使い切ったら理由を stderr に出して exit 1。
+
+    理由には**試した段数**と**縮小前後の長さ**が入る（事後に確認できる。FR-017）。
+    """
+    result = cli_runner(*DEGRADE_ARGS, scenario="degrade_exhausted")
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "[エラー] 上限超過のため生成できませんでした" in result.stderr
+    assert "ノード: parse_instruction" in result.stderr
+    assert "試した段数: 3" in result.stderr
+    assert re.search(r"縮小前: \d+ 文字 → 縮小後: \d+ 文字", result.stderr)
+    assert "Traceback" not in result.stderr
+    # 報告は `[エラー]` で始まる 1 行に収まる（既存の失敗報告と同じ形式）
+    error_lines = [line for line in result.stderr_lines() if line.startswith("[エラー]")]
+    assert len(error_lines) == 1
+
+
+def test_us3_degradation_success_exits_zero(cli_runner):
+    """US3 シナリオ 4 / FR-015: 縮小して成功したら exit 0 で完走する。
+
+    実行した段は `note()` の 1 行として stderr に残る（FR-017 / FR-029）。
+    """
+    result = cli_runner(*DEGRADE_ARGS, scenario="degrade_success")
+
+    assert result.exit_code == 0
+    assert result.stdout != ""
+    assert re.search(r"\[補足\] 縮退: parse_instruction / 1 段 / \d+ → \d+ 文字", result.stderr)
+    assert "[エラー]" not in result.stderr
+    # 進捗は stderr のみ（stdout = レポート。CLI-002-1 / CLI-002-3）
+    assert "[1/7]" not in result.stdout
+
+
+def test_us3_non_limit_error_is_not_degraded(cli_runner):
+    """US3 シナリオ 3 / FR-018: 上限超過と判定されない 400 は縮退せず exit 1。
+
+    除外語彙（`invalid api key`）を含む 400 を縮退へ渡すと、入力を切り詰めて同じ
+    失敗を繰り返したうえ、原因が「上限超過」に化ける（誤認の禁止）。
+    """
+    result = cli_runner(*DEGRADE_ARGS, scenario="degrade_other_error")
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "[エラー] リサーチ実行中に問題が発生しました: " in result.stderr
+    assert "縮退" not in result.stderr
+    assert "試した段数" not in result.stderr
+
+
 
 

@@ -17,6 +17,7 @@ from trend_researcher.graph import EXECUTION_TIMEOUT, trend_researcher
 from trend_researcher.models import OutputFormat
 from trend_researcher.providers import available_platforms, get_provider
 from trend_researcher.rendering import render_report
+from trend_researcher.tools.degradation import DegradationError
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -146,6 +147,11 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
         # タイムアウト時は途中結果がないため、空のレポートを返す
+        return 1
+    except DegradationError as exc:
+        # 上限超過で入力を縮小し切っても生成できなかった（FR-015 / 契約 §6）。
+        # 理由（試した段数・縮小前後の長さ）をそのまま出す（握り潰すと原因が消える）。
+        print(f"[エラー] {exc}", file=sys.stderr, flush=True)
         return 1
     except Exception as exc:  # noqa: BLE001
         print(f"[エラー] リサーチ実行中に問題が発生しました: {exc}", file=sys.stderr, flush=True)
