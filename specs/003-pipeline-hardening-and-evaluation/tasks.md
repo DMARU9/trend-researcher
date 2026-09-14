@@ -824,6 +824,12 @@ FR-035 / SC-008 の「既存テストを削除しない」に反するため**�
 |---|---|---|
 | `test_source_text_is_truncated_at_twenty_thousand_chars` → `test_over_threshold_source_is_compressed_not_silently_truncated` | 改名・書き換え（「素材**全体**が圧縮の入力に渡る」「解析プロンプトには圧縮結果が載る」を固定する形に） | 旧テストは `source_text[:20000]` という**無言の切り捨て**を固定していたが、FR-001 の MUST NOT（先頭のみを無言で切り捨ててはならない）がこの振る舞いを禁じるため、期待値を維持できない（spec Assumptions の「観測可能な振る舞いを固定する既存テストは変更しない」の**唯一の例外**）。**削除せず置き換え**、新しい契約を固定し直した |
 
+**更新（T101。docstring のみ。アサーションは不変）**
+
+| テスト | 変更 | 理由 |
+|---|---|---|
+| `test_a_known_model_returns_its_token_limit` | docstring を「前方一致ではなく部分一致で引く」→「登録済みの鍵は**自分の値**を返す」に修正 | T101 で引き方が「最長の前方一致」になったため、旧 docstring は実装と食い違う（期待値 `openai:gpt-4o` / `openai:gpt-4.1-mini` は両方の規則で同じ値になり、アサーションは変更していない） |
+
 **新規（値域・宣言の走査）**: `test_every_declared_field_has_a_description` /
 `test_added_fields_declare_defaults_and_ui_type` / `test_added_numeric_fields_declare_their_range` /
 `test_added_fields_reject_out_of_range_values` / `test_structured_method_is_a_literal_choice` /
@@ -1195,7 +1201,7 @@ FR-061 / FR-062 / FR-069（実施済みのテストで固定されている）�
 - [X] T098 [US6] **（CRITICAL: 憲法 原則 I / US6 の独立テスト）** 実走の使用量が結果に載らない配線を直し、テストで固定する。`script/evaluate.py` の `_add_usage` は `state["usage"]`（`list[ModelUsage]`）を受けるのに `Mapping` 前提で早期 return するため、実測では常に `{}` → `records.usage_summary` が `status: 不明`・トークン全 `None` になる（キー名も `records.USAGE_KEYS` の `prompt_tokens` / `completion_tokens` と集計の `input_tokens` / `output_tokens` で不一致）。畳む場所（`_add_usage` か `records`）を一意にし、`_add_usage` を実値で駆動する単体テストを `tests/unit/test_evaluation_entrypoint.py` に足す（ファイル: `script/evaluate.py` / `tests/unit/test_evaluation_entrypoint.py`）per FR-042 / SC-024 (partial)
 - [ ] T099 [US6] テストスイートを 60 秒以内で完走させる（SC-013）。残る下限はサブプロセス起動 55 件 × 約 1.3 秒で、内訳は CLI の import コスト（`python -X importtime` で 1.19 秒。`openai` 507 ms / `langgraph.graph` 496 ms）。**凍結契約の固定方法（FR-035 / SC-008）は変えずに** import を遅延させて実測し、到達できない場合は「起動回数 × 実測コスト」の下限と不可能性の根拠を §5 に確定する（不変条件: 既定の入力の `stdout` / `stderr` / 終了コード / `messages` / 呼び出し回数が変わらない）（ファイル: `src/trend_researcher/tools/llm.py` / `src/trend_researcher/__main__.py` / `specs/003-pipeline-hardening-and-evaluation/tasks.md`）per SC-013 (partial)
 - [ ] T100 [US6] 評価の実走で `include_intermediate` を有効にして実行し、中間データ（採用したクエリ・素材長・解析件数・縮退や失敗の発生）を結果から確認できるようにする。現状 `script/evaluate.py` に `include_intermediate` の参照が無く、`_generate` は `report` と `usage` しか読まない。記録する項目と確認方法をテストで固定する（ファイル: `script/evaluate.py` / `tests/eval/records.py` / `tests/unit/test_evaluation_entrypoint.py`）per FR-046 (partial)
-- [ ] T101 [US3] `get_model_token_limit` の部分文字列一致（`src/trend_researcher/tools/degradation.py` の `key in model`）を、参照実装の欠陥（辞書の反復順に依存し、短い鍵が長い鍵を影にする）を移植しない形へ直す。実測: `openai:o1-pro` / `openai:o3-pro` が先行キーに影にされ（`openai:o1` の値を変えると `openai:o1-pro` が 111111 を返す＝自身の登録値 200000 は到達不能）、未登録の `google:gemini-pro-vision` が 32768 で拾われる。完全一致優先の規則と「影になる鍵が無い」ことをテストで固定する（ファイル: `src/trend_researcher/tools/degradation.py` / `tests/unit/test_degradation.py`）per FR-063 (contradicts)
+- [X] T101 [US3] `get_model_token_limit` の部分文字列一致（`src/trend_researcher/tools/degradation.py` の `key in model`）を、参照実装の欠陥（辞書の反復順に依存し、短い鍵が長い鍵を影にする）を移植しない形へ直す。実測: `openai:o1-pro` / `openai:o3-pro` が先行キーに影にされ（`openai:o1` の値を変えると `openai:o1-pro` が 111111 を返す＝自身の登録値 200000 は到達不能）、未登録の `google:gemini-pro-vision` が 32768 で拾われる。完全一致優先の規則と「影になる鍵が無い」ことをテストで固定する（ファイル: `src/trend_researcher/tools/degradation.py` / `tests/unit/test_degradation.py`）per FR-063 (contradicts)
 - [ ] T102 [US3] 圧縮と縮退が同じ実行で起きる経路（圧縮で素材を削った後に上限超過で梯子を登る）を実経路のテストで固定する。AST 走査では両方を扱うテストが 0 件（`tests/unit/test_compile_report.py` の 2 件は状態の手注入のみ）で、統合の縮退シナリオも `parse_instruction` だけである（ファイル: `tests/unit/test_analyze_content.py` / `tests/integration/test_cli_contract.py`）per FR-019 (partial)
 - [ ] T103 [US6] `tests/eval/axes.md` の観点↔制約の対応表を機械的に固定する。変異探針では観点 3 と 4 の制約を入れ替えても `tests/unit/test_evaluation.py` が 39 passed（識別子が表に現れるかしか見ていない）（ファイル: `tests/unit/test_evaluation.py` / `tests/eval/axes.md`）per FR-048 / FR-074 (partial)
 - [ ] T104 [US3] 実装メモ §7「参照実装の欠陥を移植していないことの確認」の未チェック 3 項目（無効なオプションを渡す経路・ツール契約の対称性・常に真の条件と到達しない分岐）をコード走査と実測で確定してチェックを付ける。到達しない分岐の実例: `tools/degradation.py` の `_budget` の `tokens <= 0` はテーブル最小 32768 − 予約 10,000 > 0 で到達不能（カバレッジでも未実行）。到達不能を論証できるなら削除し、残す場合は根拠をコメントとテストで固定する（ファイル: `specs/003-pipeline-hardening-and-evaluation/tasks.md` / `src/trend_researcher/tools/degradation.py`）per FR-063 / FR-064 (partial)
@@ -1213,3 +1219,4 @@ Issue を閉じる。ゲートは各コミットで `uv run pytest -q` / `uv run
 | タスク | 変更 | ゲート（実測） | 変異探針 |
 |---|---|---|---|
 | T098 | `script/evaluate.py` の `_add_usage` を `list[ModelUsage]`（要素数＝`calls`、判明分のトークン）へ直し、対応表 `USAGE_SOURCES` を追加。`tests/unit/test_evaluation_entrypoint.py` に 6 件（対応の両方向・実値の畳み込み・不明の扱い・0 件・配線の実測） | **1,032 passed / カバレッジ 97.42% / ruff 0 件 / mypy 29 ファイル 0 件**（100.82 秒） | 修正前の `Mapping` 版へ戻すと **5 failed**（退避から復元後にフルスイート green。sha256 `530b1938…` の一致を確認） |
+| T101 | `src/trend_researcher/tools/degradation.py` の `get_model_token_limit` を「登録済みの鍵との**最長の前方一致**」へ変更（完全一致はその最長ケースとして必ず優先される）。`tests/unit/test_degradation.py` に 6 件（全鍵が自分の値を返す・実測した影・影になり得る組の値反転・最長優先・派生名の前方一致・名前の途中に出る鍵） | **1,038 passed / カバレッジ 97.42% / ruff 0 件 / mypy 29 ファイル 0 件**（98.41 秒） | (1) 最長優先の並び（`sorted(..., key=len, reverse=True)`）を外すと **3 failed** (2) 参照実装の規則（`key in model` を辞書順）では **4 failed**（退避から復元後にフルスイート green。sha256 の一致を確認） |

@@ -169,10 +169,19 @@ def is_token_limit_exceeded(exc: BaseException) -> bool:
 
 
 def get_model_token_limit(model: str) -> int | None:
-    """モデルのコンテキスト上限（トークン）を引く。表に無ければ `None`（R-18）。"""
-    for key, limit in MODEL_TOKEN_LIMITS.items():
-        if key in model:
-            return limit
+    """モデルのコンテキスト上限（トークン）を引く。表に無ければ `None`（R-18）。
+
+    規則は**最も長い前方一致**（表の鍵と `provider:model` の形で突き合わせる）。
+    登録済みの鍵は自分自身が最長の前方一致になるため、**完全一致が必ず優先される**。
+
+    参照実装（`open_deep_research/src/utils.py:900`）は `model_key in model_string` の
+    部分文字列を**辞書の反復順**に見るため、(1) 短い鍵が長い鍵を影にする
+    （`openai:o1` の値を変えると `openai:o1-pro` の答えが変わり、登録値が到達不能に
+    なる）、(2) 鍵が名前の途中に現れても一致する。どちらも移植しない（FR-063 / FR-064）。
+    """
+    for key in sorted(MODEL_TOKEN_LIMITS, key=len, reverse=True):
+        if model.startswith(key):
+            return MODEL_TOKEN_LIMITS[key]
     return None
 
 

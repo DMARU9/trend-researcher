@@ -19,6 +19,7 @@ import openai
 import pytest
 
 from trend_researcher.tools.degradation import (
+    MODEL_TOKEN_LIMITS,
     REASON_TOKEN_LIMIT,
     DegradeOptions,
     Ladder,
@@ -259,7 +260,7 @@ def test_a_renamed_subclass_of_the_real_exception_is_detected() -> None:
 
 
 def test_a_known_model_returns_its_token_limit() -> None:
-    """表にあるモデルは上限トークンを返す（前方一致ではなく部分一致で引く）。"""
+    """表にあるモデルは上限トークンを返す（登録済みの鍵は**自分の値**を返す。R-18）。"""
     assert get_model_token_limit("openai:gpt-4o") == 128000
     assert get_model_token_limit("openai:gpt-4.1-mini") == 1047576
 
@@ -268,6 +269,78 @@ def test_an_unknown_model_returns_none() -> None:
     """表に無いモデルは `None`（既定の `openai:mimo-v2.5` は表に無い。R-18）。"""
     assert get_model_token_limit("openai:mimo-v2.5") is None
     assert get_model_token_limit("") is None
+
+
+def test_no_registered_key_is_shadowed() -> None:
+    """表のすべての鍵が**自分の値**を返す（短い鍵が長い鍵を影にしない。FR-063 / FR-064）。
+
+    参照実装は `key in model` の部分文字列を辞書の反復順に見るため、`openai:o1` が
+    `openai:o1-pro` を覆い、`openai:o1-pro` 自身の登録値は到達不能になる。
+    """
+    shadowed = {
+        key: get_model_token_limit(key)
+        for key, limit in MODEL_TOKEN_LIMITS.items()
+        if get_model_token_limit(key) != limit
+    }
+
+    assert shadowed == {}
+
+
+def test_the_reported_shadowing_does_not_come_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """実測した影（`openai:o1` → `openai:o1-pro`）が戻らない（FR-063）。
+
+    収束チェックの実測: 参照実装の規則では `openai:o1` の値を 111111 に変えると
+    `openai:o1-pro` の答えが 111111 になり、自身の登録値 200000 は到達不能だった。
+    """
+    assert get_model_token_limit("openai:o1-pro") == MODEL_TOKEN_LIMITS["openai:o1-pro"]
+
+    monkeypatch.setitem(MODEL_TOKEN_LIMITS, "openai:o1", 111111)
+
+    assert get_model_token_limit("openai:o1-pro") == MODEL_TOKEN_LIMITS["openai:o1-pro"]
+    assert get_model_token_limit("openai:o1") == 111111
+
+
+def test_no_key_shadows_a_longer_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """影になり得る組を**値の差**で炙り出す（表の値が等しい組でも検出する。FR-063）。
+
+    `openai:o1` と `openai:o1-pro` はどちらも 200000 なので、値の比較だけでは影を
+    見つけられない。短い鍵の値を反転しても長い鍵の答えが動かないことを確かめる。
+    """
+    pairs = [
+        (short, long)
+        for short in MODEL_TOKEN_LIMITS
+        for long in MODEL_TOKEN_LIMITS
+        if short != long and long.startswith(short)
+    ]
+
+    assert pairs, "影になり得る組が表に無い（この検査が空振りしている）"
+    for short, long in pairs:
+        monkeypatch.setitem(MODEL_TOKEN_LIMITS, short, -1)
+
+        assert get_model_token_limit(long) == MODEL_TOKEN_LIMITS[long], (short, long)
+
+
+def test_the_longest_registered_key_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """前方一致では**最も長い**鍵が勝つ（短い鍵が覆い隠さない。FR-063）。"""
+    monkeypatch.setitem(MODEL_TOKEN_LIMITS, "openai:aaa", 111)
+    monkeypatch.setitem(MODEL_TOKEN_LIMITS, "openai:aaa-bbb", 222)
+
+    assert get_model_token_limit("openai:aaa-bbb") == 222
+    assert get_model_token_limit("openai:aaa-bbb-ccc") == 222
+    assert get_model_token_limit("openai:aaa-ccc") == 111
+
+
+def test_a_variant_name_matches_by_prefix() -> None:
+    """日付つきの派生名は前方一致で引ける（鍵は `provider:model` の形。R-18）。"""
+    assert get_model_token_limit("openai:gpt-4o-2024-08-06") == 128000
+    assert get_model_token_limit("anthropic:claude-3-5-sonnet-20241022") == 200000
+    assert get_model_token_limit("google:gemini-pro-vision") == 32768
+
+
+def test_a_key_inside_the_name_is_not_matched() -> None:
+    """鍵が名前の**途中**に現れても一致にしない（部分文字列ではなく前方一致。FR-063）。"""
+    assert get_model_token_limit("mimo-v2.5:openai:gpt-4o") is None
+    assert get_model_token_limit("gpt-4o") is None
 
 
 # --- `shrink` ------------------------------------------------------------
