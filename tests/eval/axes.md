@@ -1,6 +1,6 @@
 # 観点の対応表（FR-038 / FR-040 / FR-048 / FR-074）
 
-**Feature**: `003-pipeline-hardening-and-evaluation` | **更新**: 2026-09-14
+**Feature**: `003-pipeline-hardening-and-evaluation` | **更新**: 2026-09-15
 
 評価基盤が採点する観点と、**生成側のプロンプトが課す制約**（`src/trend_researcher/prompts.py`）、
 および**参照実装の 6 評価**との対応を 1 つの表にまとめる。この表は
@@ -24,8 +24,8 @@
 |---|---|---|---|---|---|---|
 | 1 | `overall_quality` | 総合品質（下位基準 6 つの集約） | `eval_overall_quality`（採用） | する | `output_language` / `citation` / `relevance_target` | `OverallQualityScore`（下位基準 6 つ＋理由） |
 | 2 | `relevance` | 関連性 | `eval_relevance`（採用） | する | `relevance_target` | `AxisScore` |
-| 3 | `structure` | 構造 | `eval_structure`（採用） | する | `output_structure` | `AxisScore` |
-| 4 | `groundedness` | 根拠性 | `eval_groundedness`（採用） | する | `citation` | `AxisScore` |
+| 3 | `structure` | 構造 | `eval_structure`（採用） | する | `output_structure` / `output_purity` / `citation_count` | `AxisScore` |
+| 4 | `groundedness` | 根拠性 | `eval_groundedness`（採用） | する | `citation` / `citation_context` | `AxisScore` |
 | 5 | `completeness` | 網羅性 | `eval_completeness`（採用） | する | `query_count` | `AxisScore` |
 | 6 | `output_language` | 出力言語の一致 | 対応なし（**本リポジトリで追加**。FR-038 が追加を許可） | する | `output_language` | `AxisScore` |
 | 7 | `correctness` | 正しさ | `eval_correctness`（**対象外**） | しない | — | —（判定モデルへ送らない） |
@@ -68,6 +68,9 @@ SC-028）。正規化は `(score - 1) / 4` で行い、範囲外の値はその�
 | `citation` | 引用は原文のままで、改変・創作をしない | 「投稿内の代表的なキーフレーズ（そのまま引用できる形）」（`X_ANALYZE_CONTENT_PROMPT` / `YOUTUBE_ANALYZE_CONTENT_PROMPT`） | `groundedness` / `overall_quality` |
 | `relevance_target` | 対象は「バズっている投稿」ではなく「トピックに関連する投稿」 | 「目的は「バズっている投稿」ではなく「トピックに関連する投稿」を拾うこと」（`X_PLAN_SEARCH_PROMPT`） | `relevance` / `overall_quality` |
 | `output_structure` | 決められた見出し構成に従う | 「## 概要」「## ブログの活用アイデア」（`X_ANALYZE_CONTENT_PROMPT` / `YOUTUBE_ANALYZE_CONTENT_PROMPT`） | `structure` |
+| `output_purity` | 出力は指定の形式だけにし、前置き・後書き・謝辞・補足説明を書かない | 「前置き・後書き・謝辞・説明を書かないこと」（8 定数の【停止条件】。T071 で追加） | `structure` |
+| `citation_count` | 引用の箇条数と活用アイデアの行数を指定の範囲（3〜6）に収める | 「引用は 3〜6 箇条、活用アイデアは 3〜6 行に収める」（`X_ANALYZE_CONTENT_PROMPT` / `YOUTUBE_ANALYZE_CONTENT_PROMPT`。T071 で追加） | `structure` |
+| `citation_context` | 引用には原文だけでなく、どんな文脈で語られたかの説明を添える | 「どんな文脈で語られていたか」（`X_ANALYZE_CONTENT_PROMPT` / `YOUTUBE_ANALYZE_CONTENT_PROMPT` の【出力形式】。T071 で追加） | `groundedness` |
 
 **制約を増やすときの手順**: 先に `prompts.py` 側で制約を宣言し、`CONSTRAINTS` と
 `CONSTRAINT_EVIDENCE`、測る観点（`AXIS_CONSTRAINTS`）を同時に足す。制約だけを足して
@@ -95,3 +98,36 @@ SC-028）。正規化は `(score - 1) / 4` で行い、範囲外の値はその�
 採点の値域は検査しない（FR-067）、型違い・欠落は例外にせず「取得失敗」として記録する
 （FR-039）、`correctness` を黙って落とさず `excluded_axes` に残す（FR-038）。
 これらは `tests/unit/test_evaluation.py` が固定する。
+
+---
+
+## 4. 最終突き合わせの結果（T092。FR-048 / FR-074）
+
+`prompts.py`（T071 が加えた【停止条件】・【出力形式】と 2 箇所への明示）・
+`Configuration` の項目・この対応表の 3 つを突き合わせた結果を残す。
+
+**(a) 制約側から評価側へ足したもの（評価項目を先に足す）**。T071 の【停止条件】と
+【出力形式】には、既存の 5 制約（`output_language` / `query_count` / `citation` /
+`relevance_target` / `output_structure`）に入っていない制約が 3 つ現れていた。
+制約を書いたまま測らない状態（FR-048 の禁止）を作らないため、観点を増やさずに
+測る側（`CONSTRAINTS` / `CONSTRAINT_EVIDENCE` / `AXIS_CONSTRAINTS`）を先に足した。
+
+| 足した制約 | 根拠（`prompts.py` の文言） | 測る観点 |
+|---|---|---|
+| `output_purity` | 「前置き・後書き・謝辞・説明を書かないこと」（【停止条件】） | `structure` |
+| `citation_count` | 「引用は 3〜6 箇条、活用アイデアは 3〜6 行に収める」 | `structure` |
+| `citation_context` | 「どんな文脈で語られていたか」（【出力形式】の引用の説明） | `groundedness` |
+
+**(b) `Configuration` の項目との関係**。設定は「レポートをどう作るか」を変える
+（使用量・リトライ数・並列度・圧縮など）もので、**観点（何を測るか）は変えない**。
+そのためこの表に「設定 → 観点」の列は置かない（置くと「設定ごとに採点項目が
+変わる」と読めてしまう）。次の 2 点だけを実装側で固定している。
+
+- 評価の実走は `Configuration.load()` を通し、`--config` のキーは
+  `Configuration.model_fields` に限る（未知キーは起動時に拒否。T066）。
+- 判定モデル（`TR_EVAL_MODEL`）は `Configuration` の項目にしない
+  （`judge_model` / `eval_model` というフィールドを作らない。FR-069）。初期状態へ
+  入れるのは `messages` / `platform` / `max_results` の 3 つだけ（FR-065）。
+
+根拠は `tests/unit/test_evaluation_entrypoint.py`（初期状態 3 項目・判定モデルの
+別解決・出荷 CLI の引数を再実装していないこと）にある。

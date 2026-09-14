@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+import ast
 import io
+from pathlib import Path
 
 import pytest
 
@@ -248,3 +250,102 @@ def test_note_keeps_emit_messages_unchanged():
     assert [message.content for message in emitter.get_messages()] == [
         "[3/7] search ... 完了（3 件を選定）"
     ]
+
+
+# --- 追加の観測は `note()` だけ（T093。`emit(` は増えていない） ---------------
+
+#: 出荷コードのノード実装が置かれているディレクトリ。
+NODES_DIR = Path(__file__).resolve().parents[2] / "src" / "trend_researcher" / "nodes"
+
+#: ノードごとの `emit()` 呼び出し箇所。各ノードは「開始」「完了」の 2 箇所だけを
+#: 持ち、`compile_report` は既存の「キャッシュ書き込み失敗」の報告が 1 つ加わる
+#: （`test_cli_001_05_write_failure_has_single_error_line` が固定する既存の振る舞い）。
+#: 新しい観測を足すときは `note()` を使う（この表が増えないことが契約）。
+EMIT_CALL_SITES = {
+    "analyze_content.py": 2,
+    "compile_report.py": 3,
+    "extract_common.py": 2,
+    "fetch.py": 2,
+    "parse_instruction.py": 2,
+    "plan_search.py": 2,
+    "search.py": 2,
+}
+
+#: ノードごとの `note()` 呼び出し箇所。US1〜US8 で足した追加の観測はここにだけ
+#: 現れる（圧縮・縮退・失敗の内訳・使用量・点検の失敗）。
+#: `fetch` / `search` は追加の観測を持たない（既存の `notes` は provider が作る）。
+NOTE_CALL_SITES = {
+    "analyze_content.py": 3,
+    "compile_report.py": 2,
+    "extract_common.py": 1,
+    "fetch.py": 0,
+    "parse_instruction.py": 1,
+    "plan_search.py": 1,
+    "search.py": 0,
+}
+
+
+def _attribute_calls(source: str, name: str) -> int:
+    """`<何か>.<name>(...)` の呼び出しを数える（AST で見る）。"""
+    tree = ast.parse(source)
+    return sum(
+        1
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == name
+    )
+
+
+def _node_sources() -> dict[str, str]:
+    """出荷コードのノード実装（`nodes/__init__.py` を除く）を読む。"""
+    return {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted(NODES_DIR.glob("*.py"))
+        if path.name != "__init__.py"
+    }
+
+
+def test_the_scan_covers_every_node_module():
+    """走査対象は `nodes/` の実装（7 ノード）。新しいノードを足したら走査も広げる。"""
+    assert sorted(_node_sources()) == sorted(EMIT_CALL_SITES)
+
+
+def test_every_node_keeps_only_the_start_and_done_emit_call_sites():
+    """`emit()` の呼び出し箇所は増えていない（開始 / 完了の形のまま。T093）。"""
+    counts = {name: _attribute_calls(src, "emit") for name, src in _node_sources().items()}
+
+    assert counts == EMIT_CALL_SITES
+    assert sum(counts.values()) == len(NODE_ORDER) * 2 + 1
+
+
+def test_additional_observations_use_note_only():
+    """US1〜US8 の追加の観測は `note()` にだけ現れる（T093 / D-3）。"""
+    counts = {name: _attribute_calls(src, "note") for name, src in _node_sources().items()}
+
+    assert counts == NOTE_CALL_SITES
+    assert sum(counts.values()) > 0  # 走査が空振りしていない（非空虚性）
+
+
+def test_nodes_do_not_write_to_stdout_or_stderr_directly():
+    """ノードは自前で出力しない（観測の入口を `emit()` / `note()` の 2 つに限る）。
+
+    直接 `print` / `sys.stdout` / `sys.stderr` を書くと、stdout はレポート専用
+    という契約（CLI-002-1）と `messages` の蓄積を迂回できてしまう。
+    """
+    sources = _node_sources()
+    direct = {
+        name: sorted(word for word in ("print(", "sys.stdout", "sys.stderr") if word in src)
+        for name, src in sources.items()
+    }
+
+    assert {name: words for name, words in direct.items() if words} == {}
+
+
+def test_the_call_scanner_sees_what_it_counts():
+    """走査の非空虚性: 呼び出しを足したら数が増える（空振りの `0` と区別する）。"""
+    source = "def f(e):\n    e.emit('a', '開始')\n    e.note('補足')\n"
+
+    assert _attribute_calls(source, "emit") == 1
+    assert _attribute_calls(source, "note") == 1
+    assert _attribute_calls(source + "    e.emit('a', '完了')\n", "emit") == 2

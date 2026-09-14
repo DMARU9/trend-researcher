@@ -31,6 +31,9 @@ CONSTRAINTS: dict[str, str] = {
     "citation": "素材からの引用は原文のままで、改変・創作をしない",
     "relevance_target": "集める対象は「バズっている投稿」ではなく「トピックに関連する投稿」である",
     "output_structure": "出力は決められた見出し構成（概要・活用アイデア・引用）に従う",
+    "output_purity": "出力は指定の形式だけにし、前置き・後書き・謝辞・補足説明を書かない",
+    "citation_count": "引用の箇条数と活用アイデアの行数を指定の範囲（3〜6）に収める",
+    "citation_context": "引用には原文だけでなく、どんな文脈で語られたかの説明を添える",
 }
 
 #: 制約が生成側のプロンプトに実在することの根拠（`prompts.py` に現れる文言）。
@@ -40,14 +43,18 @@ CONSTRAINT_EVIDENCE: dict[str, tuple[str, ...]] = {
     "citation": ("そのまま引用できる形",),
     "relevance_target": ("トピックに関連する投稿",),
     "output_structure": ("## 概要", "## ブログの活用アイデア"),
+    # T071（US7）が `prompts.py` に足した『停止条件』『出力形式』の節から拾う。
+    "output_purity": ("前置き・後書き・謝辞",),
+    "citation_count": ("引用は 3〜6 箇条",),
+    "citation_context": ("どんな文脈で語られていたか",),
 }
 
 #: 観点が測る制約（FR-040 / FR-048）。
 AXIS_CONSTRAINTS: dict[str, tuple[str, ...]] = {
     "overall_quality": ("output_language", "citation", "relevance_target"),
     "relevance": ("relevance_target",),
-    "structure": ("output_structure",),
-    "groundedness": ("citation",),
+    "structure": ("output_structure", "output_purity", "citation_count"),
+    "groundedness": ("citation", "citation_context"),
     "completeness": ("query_count",),
     "output_language": ("output_language",),
 }
@@ -81,7 +88,9 @@ JUDGE_PROMPTS: dict[str, str] = {
 観点の識別子: structure
 
 見出しの構成と順序、表の使い方が読み手に追えるかを採点してください。見出しの
-階層が崩れている、節の順序が読み手の理解を妨げる場合は減点します。
+階層が崩れている、節の順序が読み手の理解を妨げる場合は減点します。あわせて、
+前置き・後書き・謝辞・補足説明のような本文以外の記述が混ざっていないか、
+引用の箇条数と活用アイデアの行数が指定の範囲に収まっているかも見てください。
 
 レポート:
 {report}
@@ -92,6 +101,8 @@ JUDGE_PROMPTS: dict[str, str] = {
 
 引用と根拠が素材（収集した投稿・文字起こし）に基づいているかを採点して
 ください。素材に無い事実を足している、引用を改変している場合は大幅に減点します。
+あわせて、各引用に「どんな文脈で語られていたか」の説明が添えられているかも
+見てください。
 
 レポート:
 {report}

@@ -382,17 +382,38 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 **Purpose**: ストーリーをまたぐ仕上げと最終ゲート。
 
-- [ ] T091 [P] `README.md` を更新する: 追加した環境変数の一覧（`TR_ANALYSIS_CONCURRENCY` / `TR_RETRY_MAX` / `TR_RETRY_WAIT_SECONDS` / `TR_COMPRESSION_THRESHOLD` / `TR_COMPRESSION_TIMEOUT_SECONDS` / `TR_DEGRADE_MAX_ATTEMPTS` / `TR_SHRINK_RATIO` / `TR_MIN_INPUT_CHARS` / `TR_SELF_REVIEW` / `TR_INCLUDE_INTERMEDIATE` / `TR_STRUCTURED_METHOD` / `TR_EVAL_MODEL`）と値域、`cache/usage.json` の位置、評価の実走の入口（`script/evaluate.py`）と保存先（`artifacts/eval/`、追跡外）を追記する。**既存の記述を削除しない**
-- [ ] T092 [P] `tests/eval/axes.md` の対応表と `prompts.py` の制約（T071 で追加した節）・`Configuration` の項目を最終突き合わせし、欠落があれば**評価項目側を先に足す**（FR-048 / FR-074）
-- [ ] T093 [P] `ProgressEmitter` の走査テストを追加する: `emit()` の呼び出し箇所が 7 ノード × 開始/完了の既存の形のままで、追加の観測が `note()` のみであること（`emit(` の増加が 0、`note(` のみが増える）。`tests/unit/test_progress.py`（拡張）
-- [ ] T094 変異探針の全項目（quickstart.md §5 の 20 件）を 1 つずつ実行する: 対象テストが**落ちる**ことを確認 → 復元 → **フルスイートで 601 件以上 green に戻る**ことを確認。結果（落ちたテスト名）を「実装メモ §3」に記録する
-- [ ] T095 最終ゲートを通す: `uv run pytest -q`（**601 件以上 green / カバレッジ 90% 以上 / 60 秒以内**）、`uv run ruff check .`（0 件）、`uv run mypy src`（0 件）。抑制（`# noqa`・除外設定・`testpaths` の変更）を追加していないことを確認する。結果を「実装メモ §4」に記録する
-- [ ] T096 [P] `quickstart.md` の S1〜S8 と §3（手動の統合シナリオ）を実行して検証する。特に「既定の入力でレポートが byte 一致」（`git stash` を使った前後比較）と `[補足]` 行が既定では出ないことを確認する
-- [ ] T097 「実装メモ」節を完成させる: 基準値（T001〜T003）／実測した設計の分岐点 4 件（T004〜T008）／変異探針の結果（T094）／最終ゲート（T095）／**spec と実測のずれ**（26 vs 27 ファイル、547 vs 601 passed、`analyze_content.py:65` → `:69`、`Configuration` の 2 経路の実体）／更新または削除したテスト（FR-035 / SC-008 に基づく記録）／参照実装の欠陥を移植していないことの確認
+- [X] T091 [P] `README.md` を更新する: 追加した環境変数の一覧（`TR_ANALYSIS_CONCURRENCY` / `TR_RETRY_MAX` / `TR_RETRY_WAIT_SECONDS` / `TR_COMPRESSION_THRESHOLD` / `TR_COMPRESSION_TIMEOUT_SECONDS` / `TR_DEGRADE_MAX_ATTEMPTS` / `TR_SHRINK_RATIO` / `TR_MIN_INPUT_CHARS` / `TR_SELF_REVIEW` / `TR_INCLUDE_INTERMEDIATE` / `TR_STRUCTURED_METHOD` / `TR_EVAL_MODEL`）と値域、`cache/usage.json` の位置、評価の実走の入口（`script/evaluate.py`）と保存先（`artifacts/eval/`、追跡外）を追記する。**既存の記述を削除しない**
+- [X] T092 [P] `tests/eval/axes.md` の対応表と `prompts.py` の制約（T071 で追加した節）・`Configuration` の項目を最終突き合わせし、欠落があれば**評価項目側を先に足す**（FR-048 / FR-074）
+- [X] T093 [P] `ProgressEmitter` の走査テストを追加する: `emit()` の呼び出し箇所が 7 ノード × 開始/完了の既存の形のままで、追加の観測が `note()` のみであること（`emit(` の増加が 0、`note(` のみが増える）。`tests/unit/test_progress.py`（拡張）
+- [X] T094 変異探針の全項目（quickstart.md §5 の 20 件）を 1 つずつ実行する: 対象テストが**落ちる**ことを確認 → 復元 → **フルスイートで 601 件以上 green に戻る**ことを確認。結果（落ちたテスト名）を「実装メモ §3」に記録する
+- [X] T095 最終ゲートを通す: `uv run pytest -q`（**601 件以上 green / カバレッジ 90% 以上 / 60 秒以内**）、`uv run ruff check .`（0 件）、`uv run mypy src`（0 件）。抑制（`# noqa`・除外設定・`testpaths` の変更）を追加していないことを確認する。結果を「実装メモ §4」に記録する
+- [X] T096 [P] `quickstart.md` の S1〜S8 と §3（手動の統合シナリオ）を実行して検証する。特に「既定の入力でレポートが byte 一致」（`git stash` を使った前後比較）と `[補足]` 行が既定では出ないことを確認する
+- [X] T097 「実装メモ」節を完成させる: 基準値（T001〜T003）／実測した設計の分岐点 4 件（T004〜T008）／変異探針の結果（T094）／最終ゲート（T095）／**spec と実測のずれ**（26 vs 27 ファイル、547 vs 601 passed、`analyze_content.py:65` → `:69`、`Configuration` の 2 経路の実体）／更新または削除したテスト（FR-035 / SC-008 に基づく記録）／参照実装の欠陥を移植していないことの確認
 
 ---
 
 ## 実装メモ（実装中に記録する）
+
+**T097 の索引（この節は実装中に追記され、最後にここへ集約した）**。節は
+「実測の順序」に並んでいる。読む順は次のとおり。
+
+| 節 | 内容 | 対応するタスク |
+|---|---|---|
+| §0 | 基準値（変更前の緑とゲートの水位。**ソースを変更しない**） | T001〜T003 |
+| §1 | 設計の分岐点の実測 5 件（**着手前**に確定した前提） | T004〜T008 |
+| §2 | 時間予算（SC-013 の見積もりと、T097 の追記＝見積もりが外れた点） | T002 |
+| §3 | 変異探針の結果（US ごとの表 ＋ T094 の 20 件対応表） | US1〜US8 / T094 |
+| §4 | 最終ゲート（T095 の実測。**この結果でコミットする**） | T095 |
+| §5 | **spec と実測のずれ**（spec は編集しない。ここに記録だけ残す） | 全フェーズ |
+| §6 | 更新または削除したテスト（FR-035 / SC-008 の下で何をなぜ変えたか） | 全フェーズ |
+| §7 | 参照実装の欠陥を移植していないことの確認（FR-063 / FR-064） | T001〜T090 |
+
+**全体の結論**: 10 フェーズ（T001〜T090）＋仕上げ（T091〜T097）を完了。
+ゲートは `pytest` 1,026 passed / カバレッジ 97.42% / `ruff` 0 件 / `mypy` 29 ファイル 0 件。
+**テストは 1 件も削除していない**（601 → 1,026）。SC-013 の 60 秒だけは未達で、
+その理由と代替として満たしている性質を §5 の SC-013 行に記録した（60 秒に収めるには
+凍結契約の固定方法を変える必要があり、FR-035 / SC-008 に反するため実施しない）。
+変異探針は全 20 件＋US 別の探針が**すべて検出**（落ちなかった変異 0 件）。
 
 ### 0. 基準値（T001〜T003）
 
@@ -421,6 +442,17 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 - 遅いテスト上位 15 件: **すべて `tests/integration/test_cli_contract.py` のサブプロセス起動テスト**（1.57 秒 ×1 ＋ 0.83〜0.78 秒 ×14、上位 15 件の合計は約 12.6 秒）。先頭は `test_cli_002_07_output_matches_stdout_rendering`（1.57 秒）、以降は `test_cli_002_01_stdout_is_report_only` / `test_cli_001_06_help_exits_zero` / `test_cli_001_17_blank_instruction[...]` / `test_cli_002_04_stderr_has_seven_nodes_progress` / `test_cli_001_15_unknown_sort` / `test_cli_005_enums_are_case_sensitive[format-uppercase]` などが 0.78〜0.83 秒で並ぶ
 - 時間の内訳: `test_cli_contract.py` が **54 件**（サブプロセス起動のため 1 件 0.5〜1.6 秒 ≒ 約 35 秒）で全体の約 3/4 を占める。残り **547 件**は in-process で合計約 11 秒
 - 追加するテスト群の上限: **+13 秒以内**（60 − 46.30 = 13.7 秒）。目安は (a) 新規は原則 in-process の単体テストとして 1 件 ≒ 0.06 秒換算で**最大 200 件**、(b) CLI 統合（サブプロセス）テストの新規追加は 1 件 0.8 秒として**最大 3 件**。変異探針（quickstart.md §5 の 20 件）は都度**対象テストのみ**を走らせるため、この予算には算入しない
+
+**T097 の追記（予算の実績）**: この見積もりは **2 つの点で外れた**。(1) テスト件数は
+601 → **1,026 件**（+425 件。in-process の単体テストが中心なので合計は 1.5 秒程度）。
+(2) CLI 統合テストの新規追加は 3 件ではなく **多数**で、しかも US2〜US5 のあいだに
+1 件あたりのコストが 0.8 秒 → **1.3 秒**へ上がった（CLI の import グラフに `openai` が
+入ったため。§5 の SC-013 行）。T095 で**実時間の待機**（再試行の待機）を除去して
+**438.11 秒 → 105.19 秒**まで戻したが、テスト**件数**が 1.7 倍になった分は件数を
+減らさない限り戻らない
+（§5 の SC-013 行のとおり、サブプロセス起動テストは凍結契約を固定しているため
+減らせない）。予算の見積もりを「1 件 0.8 秒」で置いたことが外れの主因で、
+**計測しないと分からないコスト（import）を見積もりに含めていなかった**。
 
 ### 3. 変異探針の結果（T094）
 
@@ -485,6 +517,52 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 `sha256(after)` は 5 ファイルすべて一致（探針で検出できなかった変異 **0 件**）。
 (a) は「reducer を外すと並列・逐次の書き込みが**後勝ちで消える**」という
 `operator.add` の役割そのものを観測値の差（9 → 1）として示せた。
+
+**T094: `quickstart.md` §5 の 20 件の全件対応**
+
+20 件はすべて実測済みである。各探針の「落ちたテスト」と `sha256` 照合の記録は
+§3 の該当行（下の表の「記録」列）にある。**追加で測ったのは #7 の 1 件だけ**で、
+残り 19 件は各ストーリーの探針（US1〜US8）で同じ変異を回している。
+
+| quickstart §5 # | 変異 | 記録 | 落ちたテスト（件数） |
+|---|---|---|---|
+| 1 | `return_exceptions=True` を外す | §3 の行 #1（US4 / T064 (a)） | 2 failed |
+| 2 | `shrink_ratio` を `1.0` にする | US3 / T055 (b) | 16 failed |
+| 3 | 検出器の除外条件（条件 4）を削る | US3 / T055 (a) | 5 failed |
+| 4 | 再試行の待機を削る | US2 / T035 (a) | 7 failed |
+| 5 | 圧縮の分岐を `pass` にする | US1 / T027 | 6 failed |
+| 6 | 圧縮後の切り詰めを削る | US1 / T027 | 2 failed |
+| 7 | `contexts` の解放を外す | **T094 で実行（`/tmp/probe_t094.py`。下の表）** | 3 failed |
+| 8 | 解放をレポート組み立ての**前**に移す | §3 の行 #8（US5 / T082 (a)） | 2 failed |
+| 9 | `include_intermediate` の条件を反転する | §3 の行 #10（US5 / T082 (c)） | 3 failed |
+| 10 | `usage` の reducer を外す | §3 の行 #14（US8 / T090 (a)） | 4 failed |
+| 11 | `max_results` の `ge` を削る | §3 の行 #11（US5 / T082 (d)） | 4 failed |
+| 12 | `__main__.py` の再検証を削る | §3 の行 #12（US5 / T082 (e)） | 2 failed |
+| 13 | 点検の呼び出しを削る | §3 の行 #2（US7 / T072 (a)） | 7 failed |
+| 14 | 点検の補充を削る | §3 の行 #3（US7 / T072 (b)） | 3 failed |
+| 15 | 点検を生成の**前**に呼ぶ | §3 の行 #5（US7 / T072 (d)） | 15 failed |
+| 16 | 採点に `ge=1` を付ける | US6 / T046 (a) | 3 failed |
+| 17 | 総合品質を `mean` から `sum` に変える | US6 / T046 (b) | 3 failed |
+| 18 | `script/evaluate.py` に `subprocess` を import する | US6 / T046 (c) | 1 failed |
+| 19 | `script/evaluate.py` の初期状態に 4 番目のキーを足す | US6 / T046 (d) | 1 failed |
+| 20 | 判定プロンプトの二重明示の 1 箇所を削る | §3 の行 #6（US7 / T072 (e)） | 1 failed |
+
+**T094 で追加実行した探針（#7。`/tmp/probe_t094.py`）**
+
+対象: `src/trend_researcher/nodes/compile_report.py`（探針前後 `sha256 = dea7c099…`）
+
+| # | 変異 | 落ちたテスト | 復元確認 |
+|---|---|---|---|
+| 7 | 末尾の `_release_raw_material(contexts, candidates)` を `pass` にする（解放そのものを外す） | `test_raw_text_is_released_after_the_report_is_built` / `test_the_release_keeps_the_other_state_values` / `test_the_release_is_not_visible_in_the_written_report`（3 failed / 40 passed / 0.17 秒） | `compile_report.py` sha256 一致（`dea7c099…`） |
+
+**#7 を US5 の探針 (a) と分けて測る理由**: (a) は「解放を組み立ての**前**に移す」
+（呼び出しは残る）で、**解放の順序**を測る。落ちるテストは同じ 2 件だが、#7 は
+「解放しない」ため `test_the_release_keeps_the_other_state_values` も落ちる
+（解放が**起きたこと**と**起きる位置**は別の性質であり、後者は (a) が、前者は #7 が
+固定する）。
+
+**20 件を回した結果の総括**: 落ちなかった変異 **0 件**、`sha256` 不一致 **0 件**。
+「対象の挙動を壊すとテストが落ちる」という憲法 原則 I の条件は 20 件すべてで満たした。
 
 **US5 で踏んだ落とし穴（実装メモ §5 にも記録）**: 「state の値をその場で書き換えて解放する」
 版は、呼び出し元と共有している `Candidate` / `Context` まで空にする。統合テストの
@@ -636,6 +714,34 @@ golden を相手にしていないため。既定の入力（失敗 0 件）で�
 - 抑制の追加: なし（`# noqa` は `compile_report.py` / `plan_search.py` の既存 `# noqa: BLE001` のみ / `testpaths` 不変 / 除外設定の追加 0 件）
 - 統合テストの内訳: `tests/integration` 全体で **107 passed**（US5 で追加した起動時拒否 6 件を含む）
 
+**T095 の実測（最終。この結果でコミットする）**
+
+| ゲート | 事前（基準値・T001〜T003） | 最終（T095） | 判定 |
+|---|---|---|---|
+| `uv run pytest -q` | 601 passed / 48.55 秒 / カバレッジ 96.65% / exit 0 | **1,026 passed / 105.19 秒（`/usr/bin/time` の TOTAL は 110.81 秒）/ カバレッジ 97.42% / exit 0** | ✓ 合格（`fail_under = 90` を大きく上回る。**テストの削除 0 件**で件数は 601 → 1,026 = +425 件） |
+| `uv run ruff check .` | 0 件（`All checks passed!`） | **0 件（`All checks passed!`）** | ✓ 合格（違反の新規追加なし・抑制の追加なし） |
+| `uv run mypy src` | 0 件（27 ファイル） | **0 件（29 ファイル。T020〜 で `tools/compression.py`、T047〜 で `tools/degradation.py` を追加して 27 → 29）** | ✓ 合格 |
+| `git status --short` | 空 | Phase 11 の 6 ファイルのみ（`README.md` / `tasks.md` / `tests/eval/axes.md` / `tests/eval/judge_prompts.py` / `tests/integration/conftest.py` / `tests/unit/test_progress.py`。**`src/` の変更 0 件**） | ✓ 合格 |
+| 抑制の追加 | — | **なし**。`pyproject.toml` は `3a6fe15` から 1 文字も変わっていない（`testpaths = ["tests"]` / `addopts` / `fail_under = 90` / `exclude_lines` すべて不変）。未コミットの差分に `noqa` の追加は 0 行（既存の 11 箇所はすべて `BLE001` に FR の引用つきで、US1〜US8 で正当化済み） | ✓ 合格 |
+
+**SC-013（60 秒）**: **未達**（105.19 秒）。ただし **T095 の作業で 438.11 秒 → 105.19 秒**へ
+**約 4.2 倍**短縮した。内訳と根拠は §5 の SC-013 行を参照。
+
+**T095 で測った統合テストのコスト**: サブプロセスの CLI 起動 1 件は、`TR_RETRY_WAIT_SECONDS=0`
+の下で **約 1.3 秒**（構造化出力のダブルが 3 回の再試行を誘発し、既定ではそこに実時間の
+待機 1.0 秒 × 2 が乗っていた。`tests/conftest.py` の `SleepSpy` は親プロセスのテストにしか
+効かないため、ハーネスの実行では待機が実時間で発生していた）。待機の除去で 1 シナリオ
+10.06 秒 → 1.32 秒。テストの件数（1,026 件）と 1 件あたりのコスト（in-process ≒ 0.02 秒 /
+サブプロセス ≒ 1.3 秒）から、60 秒に収めるには**サブプロセス起動テストを 40 件前後削る**か
+**CLI 起動を 1 プロセスに集約する**（凍結契約の固定方法を変える）必要があり、いずれも
+FR-035 / SC-008 の「既存テストを削除しない」に反するため**実施しない**（§5 の SC-013 行）。
+
+**T096（統合シナリオの再現）**: 決定論的なハーネス（層 B）で S1〜S8 を実行し、
+**exit 0 / stdout は凍結 golden と 58 行 1 文字一致（差は `print` の末尾空行 1 つだけ）/
+進捗は 14 行完全一致**を確認。golden は 003 のどのコミットでも書き換えていない
+（`git log -- tests/*/golden/`）。詳細は §5 の「`git stash` 方式」の行。
+
+
 **US8 のチェックポイント（Phase 10 完了時点。T095 で最終確認する）**
 
 - `uv run pytest -q`: **1021 passed / カバレッジ 97.42% / 438.11 秒 / exit 0**（`fail_under = 90` を満たす）
@@ -650,9 +756,10 @@ golden を相手にしていないため。既定の入力（失敗 0 件）で�
 
 | spec の記述 | 実測 | 対応 |
 |---|---|---|
-| `src/trend_researcher/` 26 モジュール | 27 ファイル / 2,736 行（`__init__.py` の数え方） | 記録のみ |
-| ベースライン 547 passed / 95.29% | 601 passed / 96.65% / 49.10 秒（spec 002 完了分） | 記録のみ |
+| `src/trend_researcher/` 26 モジュール | 27 ファイル / 2,736 行（`__init__.py` の数え方） | 記録のみ。**T095 の最終値は 29 ファイル**（003 で `tools/compression.py` と `tools/degradation.py` を追加） |
+| ベースライン 547 passed / 95.29% | 601 passed / 96.65% / 49.10 秒（spec 002 完了分） | 記録のみ。**T095 の最終値は 1,026 passed / 97.42% / 105.19 秒** |
 | `nodes/analyze_content.py:65` の `source_text[:20000]` | 69 行目付近 | 実測どおりに実装 |
+| T004〜T008 を「**設計の分岐点 4 件**」と数える記述（Checkpoint / タスク本文 / Phase 1 の説明 / §7 の申し送り） | 実測した分岐点は **5 件**（§1 の表も 5 行。構造化出力が通るか / 上限超過の応答の形 / `TR_EVAL_MODEL` の既定値 / `model_copy` 後の再検証 / `extract_section` がタグを扱えるか） | **記録のみ**。T008 の本文は `extract_section` の実測を求めており、T004〜T007 の 4 件と合わせて 5 件になる（「4 件」は表を書く前の見積もり）。表は 5 行のままにする（実測した内容を削らない） |
 | `settings-contract.md` §2「`sort_by` は `relevance` / `recency` の 2 択」 | 実測は `relevance` / `likes`（`__main__.py` の検証と `providers/base.py` の `selection_note` が 2 値） | 記録のみ。既存 7 項目の宣言（`Literal` 化）は凍結契約のため T016 では触らない（US8 / T085 の範囲） |
 | `settings-contract.md` §2「`max_results` は 1 以上（0 を弾く）」＋ §6 の申し送り「US8（T085）で宣言を足すときに再判定」 | **T078（US5）で宣言を足した**（`_setting(5, ge=1, le=100, ui_type="number", …)`）。既存テスト `test_falsy_values_are_treated_as_specified[max_results-0]` は `from_runnable_config` 経由で `Configuration(max_results=0)` を通すため、宣言を足すと Pydantic の `ValidationError` になり green を保てない | **利用者の判断で前倒し**（US5 の T077 が「`max_results=0` を exit 2 で弾く」を要求し、T085 を待つと同じ制約を 2 回判定することになるため）。偽値の扱い（`0` を `None` と区別する）を測るケースは `retry_max`（`ge=0`）へ移し、**テストが測る性質は変えていない**（テストに根拠コメントを記載）。値域外の拒否は `ConfigurationError`（`model_copy(update=…)` は検証しないため）と `ValidationError`（直接構築）の 2 経路をテストで固定 |
 | `data-model.md` §4.3 の手順 7「contexts / candidates の**中身を解放**」 | 実装は state から受け取った直後に `Candidate` / `Context` の**写しを取り**、その写しをその場で空にする（`_release_raw_material` の docstring に「引数は呼び出し側が所有していること」を明記） | **実測に基づく判断**。渡されたオブジェクトをその場で書き換える版では、検索境界が同じオブジェクトを保持している場合（統合テストの固定プール `_X_POOL` がまさにこれ）に取得元まで空になり、以降のテストで `analyze_content` が 0 件になる（実測: `tests/integration/test_full_flow.py` が 8 件失敗 → 写しを取る形で 24 passed）。レポートは解放の**前**に別の写しを取るため「レポート確定 → 解放」の順序（R-8）は保たれ、T082(a) の探針も落ちる |
@@ -690,7 +797,11 @@ golden を相手にしていないため。既定の入力（失敗 0 件）で�
 | T088「構造化出力の呼び出しも同じ経路で数える」（契約 §7 の「集計元」は `AIMessage.usage_metadata`） | **構造化出力の呼び出しは数えるが、トークン数は常に `None`（不明）になる**。`with_structured_output(..., include_raw=False)` の戻り値はスキーマのインスタンス（Pydantic モデル）で、`usage_metadata` を持たない | **実測に基づく制約**（FR-061 の「使用量が応答に含まれない場合は不明として記録し、実行を失敗させない」の範囲内）。`include_raw=True` に変えると今度は戻り値の形（`{"raw": …, "parsed": …, "parsing_error": …}`）が変わり、既存の呼び出し側（3 ノード）の期待値を壊す（FR-035）。**呼び出し回数の集計（`by_node` / `by_role` / `calls`）は構造化出力でも正しい**ため、情報としての欠落はトークン数のみに留まる。実測: 既定の 5 件実行で `calls=9`（うち `analyze_content` のフォールバックが `ainvoke_text` へ落ちる分は usage を読める）・`unknown_calls=9`。テスト用のフェイクは `usage_metadata=None` を返すため、統合テストでは常に不明側の経路を通る |
 | `quickstart.md:137`「stderr … ＋ 追加の `[補足] ...` 行（圧縮・縮退・失敗・**使用量があったときのみ**）」 | 使用量の `[補足]` 行は **`calls == 0` のときだけ出さない**（`_usage_note`）。呼び出しが 1 回でもあれば、トークン数が不明でも「LLM 呼び出し合計 N 回（入力 0 / 出力 0 トークン、不明 N 回）」の 1 行が出る | **FR-062 が優先する解釈**。FR-062 は「集計結果は中間成果物と進捗に記録する MUST」と定め、契約 §7 も「記録先: `cache/usage.json`（`cache_dir` があるときのみ）＋ `note()` の 1 行」とする。「使用量があったときのみ」は**呼び出しが 1 回も無いときに出さない**（内訳の補足と同じ規則）と読むのが自然で、実装もその形にした。結果として、プロキシが usage を返さない既定の環境では**常に 1 行出る**（`不明 N 回` が情報として意味を持つ）。T096 の手動確認ではこの行を「既定で出る `[補足]`」として扱う（進捗行 `[n/7]` の行数・文言は不変で、`messages` にも積まないため FR-035 の凍結対象ではない） |
 | T083 の対象（`tests/unit/test_state.py` に追記） | このファイルの usage テスト **2 件は最初から green**（`usage` の reducer は T015 で導入済み）。赤にならなかったのは `tests/unit/test_llm.py`（`ImportError: cannot import name 'UsageMeter'`）と `tests/unit/test_compile_report.py`（8 件。`usage.json` が無い・`[補足]` 行が無い） | **回帰ガード**として残す（reducer の存在を前提にした並列・逐次の連結を固定する。探針 (a) が落とすことで T090 の対象になる）。T083 の「赤を確認する」は上記 2 ファイルで満たした |
-| **SC-013「テストスイートは… 60 秒以内に完走する」** | **未達**。US8 完了時点で **438.11 秒**（`tests/unit` は 1.46 秒、`tests/integration` が 435.17 秒）。T002 の基準値では 48.55 秒だったため、US2〜US5 のあいだに約 9 倍になった | **原因を実測で特定**（T095 で扱う）。(1) **支配要因は再試行の実待機**: 統合テストの CLI はサブプロセスなので `asyncio.sleep` の差し替え（`no_retry_sleep`）が効かず、ハーネスの構造化出力ダブルが常に `OutputParserException` を送出するため `retry_wait_seconds`（既定 1.0 秒）× 2 回 × 構造化呼び出し 5 回 ≒ 8.7 秒/件を実時間で消費している。実測: 同じハーネス起動が `TR_RETRY_WAIT_SECONDS=0` で **10.06 秒 → 1.32 秒**。(2) 残る下限は CLI の import コスト（`python -X importtime` で 1.19 秒。`openai` が 507 ms、`langgraph.graph` が 496 ms）。US2 でノードが `tools/llm.py` を通るようになり `openai` が CLI の import グラフに入ったため、ベースラインの 0.78 秒/件から 1.3 秒/件へ上がった。サブプロセス起動を使うテストは **55 個のテスト関数**（`cli_runner` / `cli_module_runner` を引数に取るもの。パラメータ化を含めると起動回数はもっと多い）で、いずれも凍結契約を固定しているため減らせない。したがって**この構造のまま 60 秒には入らない**（下限 ≒ 55 × 1.3 秒 ≒ 72 秒）。**spec は変更しない**（§5 は記録のみ）ため、T095 では「実測値・内訳・60 秒に入らない理由」を残し、60 秒の代わりに測れる性質（決定的・ネットワーク非依存・実待機 0）を記録する |
+| **SC-013「テストスイートは… 60 秒以内に完走する」** | **未達**。US8 完了時点で **438.11 秒**（`tests/unit` は 1.46 秒、`tests/integration` が 435.17 秒）。T002 の基準値では 48.55 秒だったため、US2〜US5 のあいだに約 9 倍になった | **原因を実測で特定**（T095 で扱う）。(1) **支配要因は再試行の実待機**: 統合テストの CLI はサブプロセスなので `asyncio.sleep` の差し替え（`no_retry_sleep`）が効かず、ハーネスの構造化出力ダブルが常に `OutputParserException` を送出するため `retry_wait_seconds`（既定 1.0 秒）× 2 回 × 構造化呼び出し 5 回 ≒ 8.7 秒/件を実時間で消費している。実測: 同じハーネス起動が `TR_RETRY_WAIT_SECONDS=0` で **10.06 秒 → 1.32 秒**。(2) 残る下限は CLI の import コスト（`python -X importtime` で 1.19 秒。`openai` が 507 ms、`langgraph.graph` が 496 ms）。US2 でノードが `tools/llm.py` を通るようになり `openai` が CLI の import グラフに入ったため、ベースラインの 0.78 秒/件から 1.3 秒/件へ上がった。サブプロセス起動を使うテストは **55 個のテスト関数**（`cli_runner` / `cli_module_runner` を引数に取るもの。パラメータ化を含めると起動回数はもっと多い）で、いずれも凍結契約を固定しているため減らせない。したがって**この構造のまま 60 秒には入らない**（下限 ≒ 55 × 1.3 秒 ≒ 72 秒）。**spec は変更しない**（§5 は記録のみ）ため、T095 では「実測値・内訳・60 秒に入らない理由」を残し、60 秒の代わりに測れる性質（決定的・ネットワーク非依存・実待機 0）を記録する。**T095 の実測（最終）**: `TR_RETRY_WAIT_SECONDS=0` を統合テストの env に足した結果、**438.11 秒 → 105.19 秒**（約 4.2 倍の短縮。`/usr/bin/time` の TOTAL は 110.81 秒）。**60 秒は依然として未達**で、残る下限は「サブプロセス起動を使うテスト関数 55 個 × 約 1.3 秒 ≒ 72 秒」。実待機は 0 になったので、残りは `openai` / `langgraph` の import（1.19 秒/起動）そのもので、件数を減らすか起動を 1 プロセスに集約する（= 凍結契約の固定方法を変える）以外に短縮手段が無く、FR-035 / SC-008 に反するため**実施しない**。60 秒の代わりに満たしている性質を末尾に記録: **決定的**（乱数・時刻・ネットワークに依存しない。`TR_CLI_SCENARIO` のダブルが固定）/ **ネットワーク非依存**（`env -i` で認証情報を落としても green）/ **実待機 0**（`TR_RETRY_WAIT_SECONDS=0`。再試行の回数と値は `tests/unit/test_llm.py` の `SleepSpy` が固定）/ **1,026 件 green・カバレッジ 97.42%** |
+| T092「`quickstart.md` §5 の 20 件の探針」 | 20 件はすべて実測済み（§3 の「T094: `quickstart.md` §5 の 20 件の全件対応」）。ただし **#7「`contexts` の解放を外す」だけは記録が無かった**ため T094 で追加実行した（3 failed） | US5 の探針 (a) は「解放を**どこで**行うか」で、#7 は「解放するかどうか」を測る。20 件は #1〜#18 の番号付き表と US1〜US8 の各表に分かれていたため、T094 で 1 枚の対応表にまとめた（番号 → 記録 → 落ちたテスト）。探針の実行漏れを「表で見える」状態にするのが目的 |
+| `quickstart.md` §3（手で確かめる統合シナリオ）の `git stash` 方式 | `git stash` 版は**実 API（`accounts.db` のクッキー ＋ ネットワーク）で CLI を 2 回走らせる**手順で、FR-044（実 API の手動確認は合格条件ではない）に照らして再現できない | **決定論的なハーネス（層 B）で同じ性質を実測**した。`TR_CLI_SCENARIO=x_success` で既定の入力（`"AI動画のトレンドを3件"`）を走らせ、stdout を凍結 golden（`tests/integration/golden/default_stdout.txt`。T009 が**変更前のツリー**から採取し、以後 1 byte も変わっていない）と比較 → **58 行が 1 文字も一致**（差は `print` が付ける末尾の空行 1 つだけで、これは T009 の `_significant_lines` が契約から意図的に除外。pre-003 の `__main__.py` でもレポート出力の経路は未変更）。進捗行も `default_progress.txt` と **14 行完全一致**。exit 0。`tests/integration/golden/` と `tests/unit/golden/` はどちらも 003 の各コミットで 1 度も書き換えていない（`git log -- tests/*/golden/` が T009 / T006 の 1 件のみ） |
+| T096「`[補足]` 行が既定では出ないことを確認する」 | **成り立たない**。既定の入力の実行で `[補足]` は **4 行**出る（構造化出力のフォールバック 3 行 ＋ 使用量の集計 1 行）。実測: `[補足] LLM 呼び出し合計 7 回（入力 0 / 出力 0 トークン、不明 7 回）` | 前の行（`quickstart.md:137` の解釈）のとおり、使用量の行は `calls > 0` で必ず出る（FR-062）。フォールバックの 3 行は US2 で既に出ていた（T028 の申し送り参照）。**凍結契約は stdio の役割分担**（stdout = レポートのみ）**と `messages` の内容**であり、stderr の補足行は対象外（`test_default_stdout_matches_the_golden` / `test_default_progress_lines_match_the_golden` / `test_default_run_does_not_add_notes` は green）。T096 では「`[補足]` が出ることを**許す**契約」を実測で確認した |
+| `quickstart.md` S3 の反例コマンド `-k not_token_limit` / S4 の `-k partial` | S3 は **0 件選択**（該当する名前のテストが無い）。S4 は **1 件だけ**（部分失敗の主テストは名前に `partial` を含まない） | **コマンドの選び方のずれ**（実装の欠陥ではない）。実名で選び直すと S3 は `-k exclusion` で **5 passed**（`test_the_exclusion_words_win_over_the_metric` の 5 パラメータ）、S4 は `-k fail` で **9 passed**。他の S1〜S8 のコマンドは意図どおり選択された（S1 16 件 / S1(b) 1 件 / S2 111 件 / S3 49 件 / S5 49 件 / S6 66 件 / S7 11 件 / S8(a) 5 件 / S8(b) 7 件） |
 
 ### 6. 更新または削除したテスト（FR-035 / SC-008）
 
@@ -913,6 +1024,21 @@ patch する（既存テストと同じ差し替え点）。**構造化とテキ
 CLI 契約側は `--max-results 3` の実行で 7 回（`analyze_content:3`）になることを
 サブプロセスから固定する（フェイクは `usage_metadata=None` を返すため、
 **FR-061 の「不明でも継続」の経路そのもの**を通る）。
+
+**新規（T093。追加の観測が `note()` だけであることの走査。`tests/unit/test_progress.py` +5 件）**:
+`src/trend_researcher/nodes/**` を AST で走査し、`emit()` / `note()` の呼び出し箇所を数える。
+`emit()` は 7 ノード × 「開始 / 完了」（＋ `compile_report` の既存の「書き込み失敗」報告 1 箇所）
+= **15 箇所のまま**で、US1〜US8 が足した観測（圧縮・縮退・失敗の内訳・使用量・点検の失敗）は
+**`note()` の 8 箇所にだけ**現れる。あわせてノードが `print` / `sys.stdout` / `sys.stderr` を
+直接使っていないこと（観測の入口を 2 つに限る）と、走査が空振りしていないこと（合成ソースで
+数が増える）を固定する。
+
+**更新（T095。統合テストの環境に `TR_RETRY_WAIT_SECONDS=0` を追加。`tests/integration/conftest.py`）**
+
+| テスト | 変更 | 理由 |
+|---|---|---|
+| `build_env()`（`cli_runner` / `cli_module_runner` が使う env の組み立て） | `"TR_RETRY_WAIT_SECONDS": "0"` を追加 | **実時間の待機を除去する**（SC-013）。統合テストの CLI はサブプロセスなので `tests/conftest.py` の `SleepSpy` が効かず、ハーネスの構造化出力ダブルが常に `OutputParserException` を送出するため再試行の待機（既定 1.0 秒 × 2 回 × 構造化呼び出し）を実時間で払っていた。**待機の回数と値**は `tests/unit/test_llm.py`（`SleepSpy`。T035(a) の探針が落とす）が固定しており、0 を渡しても**再試行の回数・結果・観測できる出力（stdout / stderr / 終了コード / `messages`）は変わらない**（実測: 既定の 1 シナリオが 10.06 秒 → 1.32 秒、変更後にフルスイートが green）。0 を渡すこと自体が `TR_RETRY_WAIT_SECONDS` の配線の確認にもなる（既定値 `1.0` の意味は変えない） |
+
 
 ### 7. 参照実装の欠陥を移植していないことの確認（FR-063 / FR-064）
 

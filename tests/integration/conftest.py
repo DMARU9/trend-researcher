@@ -69,6 +69,12 @@ def build_env(**overrides: str | None) -> dict[str, str]:
         "NO_COLOR": "1",
         # 実認証情報を渡さない（空文字を明示。`.env` の override=False で上書きされない）
         "OPENAI_API_KEY": "",
+        # 再試行の待機を実時間で払わない（SC-013。実測: 1 シナリオ 10.06 秒 → 1.32 秒）。
+        # 待機の**回数と値**は `tests/unit/test_llm.py`（`SleepSpy`）が固定しており、
+        # ここで 0 を渡しても再試行の回数・結果・出力（stdout / stderr / 終了コード）は
+        # 変わらない（実測で確認）。0 を渡すことは `TR_RETRY_WAIT_SECONDS` の配線の
+        # 確認にもなる。
+        "TR_RETRY_WAIT_SECONDS": "0",
     }
     for key, value in overrides.items():
         if value is None:
