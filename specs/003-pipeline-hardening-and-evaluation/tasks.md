@@ -133,7 +133,7 @@ US5（注入と拒否の挙動）と US8（宣言の検証と Studio）で**使�
 - [X] T016 `src/trend_researcher/configuration.py` に次の 3 つを追加する（T007 の実測結果に従う）: (a) 追加 11 項目の宣言（`ge` / `le` / `Literal` / `description` / `json_schema_extra={"x_oap_ui_config": ...}`。値域は `data-model.md` §1.1 と `research.md` §R-20 の表）、(b) `ConfigurationError(field, value, expected, message)`、(c) 上書き適用後の再検証（`_check_bounds` または `model_validate` のうち `model_fields_set` を保つ方）。`resolve_env` と `load()` の解決順は**変えない**
 - [X] T017 [P] `src/trend_researcher/progress.py` の `ProgressEmitter` に `note(text)` を追加する: stderr に `[補足] {text}` を 1 行書き、`self._messages` へは**積まない**。`NODE_ORDER` と `emit` は変更しない
 - [X] T018 [P] テスト境界のフェイクを拡張する: (a) `tests/conftest.py` の `_FakeLLM` に `with_structured_output(schema, **kwargs)` を追加し既定で `OutputParserException` を送出するランを返す、(b) `FakeModelFactory.install(responses, *, structured=None)` を追加（`structured` 指定時は成功するラン）、(c) `_FakeMessage` に `usage_metadata`（既定 `None`）、(d) patch 対象に `trend_researcher.tools.compression` を追加、(e) `no_retry_sleep` の対象に `tools.llm.asyncio.sleep` を追加し `autouse` にする、(f) `tests/integration/cli_harness.py` の `_FakeLLM` にも同じ 2 つを追加する（**(d) は `tools/compression.py` が未作成のため T024 で追加**。実装メモ §6 の乖離表を参照）
-- [ ] T019 `tests/unit/test_platform_scan.py` を実行して規則 (a)+(b) が**0 件のまま**であることを確認し、新規モジュール（`tools/compression.py` / `tools/degradation.py` / `usage.py` 相当）と `Configuration` の追加が走査に引っかからないことを確かめる（原則 IV）。引っかかった場合は走査テストではなく**ソース側を直す**（FR-035）
+- [X] T019 `tests/unit/test_platform_scan.py` を実行して規則 (a)+(b) が**0 件のまま**であることを確認し、新規モジュール（`tools/compression.py` / `tools/degradation.py` / `usage.py` 相当）と `Configuration` の追加が走査に引っかからないことを確かめる（原則 IV）。引っかかった場合は走査テストではなく**ソース側を直す**（FR-035）
 
 **Checkpoint**: 基盤が完成。共有モデル・状態フィールド・設定の宣言・`note()`・フェイクの拡張が
 揃い、凍結契約の回帰テストが green。ここから各ユーザーストーリーを独立して開始できる。
@@ -469,6 +469,12 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 落とした（`max_in_flight` が 2 → 1）。`await asyncio.sleep(0)` は待機ではなく
 **制御の譲渡**で、並列上限の検証には譲渡が必要である。対策として `SleepSpy` は
 `seconds <= 0` の呼び出しを実物へ委譲し、`sleeps` には正の待機だけを記録する。
+
+**T019（プラットフォーム走査）の実測**: `uv run pytest -q --no-cov tests/unit/test_platform_scan.py`
+→ **5 passed / 違反 0 件**。T016 で追加した 11 項目の宣言と `ConfigurationError` のメッセージ
+（「設定が不正です: …」）は規則 (a) プラットフォーム名リテラル / (b) `platform == "…"` 比較の
+どちらにも該当しない。`tools/compression.py` / `tools/degradation.py` 相当の新規モジュールは
+未作成のため、T024 / US3 / US5 の各チェックポイントで同じ走査を再実行する。
 
 ### 4. 最終ゲート（T095）
 
