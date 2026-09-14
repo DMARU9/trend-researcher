@@ -17,8 +17,10 @@ LLM は呼ばず、判定は**注入した呼び出し可能オブジェクト**
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import importlib
+import importlib.util
 import random
 import re
 import sys
@@ -38,6 +40,9 @@ EVAL_DIR = REPO_ROOT / "tests" / "eval"
 #: 生成側のプロンプト定義（制約が実在することの確認に使う。FR-048）。
 PROMPTS_PATH = REPO_ROOT / "src" / "trend_researcher" / "prompts.py"
 
+#: 実走の入口（収集対象外の独立スクリプト。FR-065）。
+ENTRYPOINT = REPO_ROOT / "script" / "evaluate.py"
+
 #: 判定プロンプトが自己記述する観点の識別子の行頭。
 MARKER = "観点の識別子: "
 
@@ -47,6 +52,19 @@ def _eval_module(name: str) -> ModuleType:
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     return importlib.import_module(f"tests.eval.{name}")
+
+
+def _entrypoint() -> ModuleType:
+    """`script/evaluate.py` をモジュールとして読み込む（`main()` は実行しない）。
+
+    判定の再試行の設定（`_judge_callable`）は実走の入口が持つため、実物を
+    読み込んで駆動する（テスト側で同じ処理を書き直さない。FR-044）。
+    """
+    spec = importlib.util.spec_from_file_location("script_evaluate_axes", ENTRYPOINT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 schemas = _eval_module("schemas")
@@ -317,6 +335,55 @@ def test_the_retry_rule_is_the_same_for_every_axis() -> None:
     axes = [_axis_of(prompt) for prompt in judge.prompts]
 
     assert sorted(axes) == sorted(spec.axis for spec in evaluators.scored_axes())
+
+
+def _judge_calls(tree: ast.Module) -> list[ast.Call]:
+    """観点の採点が判定モデルを呼ぶ箇所（同期版・非同期版の `judge(...)`）。"""
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "judge"
+    ]
+    assert calls, "判定モデルの呼び出しが見つからない（走査が空振りしている）"
+
+    return calls
+
+
+def test_the_judge_is_asked_with_only_the_prompt_and_the_schema() -> None:
+    """判定の呼び出しは `judge(prompt, schema)` だけ。観点ごとの追加指定を持たない（FR-068）。"""
+    calls = _judge_calls(ast.parse((EVAL_DIR / "evaluators.py").read_text(encoding="utf-8")))
+
+    assert len(calls) == 2, "同期版と非同期版の両方を走査する"
+    for call in calls:
+        assert len(call.args) == 2
+        assert not call.keywords, "観点ごとの追加指定（再試行など）を通す余地を作らない"
+
+
+def test_the_entrypoint_has_no_per_axis_branch() -> None:
+    """実走の入口は観点の名前で分岐しない（全観点が同じ経路。FR-068）。
+
+    `aggregated["axis_order"]` のような**結果の読み出し**は許す（分岐ではない）。
+    比較（`==` / `in` など）に観点の識別子が現れたら、観点ごとの規則が生まれた
+    ことになるため落とす。
+    """
+    tree = ast.parse(ENTRYPOINT.read_text(encoding="utf-8"))
+    identifiers = {spec.axis for spec in evaluators.AXIS_SPECS}
+    compared: set[str] = set()
+    attributes = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare):
+            for operand in [node.left, *node.comparators]:
+                compared.update(
+                    part.value
+                    for part in ast.walk(operand)
+                    if isinstance(part, ast.Constant) and isinstance(part.value, str)
+                )
+
+    assert identifiers
+    assert not (compared & identifiers), f"観点ごとの分岐がある: {sorted(compared & identifiers)}"
+    assert "axis" not in attributes  # `spec.axis` のような観点の取り出しも無い
 
 
 # --- 実走の入口が使う非同期経路（FR-041 / FR-045 / FR-068） -----------------
@@ -597,3 +664,48 @@ def test_comparison_without_scores_is_not_comparable() -> None:
     assert result["comparable"] is False
     assert result["winner"] is None
     assert "採点" in result["reason"]
+
+
+# --- 再試行の設定が全観点で同一（FR-068） ----------------------------------
+
+
+def test_every_axis_call_uses_the_same_retry_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """実走の判定は全観点で同じ再試行の設定を通る（観点ごとに変える余地が無い。FR-068）。
+
+    `_judge_callable` が作る 1 つの callable を `ascore_report` に渡し、観点ごとに
+    呼ばれる `ainvoke_structured` の引数を実測する。
+    """
+    module = _entrypoint()
+    calls: list[dict[str, Any]] = []
+
+    async def fake_ainvoke_structured(schema: object, prompt: str, **kwargs: Any) -> object:
+        calls.append({"prompt": prompt, **kwargs})
+        return _payloads()[_axis_of(prompt)]
+
+    monkeypatch.setattr(module, "ainvoke_structured", fake_ainvoke_structured)
+    settings = module.Configuration(
+        retry_max=7, retry_wait_seconds=0.5, structured_method="function_calling"
+    )
+    model = object()
+
+    result = asyncio.run(
+        evaluators.ascore_report("## 見出し\n本文", judge=module._judge_callable(model, settings))
+    )
+
+    # 呼ばれるのは採点する観点だけ（対象外の観点は投げない）。
+    assert sorted(_axis_of(call["prompt"]) for call in calls) == sorted(
+        spec.axis for spec in evaluators.scored_axes()
+    )
+    # 再試行と構造化出力の設定は 1 通りしか現れない（観点ごとの差が無い）。
+    applied = {
+        (
+            call["retry_max"],
+            call["retry_wait_seconds"],
+            call["method"],
+            call["role"],
+            call["model"],
+        )
+        for call in calls
+    }
+    assert applied == {(7, 0.5, "function_calling", "summary", model)}
+    assert _axes_of(result)["relevance"]["score"] == 4  # 実走の形で採点が通っている
