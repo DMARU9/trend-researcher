@@ -327,8 +327,8 @@ async def ainvoke_structured(
 ) -> _ModelT:
     """構造化出力を規定回数まで再試行して取得する（FR-009 / FR-010）。
 
-    `method` は `Configuration.structured_method` の値（`json_schema` /
-    `function_calling`）。スキーマ違反も再試行の対象に含めるため、再試行を使い
+    `method` は `Configuration.structured_method` の値（`function_calling` /
+    `json_schema`）。スキーマ違反も再試行の対象に含めるため、再試行を使い
     切った場合は最後の例外が伝わる（ノードはそれを受けてフォールバックする）。
 
     `degrade` を渡したときの上限超過の扱いは `ainvoke_text` と同じ（FR-015）。
@@ -337,15 +337,39 @@ async def ainvoke_structured(
     呼び出し側で `cast` して取り出す（`schema` に `with_structured_output` を
     渡している以上、実行時の戻り値は `schema` のインスタンスになる）。
 
+    `None` は「構造化出力が得られなかった」失敗として扱う（下の `_invoke`）。
+
     `meter` の扱いは `ainvoke_text` と同じだが、戻り値が `AIMessage` ではないため
     トークン数は不明（`None`）のまま記録される（`structured=True`）。
     """
     built = model if model is not None else build_model(role, env_prefix)
     runnable = built.with_structured_output(schema, method=method)
+
+    async def _invoke(text: str) -> Any:
+        """構造化出力を 1 回呼び、`None` をパース失敗に正規化する。
+
+        `function_calling` はツール呼び出しを返さなかったモデルに対して**例外ではなく
+        `None`** を返す。素通しすると「成功時はスキーマのインスタンスを返す」という
+        契約（contracts/llm-invocation-contract.md §2）が破れ、呼び出し側が属性参照で
+        落ちる（実測: `parse_instruction` の
+        `'NoneType' object has no attribute 'topic'` → 終了コード 1）。
+
+        `OutputParserException` は再試行の対象（FR-010）なので、一時的な
+        「ツール呼び出しの抜け」はここで回復し、規定回数を使い切ったときだけ
+        決定的解析へフォールバックする（FR-011）。
+        """
+        value = await runnable.ainvoke(text)
+        if value is None:
+            raise OutputParserException(
+                f"{role}: 構造化出力が得られませんでした"
+                "（モデルがツール呼び出しを返していません）"
+            )
+        return value
+
     result = cast(
         "_ModelT",
         await _invoke_with_degradation(
-            runnable.ainvoke,
+            _invoke,
             prompt,
             retry_max=retry_max,
             retry_wait_seconds=retry_wait_seconds,

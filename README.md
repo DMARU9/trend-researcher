@@ -200,7 +200,7 @@ uv run python -m trend_researcher \
 | 共通 | `TR_MIN_INPUT_CHARS` | `1000` | 縮退を打ち切る入力長の下限（`100` 以上） |
 | 共通 | `TR_SELF_REVIEW` | `true` | 検索クエリを生成直後に点検するか（`true` / `false`） |
 | 共通 | `TR_INCLUDE_INTERMEDIATE` | `false` | 圧縮・縮退・失敗の中間データを `cache/` に書き出すか（`true` / `false`） |
-| 共通 | `TR_STRUCTURED_METHOD` | `json_schema` | 構造化出力の方式（`json_schema` / `function_calling`） |
+| 共通 | `TR_STRUCTURED_METHOD` | `function_calling` | 構造化出力の方式（`json_schema` / `function_calling`） |
 | X 固有 | `XTR_ACCOUNTS_DB` | `accounts.db` | `twscrape` のアカウント DB（クッキー保存先） |
 | X 固有 | `XTR_SEARCH_POOL_SIZE` | `50` | いいね順ソート用の検索プールサイズ |
 | X 固有 | `XTR_MAX_RETRIES` | `3` | X 境界の最大リトライ回数 |

@@ -84,7 +84,7 @@
 **Decision**: 宣言的なスキーマ（`typing_extensions.TypedDict` ではなく **Pydantic モデル**）から
 `ChatOpenAI.with_structured_output(Model, method="json_schema")` を構築する。ただし
 **`method` は実行時設定（`TR_STRUCTURED_METHOD`）で `json_schema` / `function_calling` を
-切り替えられるようにする**（既定は `json_schema`）。パース失敗（`OutputParserException`）は
+切り替えられるようにする**（既定は `function_calling`）。パース失敗（`OutputParserException`）は
 再試行の対象とし、規定回数失敗したら既存の `tools/parse.py` の抽出へフォールバックする。
 
 **Rationale**:
@@ -779,7 +779,7 @@ SHOULD** とする。既定を「未設定ならエラー」にすると実走�
 | `include_intermediate` | `bool` | — | `False` | FR-046（既定は無効） |
 | `cache_dir` | `str \| None` | — | `None` | 既存 |
 | `published_after` | `str \| None` | — | `None` | 既存 |
-| `structured_method` | `Literal["json_schema","function_calling"]` | 2 択 | `"json_schema"` | R-2 |
+| `structured_method` | `Literal["json_schema","function_calling"]` | 2 択 | `"function_calling"` | R-2 |
 | `model` / `session_id` | `str` | — | 既存の解決に委ねる | `tools/llm.py` が既に `resolve_env` で解決 |
 
 `abort_wait_seconds` という名前は使わない（`retry_wait_seconds` に統一）。

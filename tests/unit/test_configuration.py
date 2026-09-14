@@ -48,7 +48,7 @@ DEFAULTS = {
     "min_input_chars": 1000,
     "self_review": True,
     "include_intermediate": False,
-    "structured_method": "json_schema",
+    "structured_method": "function_calling",
 }
 
 #: 追加 11 項目が env から読む名前（`load()` の解決対象。data-model §1.3）
@@ -552,11 +552,11 @@ def test_added_fields_reject_out_of_range_values():
 
 
 def test_structured_method_is_a_literal_choice():
-    """選択肢は `Literal` で宣言する（実測どおり `json_schema` を通す。T004）。"""
+    """選択肢は `Literal` で宣言する（T004 の実測で `function_calling` を既定に確定）。"""
     field = Configuration.model_fields["structured_method"]
 
     assert get_args(field.annotation) == CHOICE_FIELDS["structured_method"]
-    assert Configuration().structured_method == "json_schema"
+    assert Configuration().structured_method == "function_calling"
     with pytest.raises(ValidationError):
         Configuration(structured_method="auto")
 
@@ -698,7 +698,8 @@ def _probe_value(name: str, ge: object, le: object, ui_type: str) -> object:
     if ui_type == "boolean":
         return not DEFAULTS[name]
     if ui_type == "text":
-        return "function_calling"
+        # 選択肢は宣言された 2 択のうち既定でない方（既定を変えても探針が追随する）
+        return next(c for c in CHOICE_FIELDS[name] if c != DEFAULTS[name])
     if le is not None and le != DEFAULTS[name]:
         return le
     if ge is not None:

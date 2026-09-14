@@ -331,6 +331,28 @@ def test_structured_failure_falls_back_to_the_heading_parser(
     assert len(fake_model_factory.prompts_for("extract_common")) == 1
 
 
+def test_structured_none_is_treated_as_a_parse_failure(
+    fake_model_factory: Any, structured_none: Any, capsys: Any
+) -> None:
+    """構造化出力が `None` でも見出し解析へ切り替えて継続する（FR-010 / FR-011）。
+
+    `function_calling` はツール呼び出しが無いと**例外ではなく `None`** を返す。
+    素通しすると `structured.themes` の属性参照で実行全体が落ちる。境界がこれを
+    パース失敗へ正規化するため、再試行の対象になる（`retry_max = 2` で 3 回）。
+    """
+    out = _run_structured(fake_model_factory, structured=structured_none)
+
+    err = capsys.readouterr().err
+    assert (
+        "[補足] 構造化出力を取得できなかったため見出し解析へ切り替えました"
+        "（OutputParserException）" in err
+    )
+    themes = out["common_themes"]
+    assert [t.theme for t in themes] == ["自動化"]
+    assert len(fake_model_factory.structured_prompts_for("extract_common")) == 3
+    assert len(fake_model_factory.prompts_for("extract_common")) == 1
+
+
 def test_fallback_extracts_quotes_with_the_existing_parsers(fake_model_factory: Any) -> None:
     """フォールバックは既存の `extract_section` / `extract_list_items` の経路を通る。"""
     out = _run(fake_model_factory, response=NESTED_STYLE)

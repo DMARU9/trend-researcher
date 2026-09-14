@@ -113,6 +113,13 @@ class _FakeMessage:
         self.usage_metadata = usage_metadata
 
 
+#: `install(..., structured={...})` の値に渡すと、そのノードの構造化出力が `None` を
+#: 返す。`function_calling` はツール呼び出しが無いとき**例外ではなく `None`** を返す
+#: ため、その応答を再現する（`None` は「未設定 = 必ず例外」の意味で既に使っている
+#: ので、区別できるよう別の値で表す）。
+STRUCTURED_NONE: Any = object()
+
+
 class _FakeStructuredRunnable:
     """`with_structured_output()` の戻り値（ラン）。
 
@@ -129,6 +136,9 @@ class _FakeStructuredRunnable:
 
     def _parse(self, prompt: str) -> Any:
         self._llm.record_structured(prompt)
+        if self._llm.structured is STRUCTURED_NONE:
+            # ツール呼び出しを返さなかったモデルの応答（例外ではなく `None`）。
+            return None
         if self._llm.structured is None:
             raise OutputParserException(
                 f"{self._llm.node}: 構造化出力が設定されていません"
@@ -394,6 +404,16 @@ def fake_yt_transcript() -> Iterator[Boundary]:
 def fake_model_factory() -> FakeModelFactory:
     """ノード単位で LLM 応答を注入するファクトリ（R-7 / LAYOUT-004-4）。"""
     return FakeModelFactory()
+
+
+@pytest.fixture
+def structured_none() -> Any:
+    """`install(..., structured={...})` の値に渡すと、そのノードの構造化出力が `None`。
+
+    `function_calling` がツール呼び出しを返さなかった場合の応答を再現する
+    （例外ではないため、例外だけを見張るフォールバックでは拾えない。FR-011）。
+    """
+    return STRUCTURED_NONE
 
 
 # --- 非決定性の固定（data-model 1.2 / FR-010 / LAYOUT-004） ----------------

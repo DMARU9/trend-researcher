@@ -259,7 +259,7 @@ class Configuration(BaseModel):
         description="圧縮・縮退・失敗の中間データを cache に書き出すか",
     )
     structured_method: Literal["json_schema", "function_calling"] = _setting(
-        "json_schema",
+        "function_calling",
         ui_type="text",
         label="構造化出力の方式",
         description="構造化出力の方式",

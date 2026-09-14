@@ -501,6 +501,35 @@ def test_structured_failure_falls_back_and_is_reported(
     assert len(fake_model_factory.prompts_for("parse_instruction")) == 1
 
 
+def test_structured_none_is_treated_as_a_parse_failure(
+    fake_model_factory: Any, structured_none: Any, capsys: Any
+) -> None:
+    """構造化出力が `None` でも実行を継続する（FR-010 / FR-011 / SC-005）。
+
+    `function_calling` はツール呼び出しが無いと**例外ではなく `None`** を返す。
+    素通しすると `_structured_to_parsed` の属性参照で実行全体が落ちる（実測:
+    `'NoneType' object has no attribute 'topic'` → 終了コード 1）。境界がこれを
+    パース失敗へ正規化するため、再試行の対象になり（`retry_max = 2` で 3 回）、
+    使い切ったら決定的解析へフォールバックして処理が続く。
+    """
+    out = _run_structured(
+        fake_model_factory,
+        "AI 動画の動向を調べたい",
+        structured=structured_none,
+    )
+
+    err = capsys.readouterr().err
+    assert (
+        "[補足] 構造化出力を取得できなかったため簡易解析へ切り替えました"
+        "（OutputParserException）" in err
+    )
+    # フォールバックでも値が入る（既存の優先順位規則はそのまま）
+    assert out["instruction"].topic == "LLM のトピック"
+    # `None` は再試行の対象（1 + retry_max = 3）。テキストはフォールバックの 1 回だけ
+    assert len(fake_model_factory.structured_prompts_for("parse_instruction")) == 3
+    assert len(fake_model_factory.prompts_for("parse_instruction")) == 1
+
+
 def test_fallback_does_not_add_progress_lines(fake_model_factory: Any) -> None:
     """フォールバックは進捗行を増やさない（補足は stderr のみ。既定の出力は不変）。"""
     out = _run(fake_model_factory, "AI 動画の動向を調べたい")

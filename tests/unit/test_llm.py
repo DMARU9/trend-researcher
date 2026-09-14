@@ -21,6 +21,7 @@ from unittest import mock
 import httpx
 import openai
 import pytest
+from langchain_core.exceptions import OutputParserException
 from pydantic import BaseModel, ValidationError
 
 from trend_researcher import config as config_module
@@ -352,6 +353,52 @@ def test_structured_schema_violation_is_retried(no_retry_sleep: Any) -> None:
         )
 
     assert result == _Sample(value=3)
+    assert model.runnable.calls == 3
+    assert no_retry_sleep.sleeps == [1.0, 1.0]
+
+
+def test_a_structured_none_is_retried(no_retry_sleep: Any) -> None:
+    """`None` はパース失敗として再試行する（ツール呼び出しの抜けは一時的でありうる）。
+
+    `function_calling` はツール呼び出しを返さないモデルに対して例外ではなく `None` を
+    返す。境界はこれを `OutputParserException` へ正規化するので、再試行の対象になる
+    （FR-010）。スキーマのインスタンスが返れば成功として扱う。
+    """
+    model, patch = _patch_model([None, None, _Sample(value=5)])
+    with patch:
+        result = asyncio.run(
+            ainvoke_structured(
+                _Sample,
+                "prompt",
+                env_prefix=None,
+                retry_max=2,
+                retry_wait_seconds=1.0,
+            )
+        )
+
+    assert result == _Sample(value=5)
+    assert model.runnable.calls == 3
+    assert no_retry_sleep.sleeps == [1.0, 1.0]
+
+
+def test_an_exhausted_structured_none_raises_a_parse_error(no_retry_sleep: Any) -> None:
+    """全試行が `None` なら `OutputParserException` を送出する（境界の契約）。
+
+    契約 §2「成功時はモデルのインスタンスを返す」を守る。`None` を返すと、呼び出し側が
+    属性参照で落ちるか、誤って「成功」として扱われる。
+    """
+    model, patch = _patch_model([None])
+    with patch, pytest.raises(OutputParserException, match="構造化出力が得られませんでした"):
+        asyncio.run(
+            ainvoke_structured(
+                _Sample,
+                "prompt",
+                env_prefix=None,
+                retry_max=2,
+                retry_wait_seconds=1.0,
+            )
+        )
+
     assert model.runnable.calls == 3
     assert no_retry_sleep.sleeps == [1.0, 1.0]
 

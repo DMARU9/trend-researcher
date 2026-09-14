@@ -23,7 +23,7 @@
 |---|---|
 | スキーマ | `models.py` の Pydantic モデル（`ResearchInstruction` / `AnalysisFinding` / `CommonTheme`） |
 | 構築 | `build_model(role, env_prefix).with_structured_output(Model, method=<structured_method>)` |
-| `method` | `Configuration.structured_method`（既定 `json_schema`）。`function_calling` へ切り替え可能 |
+| `method` | `Configuration.structured_method`（既定 `function_calling`）。`json_schema` へ切り替え可能 |
 | 成功時 | モデルのインスタンスを返す（ノードは `.model_dump()` せず、そのまま状態へ入れる） |
 | パース失敗 | `OutputParserException` / `ValidationError` を捕捉 → 再試行（3 節） |
 | 規定回数失敗 | 既存の決定的解析へフォールバック（4 節）。例外を送出しない |

@@ -33,7 +33,7 @@ DB を持たないため、すべてのエンティティは **Pydantic モデ�
 | `min_input_chars` | `int` | `100 ≤ n` | `1000` | `縮退を打ち切る入力長の下限` | FR-015 |
 | `self_review` | `bool` | — | `True` | `検索クエリを生成直後に点検するか` | FR-054 |
 | `include_intermediate` | `bool` | — | `False` | `圧縮・縮退・失敗の中間データを cache に書き出すか` | FR-046 |
-| `structured_method` | `Literal["json_schema", "function_calling"]` | 2 択 | `"json_schema"` | `構造化出力の方式` | FR-009 / research R-2 |
+| `structured_method` | `Literal["json_schema", "function_calling"]` | 2 択 | `"function_calling"` | `構造化出力の方式` | FR-009 / research R-2 |
 
 **不変条件**:
 
@@ -344,7 +344,7 @@ LLM に総合点を直接聞かない（FR-038 の「下位基準の集約」）
 | 縮退の入力下限 | `1000` 文字 | FR-015 の停止条件 |
 | 自己点検 | 有効 | FR-054（`False` で 1 回） |
 | 中間データの書き出し | 無効 | FR-046（無効時の出力は変更前と一致） |
-| 構造化出力の方式 | `json_schema` | research R-2（実走で確定） |
+| 構造化出力の方式 | `function_calling` | research R-2（実走で確定。`json_schema` は例外なしに意味の壊れた出力を返す） |
 | 判定モデル | `TR_EVAL_MODEL` → 既定（実走で確定） | FR-069 / SC-034 |
 | 評価の保存先 | `artifacts/eval/` | FR-043 |
 
