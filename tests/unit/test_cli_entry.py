@@ -14,6 +14,9 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar
@@ -167,3 +170,59 @@ def test_default_max_results_is_not_put_in_state(graph: _FakeGraph) -> None:
 
     assert graph.state is not None
     assert "max_results" not in graph.state
+
+
+# --- 重い import の遅延（SC-013 / T099） ----------------------------------------
+
+
+def test_importing_the_entry_point_defers_the_graph() -> None:
+    """CLI の入口を import しただけではグラフを読み込まない（SC-013 / T099）。
+
+    引数検証だけで終わる起動（`--since` の形式違反など）が `langgraph` / `openai`
+    （実測 1.25 秒）を払わないようにする。同時に、参照した時点で読み込まれること
+    （遅延が「読まれない」に化けていないこと）も確かめる。
+    """
+    script = (
+        "import json, sys\n"
+        "import trend_researcher.__main__ as cli\n"
+        "before = 'trend_researcher.graph' in sys.modules\n"
+        "entry = cli.trend_researcher\n"
+        "after = 'trend_researcher.graph' in sys.modules\n"
+        "print(json.dumps({\n"
+        "    'before': before,\n"
+        "    'after': after,\n"
+        "    'has_ainvoke': hasattr(entry, 'ainvoke'),\n"
+        "    'timeout_seconds': cli.EXECUTION_TIMEOUT.total_seconds(),\n"
+        "}))\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["before"] is False, "import だけでグラフを読み込んでいる"
+    assert payload["after"] is True, "参照してもグラフが読み込まれない（遅延の実装漏れ）"
+    assert payload["has_ainvoke"] is True
+    assert payload["timeout_seconds"] > 0
+
+
+def test_public_names_resolve_lazily_and_unknown_names_raise() -> None:
+    """公開名は遅延で解決し、未知の名前は `AttributeError`（T099）。
+
+    遅延化で名前が消えていないこと（`__all__` の全件が解決すること）と、`hasattr` の
+    判定が通常のモジュールと同じであることを固定する。
+    """
+    import trend_researcher as package
+
+    for name in package.__all__:
+        assert getattr(package, name) is not None, name
+    missing = "does_not_exist"  # 定数名を直接渡すと ruff B009 が禁じるため変数にする
+    with pytest.raises(AttributeError):
+        getattr(package, missing)
+    with pytest.raises(AttributeError):
+        getattr(cli, missing)

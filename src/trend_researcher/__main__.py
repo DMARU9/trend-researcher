@@ -13,11 +13,42 @@ from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from trend_researcher.configuration import Configuration, ConfigurationError, _check_bounds
-from trend_researcher.graph import EXECUTION_TIMEOUT, trend_researcher
 from trend_researcher.models import OutputFormat
 from trend_researcher.providers import available_platforms, get_provider
 from trend_researcher.rendering import render_report
 from trend_researcher.tools.degradation import DegradationError
+
+#: グラフ側に属する公開名（`_graph` がモジュール属性として解決する）
+_GRAPH_NAMES = ("EXECUTION_TIMEOUT", "trend_researcher")
+
+
+def __getattr__(name: str) -> Any:
+    """グラフ（重い import）を参照された時だけ読み込む（SC-013 / T099）。
+
+    `mock.patch("trend_researcher.__main__.EXECUTION_TIMEOUT", …)` や
+    `mock.patch("trend_researcher.__main__.trend_researcher", …)`（統合テストの
+    ハーネス）のようにモジュール属性として差し替えられる必要があるため、PEP 562 の
+    モジュール level `__getattr__` で公開する。初回参照で実体を作り、以後は通常の
+    属性として扱われる（差し替えの後始末も mock の既定動作のまま）。
+    """
+    if name in _GRAPH_NAMES:
+        from trend_researcher.graph import EXECUTION_TIMEOUT, trend_researcher
+
+        return EXECUTION_TIMEOUT if name == "EXECUTION_TIMEOUT" else trend_researcher
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _graph() -> tuple[Any, Any]:
+    """時間上限とグラフ本体をモジュール属性として解決する（遅延 import。T099）。
+
+    関数ローカルで `from trend_researcher.graph import …` すると、ハーネスが
+    `trend_researcher.__main__` に当てた差し替えを無視して実物を使ってしまう。
+    モジュール属性として読むことで、差し替え（無ければ `__getattr__` の遅延読み込み）
+    の結果をそのまま使う。
+    """
+    # `Any` 経由の属性アクセス（`getattr` の定数名は ruff B009 が禁じる）
+    module: Any = sys.modules[__name__]
+    return module.EXECUTION_TIMEOUT, module.trend_researcher
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -93,9 +124,10 @@ async def _run_async(args: argparse.Namespace, settings: Configuration) -> dict:
         # 明示指定のみを state に載せる。未指定と「5 件指定」を区別するため（FR-011）。
         initial_state["max_results"] = args.max_results
 
+    execution_timeout, graph = _graph()
     return await asyncio.wait_for(
-        trend_researcher.ainvoke(initial_state, runnable_config),
-        timeout=EXECUTION_TIMEOUT.total_seconds(),
+        graph.ainvoke(initial_state, runnable_config),
+        timeout=execution_timeout.total_seconds(),
     )
 
 
@@ -152,8 +184,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = asyncio.run(_run_async(args, settings))
     except TimeoutError:
+        # 時間上限は差し替えられ得るので、モジュール属性として読む（`_graph` と同じ）
+        execution_timeout, _ = _graph()
         print(
-            f"[警告] リサーチが時間上限（{int(EXECUTION_TIMEOUT.total_seconds() / 60)}分）に達しました。途中結果を返します。",
+            f"[警告] リサーチが時間上限（{int(execution_timeout.total_seconds() / 60)}分）に達しました。途中結果を返します。",
             file=sys.stderr,
             flush=True,
         )
