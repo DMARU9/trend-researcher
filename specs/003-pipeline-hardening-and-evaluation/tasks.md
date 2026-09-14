@@ -802,6 +802,8 @@ FR-035 / SC-008 の「既存テストを削除しない」に反するため**�
 | `quickstart.md` §3（手で確かめる統合シナリオ）の `git stash` 方式 | `git stash` 版は**実 API（`accounts.db` のクッキー ＋ ネットワーク）で CLI を 2 回走らせる**手順で、FR-044（実 API の手動確認は合格条件ではない）に照らして再現できない | **決定論的なハーネス（層 B）で同じ性質を実測**した。`TR_CLI_SCENARIO=x_success` で既定の入力（`"AI動画のトレンドを3件"`）を走らせ、stdout を凍結 golden（`tests/integration/golden/default_stdout.txt`。T009 が**変更前のツリー**から採取し、以後 1 byte も変わっていない）と比較 → **58 行が 1 文字も一致**（差は `print` が付ける末尾の空行 1 つだけで、これは T009 の `_significant_lines` が契約から意図的に除外。pre-003 の `__main__.py` でもレポート出力の経路は未変更）。進捗行も `default_progress.txt` と **14 行完全一致**。exit 0。`tests/integration/golden/` と `tests/unit/golden/` はどちらも 003 の各コミットで 1 度も書き換えていない（`git log -- tests/*/golden/` が T009 / T006 の 1 件のみ） |
 | T096「`[補足]` 行が既定では出ないことを確認する」 | **成り立たない**。既定の入力の実行で `[補足]` は **4 行**出る（構造化出力のフォールバック 3 行 ＋ 使用量の集計 1 行）。実測: `[補足] LLM 呼び出し合計 7 回（入力 0 / 出力 0 トークン、不明 7 回）` | 前の行（`quickstart.md:137` の解釈）のとおり、使用量の行は `calls > 0` で必ず出る（FR-062）。フォールバックの 3 行は US2 で既に出ていた（T028 の申し送り参照）。**凍結契約は stdio の役割分担**（stdout = レポートのみ）**と `messages` の内容**であり、stderr の補足行は対象外（`test_default_stdout_matches_the_golden` / `test_default_progress_lines_match_the_golden` / `test_default_run_does_not_add_notes` は green）。T096 では「`[補足]` が出ることを**許す**契約」を実測で確認した |
 | `quickstart.md` S3 の反例コマンド `-k not_token_limit` / S4 の `-k partial` | S3 は **0 件選択**（該当する名前のテストが無い）。S4 は **1 件だけ**（部分失敗の主テストは名前に `partial` を含まない） | **コマンドの選び方のずれ**（実装の欠陥ではない）。実名で選び直すと S3 は `-k exclusion` で **5 passed**（`test_the_exclusion_words_win_over_the_metric` の 5 パラメータ）、S4 は `-k fail` で **9 passed**。他の S1〜S8 のコマンドは意図どおり選択された（S1 16 件 / S1(b) 1 件 / S2 111 件 / S3 49 件 / S5 49 件 / S6 66 件 / S7 11 件 / S8(a) 5 件 / S8(b) 7 件） |
+| T098「キー名も `records.USAGE_KEYS` の `prompt_tokens` / `completion_tokens` と集計の `input_tokens` / `output_tokens` で不一致」 | パイプラインの記録（`ModelUsage`）は `input_tokens` / `output_tokens` / `total_tokens`、保存済みの結果は `prompt_tokens` / `completion_tokens` / `total_tokens`（`records.USAGE_KEYS`） | **結果側の項目名は変えない**（保存済みの結果の形式を保つ）。`script/evaluate.py` の `USAGE_SOURCES` を対応の唯一の出所にし、`test_the_result_usage_keys_follow_the_pipeline_records` が「結果の項目 ⊆ 対応表」「対応表の元の項目 ⊆ `ModelUsage` の項目」の両方向を固定する。`calls` は並びの要素数そのもので元の項目を持たない（`None`） |
+| T098「畳む場所（`_add_usage` か `records`）を一意にし」 | 畳む場所は **`script/evaluate.py` の `_add_usage` の 1 か所**。`records.usage_summary` は**結果の解釈だけ**を担い、`list[ModelUsage]` は受け取らない | 対応表 `USAGE_SOURCES` を `records.USAGE_KEYS` と同じ項目名で定義し、`test_the_result_usage_keys_follow_the_pipeline_records` が両方向（結果の項目 ⊆ 対応表／対応表の元の項目 ⊆ `ModelUsage` の項目）を固定するため、2 つのモジュールに分かれても同期は機械的に守られる。実測: 修正前は `_add_usage` が `Mapping` 前提の早期 return で常に `{}` → `status: 不明`（変異探針で 5 failed） |
 
 ### 6. 更新または削除したテスト（FR-035 / SC-008）
 
@@ -1174,3 +1176,40 @@ T046  変異探針
 - すべてのタスクに**具体的なファイルパス**を含める
 - タスク ID は実行順の連番（**T001〜T097**）。重複・欠番なし。US1・US2・US6 の後に US3 が続くため、
   フェーズ番号（Phase 6）とユーザーストーリー番号（US3）は一致しない（優先度順に並べているため）
+
+---
+
+## Phase 12: Convergence
+
+収束チェック（`/speckit.converge`）の結果。`spec.md` / `plan.md` / 憲法を intent とし、実装済みの
+コードを実測して「まだ満たされていない」項目だけを追記する。既存タスク（T001〜T097）と判定は
+書き換えない。各行の末尾がトレース元（`per <ref> (<gap-type>)`）。
+
+**確認済み（新規タスク不要）**: FR-047（契約 §6 が単体測定テストを指定しており実装と一致）、
+FR-059 / SC-023 の凍結 6 項目と `sort_by` の選択肢差（`data-model.md §1.1` の「既存 7 フィールドは
+そのまま」／不変条件 4 と §5 の記録）、FR-017 の「縮小後の上限」（T054 が「段数・縮小前後の長さ」と
+定義）、FR-041 の比較表示（判定順は実走で `rng` 付き、比較は読み出しのみで判定を伴わない）、
+FR-033 / SC-014（`pyproject.toml` は `3a6fe15` から不変）、FR-006 / FR-011〜014 / FR-020 / FR-023 /
+FR-061 / FR-062 / FR-069（実施済みのテストで固定されている）。
+
+- [X] T098 [US6] **（CRITICAL: 憲法 原則 I / US6 の独立テスト）** 実走の使用量が結果に載らない配線を直し、テストで固定する。`script/evaluate.py` の `_add_usage` は `state["usage"]`（`list[ModelUsage]`）を受けるのに `Mapping` 前提で早期 return するため、実測では常に `{}` → `records.usage_summary` が `status: 不明`・トークン全 `None` になる（キー名も `records.USAGE_KEYS` の `prompt_tokens` / `completion_tokens` と集計の `input_tokens` / `output_tokens` で不一致）。畳む場所（`_add_usage` か `records`）を一意にし、`_add_usage` を実値で駆動する単体テストを `tests/unit/test_evaluation_entrypoint.py` に足す（ファイル: `script/evaluate.py` / `tests/unit/test_evaluation_entrypoint.py`）per FR-042 / SC-024 (partial)
+- [ ] T099 [US6] テストスイートを 60 秒以内で完走させる（SC-013）。残る下限はサブプロセス起動 55 件 × 約 1.3 秒で、内訳は CLI の import コスト（`python -X importtime` で 1.19 秒。`openai` 507 ms / `langgraph.graph` 496 ms）。**凍結契約の固定方法（FR-035 / SC-008）は変えずに** import を遅延させて実測し、到達できない場合は「起動回数 × 実測コスト」の下限と不可能性の根拠を §5 に確定する（不変条件: 既定の入力の `stdout` / `stderr` / 終了コード / `messages` / 呼び出し回数が変わらない）（ファイル: `src/trend_researcher/tools/llm.py` / `src/trend_researcher/__main__.py` / `specs/003-pipeline-hardening-and-evaluation/tasks.md`）per SC-013 (partial)
+- [ ] T100 [US6] 評価の実走で `include_intermediate` を有効にして実行し、中間データ（採用したクエリ・素材長・解析件数・縮退や失敗の発生）を結果から確認できるようにする。現状 `script/evaluate.py` に `include_intermediate` の参照が無く、`_generate` は `report` と `usage` しか読まない。記録する項目と確認方法をテストで固定する（ファイル: `script/evaluate.py` / `tests/eval/records.py` / `tests/unit/test_evaluation_entrypoint.py`）per FR-046 (partial)
+- [ ] T101 [US3] `get_model_token_limit` の部分文字列一致（`src/trend_researcher/tools/degradation.py` の `key in model`）を、参照実装の欠陥（辞書の反復順に依存し、短い鍵が長い鍵を影にする）を移植しない形へ直す。実測: `openai:o1-pro` / `openai:o3-pro` が先行キーに影にされ（`openai:o1` の値を変えると `openai:o1-pro` が 111111 を返す＝自身の登録値 200000 は到達不能）、未登録の `google:gemini-pro-vision` が 32768 で拾われる。完全一致優先の規則と「影になる鍵が無い」ことをテストで固定する（ファイル: `src/trend_researcher/tools/degradation.py` / `tests/unit/test_degradation.py`）per FR-063 (contradicts)
+- [ ] T102 [US3] 圧縮と縮退が同じ実行で起きる経路（圧縮で素材を削った後に上限超過で梯子を登る）を実経路のテストで固定する。AST 走査では両方を扱うテストが 0 件（`tests/unit/test_compile_report.py` の 2 件は状態の手注入のみ）で、統合の縮退シナリオも `parse_instruction` だけである（ファイル: `tests/unit/test_analyze_content.py` / `tests/integration/test_cli_contract.py`）per FR-019 (partial)
+- [ ] T103 [US6] `tests/eval/axes.md` の観点↔制約の対応表を機械的に固定する。変異探針では観点 3 と 4 の制約を入れ替えても `tests/unit/test_evaluation.py` が 39 passed（識別子が表に現れるかしか見ていない）（ファイル: `tests/unit/test_evaluation.py` / `tests/eval/axes.md`）per FR-048 / FR-074 (partial)
+- [ ] T104 [US3] 実装メモ §7「参照実装の欠陥を移植していないことの確認」の未チェック 3 項目（無効なオプションを渡す経路・ツール契約の対称性・常に真の条件と到達しない分岐）をコード走査と実測で確定してチェックを付ける。到達しない分岐の実例: `tools/degradation.py` の `_budget` の `tokens <= 0` はテーブル最小 32768 − 予約 10,000 > 0 で到達不能（カバレッジでも未実行）。到達不能を論証できるなら削除し、残す場合は根拠をコメントとテストで固定する（ファイル: `specs/003-pipeline-hardening-and-evaluation/tasks.md` / `src/trend_researcher/tools/degradation.py`）per FR-063 / FR-064 (partial)
+- [ ] T105 [US6] `script/evaluate.py` の commit 解決（`resolve_commit` / `_git_dir` / `_commit_from_git_dir` / `_packed_ref`）をテストで固定する。現在は commit 文字列を直接注入するテストのみで、`.git` から読む経路と解決できないときに `unknown` へ落ちる経路が未検証である（ファイル: `tests/unit/test_evaluation_entrypoint.py` / `script/evaluate.py`）per FR-043 (partial)
+- [ ] T106 [US6] `build_judge` と `_judge_callable` が `build_model` / `ainvoke_structured` の既存経路だけを使い、`ChatOpenAI` を直接構築しないことを固定するテストを足す（`TR_MODEL` を退避して戻すことも含む）（ファイル: `tests/unit/test_evaluation_entrypoint.py` / `script/evaluate.py`）per FR-045 (partial)
+- [ ] T107 [US6] 判定の再試行の規則が全観点で同一であること（観点による分岐が無く、同じ `retry_max` 経路を通る）を固定する。現在のテストは「観点ごとに 1 回呼ぶ」ことしか見ていない（ファイル: `tests/unit/test_evaluation.py` / `script/evaluate.py`）per FR-068 (partial)
+- [ ] T108 [US7] 各プロンプトの停止条件が機械で判定できる内容（件数・出力形式による打ち切り）であることと、判定不能な表現（「適切に」「必要なら」等）が停止条件に現れないことをテストで固定する。現在は `【停止条件】` の見出し存在のみを確認している（ファイル: `tests/unit/test_prompts.py` / `src/trend_researcher/prompts.py`）per FR-055 / FR-056 (partial)
+
+### 8. Phase 12（収束チェック）の記録
+
+`/speckit.converge` が追記した T098〜T108 の実装記録。タスクごとにコミットし、対応する
+Issue を閉じる。ゲートは各コミットで `uv run pytest -q` / `uv run ruff check .` /
+`uv run mypy src` を通す。
+
+| タスク | 変更 | ゲート（実測） | 変異探針 |
+|---|---|---|---|
+| T098 | `script/evaluate.py` の `_add_usage` を `list[ModelUsage]`（要素数＝`calls`、判明分のトークン）へ直し、対応表 `USAGE_SOURCES` を追加。`tests/unit/test_evaluation_entrypoint.py` に 6 件（対応の両方向・実値の畳み込み・不明の扱い・0 件・配線の実測） | **1,032 passed / カバレッジ 97.42% / ruff 0 件 / mypy 29 ファイル 0 件**（100.82 秒） | 修正前の `Mapping` 版へ戻すと **5 failed**（退避から復元後にフルスイート green。sha256 `530b1938…` の一致を確認） |

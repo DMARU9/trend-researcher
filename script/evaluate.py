@@ -73,6 +73,16 @@ EXIT_USAGE = 2
 #: 生成に使ったコミットが分からない場合の記録。
 UNKNOWN_COMMIT = "unknown"
 
+#: 結果へ書く使用量の項目（`records.USAGE_KEYS`）と、パイプラインが記録する項目
+#: （`ModelUsage`）の対応（FR-042）。結果の項目名は保存済みの結果と同じに保つ。
+#: `calls` は並びの要素数そのものなので元の項目を持たない（`None`）。
+USAGE_SOURCES: dict[str, str | None] = {
+    "calls": None,
+    "prompt_tokens": "input_tokens",
+    "completion_tokens": "output_tokens",
+    "total_tokens": "total_tokens",
+}
+
 
 # --- 前提の解決（引数または環境変数。FR-066） ------------------------------
 
@@ -367,17 +377,27 @@ async def _generate(
 
 
 def _add_usage(usage: dict[str, int], recorded: object) -> None:
-    """パイプラインが記録した使用量を足し込む（無ければ記録しない＝「不明」。FR-061）。
+    """パイプラインが記録した使用量を足し込む（FR-042 / FR-061）。
 
-    使用量の集計（`state["usage"]`）は US8 で入る。形が合う分だけを足し、得られない
-    場合は項目を作らない（`records.usage_summary` が「不明」として記録する）。
+    `state["usage"]` は **LLM 呼び出し 1 回につき 1 要素**の並び
+    （`Annotated[list[ModelUsage], operator.add]`）であり、辞書ではない。要素数を
+    そのまま呼び出し回数として数え、判明しているトークンだけを足す。
+
+    不明なトークン数（`None`）は 0 に潰さない。項目を作らないままにすると
+    `records.usage_summary` が「不明」として記録する（FR-061）。並びが得られない
+    場合（キーが無い・形が違う）も何も足さない。
     """
-    if not isinstance(recorded, Mapping):
+    if not isinstance(recorded, Sequence) or isinstance(recorded, (str, bytes)):
         return
-    for key in records.USAGE_KEYS:
-        value = recorded.get(key)
-        if isinstance(value, (int, float)):
-            usage[key] = usage.get(key, 0) + int(value)
+    # 呼び出し回数は要素数そのもの（元の項目を持たない）。
+    usage["calls"] = usage.get("calls", 0) + len(recorded)
+    for entry in recorded:
+        for key, source in USAGE_SOURCES.items():
+            if source is None:
+                continue
+            value = getattr(entry, source, None)
+            if isinstance(value, int):
+                usage[key] = usage.get(key, 0) + value
 
 
 def _judge_callable(model: Any, settings: Configuration) -> evaluators.Judge:

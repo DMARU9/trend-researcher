@@ -13,12 +13,17 @@ LLM は呼ばない（実走をテストの合否条件に含めない。FR-044�
 from __future__ import annotations
 
 import ast
+import asyncio
+import importlib
 import importlib.util
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from trend_researcher.models import ModelUsage, ResearchInstruction, ResearchReport
 
 #: 実走の入口（収集対象外の独立スクリプト。FR-065）。
 ENTRYPOINT = Path(__file__).resolve().parents[2] / "script" / "evaluate.py"
@@ -263,3 +268,122 @@ def test_the_judge_model_is_resolved_separately(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("TR_EVAL_MODEL", "openai:from-env")
     assert module.resolve_judge_model(None) == "openai:from-env"
     assert module.resolve_judge_model("openai:from-arg") == "openai:from-arg"
+
+
+# --- (f) 実走の使用量を結果へ記録する（FR-042 / SC-024） -------------------
+
+
+def _eval_module(name: str) -> ModuleType:
+    """`tests/eval/<name>.py` を読み込む（`tests/` はパッケージではないため）。"""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    return importlib.import_module(f"tests.eval.{name}")
+
+
+records = _eval_module("records")
+
+
+def _usage(
+    input_tokens: int | None, output_tokens: int | None, total_tokens: int | None
+) -> ModelUsage:
+    """1 回の呼び出し分の使用量（`state["usage"]` の要素。FR-061）。"""
+    return ModelUsage(
+        node_name="analyze_content",
+        role="summary",
+        model="openai:mimo-v2.5",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        structured=False,
+    )
+
+
+def _fold(recorded: object) -> dict[str, int]:
+    """`_add_usage` を通した集計（結果へ書く形）。"""
+    module = _load_entrypoint()
+    usage: dict[str, int] = {}
+    module._add_usage(usage, recorded)
+    return usage
+
+
+def test_the_result_usage_keys_follow_the_pipeline_records() -> None:
+    """結果へ書く項目がパイプラインの記録（`ModelUsage`）と対応する（FR-042）。"""
+    module = _load_entrypoint()
+    sources = module.USAGE_SOURCES
+    fields = set(ModelUsage.model_fields)
+
+    assert set(sources) == set(records.USAGE_KEYS)
+    for key, source in sources.items():
+        if source is not None:
+            assert source in fields, f"{key} の元の項目 {source} が ModelUsage に無い"
+
+
+def test_the_usage_of_the_run_is_no_longer_unknown() -> None:
+    """`list[ModelUsage]` を畳むと、結果の使用量が「取得」として記録される（SC-024）。"""
+    usage = _fold([_usage(120, 30, 150), _usage(10, 5, 15)])
+    summary = records.usage_summary(usage)
+
+    assert summary["status"] == "取得"
+    assert summary["calls"] == 2
+    assert summary["prompt_tokens"] == 130
+    assert summary["completion_tokens"] == 35
+    assert summary["total_tokens"] == 165
+
+
+def test_unknown_tokens_stay_unknown_but_the_call_is_counted() -> None:
+    """不明なトークン数は 0 に潰さず、呼び出し回数だけを数える（FR-061）。"""
+    summary = records.usage_summary(_fold([_usage(None, None, None), _usage(5, 5, 10)]))
+
+    assert summary["calls"] == 2
+    assert summary["prompt_tokens"] == 5
+    assert summary["completion_tokens"] == 5
+    assert summary["total_tokens"] == 10
+
+
+def test_a_run_without_usage_records_unknown() -> None:
+    """使用量がまったく得られない実行は「不明」のままにする（FR-061）。"""
+    for recorded in (None, {}, {"calls": 3}, "usage", 42):
+        usage = _fold(recorded)
+
+        assert usage == {}, f"{recorded!r} を集計に混ぜてはいけない"
+        assert records.usage_summary(usage)["status"] == "不明"
+
+
+def test_a_recorded_but_empty_usage_is_zero_calls_not_unknown() -> None:
+    """並びが得られていて 0 件なら、不明ではなく 0 回として記録する（FR-061）。"""
+    usage = _fold([])
+
+    assert usage == {"calls": 0}
+    assert records.usage_summary(usage)["status"] == "取得"
+    assert records.usage_summary(usage)["calls"] == 0
+
+
+def test_the_run_passes_the_usage_of_the_graph_to_the_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """実走の生成がグラフの使用量を結果へ渡す（配線ごと固定する。FR-042 / SC-024）。"""
+    module = _load_entrypoint()
+    dataset = module.datasets.Dataset.model_validate(
+        {"name": "tr-basic", "entries": [{"id": "a", "prompt": "指示"}]}
+    )
+    report = ResearchReport(instruction=ResearchInstruction(raw_text="指示"))
+
+    async def fake_ainvoke(state: dict[str, object], config: dict[str, object]) -> dict[str, object]:
+        return {"report": report, "usage": [_usage(120, 30, 150)]}
+
+    monkeypatch.setattr(module.trend_researcher, "ainvoke", fake_ainvoke)
+
+    _, usage = asyncio.run(
+        module._generate(
+            dataset,
+            module.Configuration(),
+            overrides={},
+            platform="x",
+            provider=module.get_provider("x"),
+        )
+    )
+    summary = records.usage_summary(usage)
+
+    assert summary["status"] == "取得"
+    assert summary["calls"] == 1
+    assert summary["total_tokens"] == 150
