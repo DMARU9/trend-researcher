@@ -95,7 +95,7 @@ SC-011 / SC-026）。
 **Purpose**: 変更前の安全網と、設計の分岐点となる実測を確定する。**この段階ではソースを変更しない。**
 
 - [X] T001 `plan.md` の「基準値のずれ」と Constitution Check に記録した基準値（**601 passed / カバレッジ 96.65% / `ruff` 0 件 / `mypy` 0 件 / 49.10 秒**）をブランチ `003-pipeline-hardening-and-evaluation` の作業ツリーで再現する（`uv run pytest -q`、`uv run ruff check .`、`uv run mypy src`、`git status --short`）。結果を作業ツリーの確認（`git status --short` が ` M .specify/feature.json` と `?? specs/003-pipeline-hardening-and-evaluation/` のみ）とともに本ファイルの「実装メモ §0」に記録する
-- [ ] T002 [P] 遅いテストを把握して時間予算を確保する。`uv run pytest -q --no-cov --durations=15` を実行し、上位 15 件の所要時間を「実装メモ §2」に控える（SC-013 の 60 秒以内を守るため、追加するテスト群の上限を決める根拠にする）
+- [X] T002 [P] 遅いテストを把握して時間予算を確保する。`uv run pytest -q --no-cov --durations=15` を実行し、上位 15 件の所要時間を「実装メモ §2」に控える（SC-013 の 60 秒以内を守るため、追加するテスト群の上限を決める根拠にする）
 - [ ] T003 [P] オフライン制約を実測する。`env -u OPENAI_API_KEY -u XTR_ACCOUNTS_DB -u YTR_ACCOUNTS_DB uv run pytest -q --no-cov` を実行し、認証情報なしでも **601 passed** のままであることを確認する（原則 II の安全網）
 - [ ] T004 [P] **設計の分岐点 1 を実測する**: 構造化出力が `json_schema` で通るかを、`uv run python -c` で `ChatOpenAI.with_structured_output(<Pydantic モデル>, method="json_schema")` の疎通を確認して確定する。通らなければ `Configuration.structured_method` の**既定を `function_calling` にする**（research §R-2 / 未解決事項 1）。「実装メモ §1」に記録
 - [ ] T005 [P] **設計の分岐点 2 を実測する**: 実際の上限超過応答の形（`status_code` / `exc.body` の構造 / メッセージの語彙）を採取し、`contracts/llm-invocation-contract.md` §5 の条件 3 の語彙を確定する（research §R-1 / 未解決事項 2）。テストは語彙に依存しない形（条件ごとの反例）で書く方針も同時に決める。「実装メモ §1」に記録
@@ -416,9 +416,10 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 ### 2. 時間予算（T002）
 
-- 全体の上限: 60 秒（SC-013）／ベースライン: （記入）
-- 遅いテスト上位 15 件: （記入）
-- 追加するテスト群の上限: （記入）
+- 全体の上限: 60 秒（SC-013）／ベースライン: **46.30 秒**（`--no-cov`。カバレッジ計測ありでは 48.55 秒）
+- 遅いテスト上位 15 件: **すべて `tests/integration/test_cli_contract.py` のサブプロセス起動テスト**（1.57 秒 ×1 ＋ 0.83〜0.78 秒 ×14、上位 15 件の合計は約 12.6 秒）。先頭は `test_cli_002_07_output_matches_stdout_rendering`（1.57 秒）、以降は `test_cli_002_01_stdout_is_report_only` / `test_cli_001_06_help_exits_zero` / `test_cli_001_17_blank_instruction[...]` / `test_cli_002_04_stderr_has_seven_nodes_progress` / `test_cli_001_15_unknown_sort` / `test_cli_005_enums_are_case_sensitive[format-uppercase]` などが 0.78〜0.83 秒で並ぶ
+- 時間の内訳: `test_cli_contract.py` が **54 件**（サブプロセス起動のため 1 件 0.5〜1.6 秒 ≒ 約 35 秒）で全体の約 3/4 を占める。残り **547 件**は in-process で合計約 11 秒
+- 追加するテスト群の上限: **+13 秒以内**（60 − 46.30 = 13.7 秒）。目安は (a) 新規は原則 in-process の単体テストとして 1 件 ≒ 0.06 秒換算で**最大 200 件**、(b) CLI 統合（サブプロセス）テストの新規追加は 1 件 0.8 秒として**最大 3 件**。変異探針（quickstart.md §5 の 20 件）は都度**対象テストのみ**を走らせるため、この予算には算入しない
 
 ### 3. 変異探針の結果（T094）
 
