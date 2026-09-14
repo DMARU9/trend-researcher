@@ -1053,9 +1053,30 @@ CLI 契約側は `--max-results 3` の実行で 7 回（`analyze_content:3`）�
 
 - [X] 検出器がクラス名・モジュール名の**文字列**に依存していない（`isinstance` ベース。US3 / T051）
 - [X] 上限テーブルの引き当てで未知モデルを例外にしていない（比率方式。US3 / T051）
-- [ ] 無効なオプションをモデルへ渡す経路が無い
-- [ ] ツール契約の非対称が無い（件数契約を生成と点検の**両方**の後に適用）
-- [ ] 常に真になる条件分岐・到達しない `except` 節が無い
+- [X] 無効なオプションをモデルへ渡す経路が無い（走査: `src/trend_researcher/tools/llm.py` に
+  `.bind(` / `with_config(` は 0 件で、モデルへ渡るのは `init_chat_model` の引数だけ。
+  `build_model` が渡すキーは `model` / `max_tokens` / `api_key` / `base_url` /
+  `default_headers` / `tags` の 6 つ固定で `**kwargs` を受けない。T104）
+- [X] ツール契約の非対称が無い（件数契約を生成と点検の**両方**の後に適用）（走査:
+  `src/trend_researcher/nodes/plan_search.py` は生成の直後（`queries = queries[:limit]`）と
+  点検の後（`_apply_review` の `merged = merged[:limit]`）の両方で `provider.max_search_queries`
+  を適用し、`limit` は 1 箇所で解決する。`test_x_caps_queries_at_eight` /
+  `test_rule_3_more_review_lines_are_capped_for_x` / `test_rule_3_has_no_cap_for_youtube` が
+  固定。T104）
+- [X] 常に真になる条件分岐・到達しない `except` 節が無い（棚卸しと実測: (1)
+  `src/trend_researcher/tools/degradation.py` の `_budget` の `tokens <= 0` は到達不能
+  （`limit` の出所は `MODEL_TOKEN_LIMITS` のみで最小 32768、控除は 10000 → 控除後は常に
+  22768 以上。分岐カバレッジでも片側が未実行）→ **削除**し、下限は `max(…, 0)` で表す
+  （`None`＝無制限へは落とさない）。(2) `src/trend_researcher/tools/transcript.py` の
+  「自動字幕にあるか」を見る `elif` は既定と同じ値を再代入するだけで真偽どちらでも観測結果が
+  変わらず、片側だけの分岐だった → **削除**。(3) `src/trend_researcher/nodes/parse_instruction.py`
+  の `_period_to_date` の `return None` は呼び出し元（実測 1 箇所）の正規表現の選択肢から
+  到達しないが、消すと未検証のラベルで `KeyError` になり得るため**残し**、根拠をコメントと
+  `test_an_unknown_period_label_yields_none` で固定。(4) 走査（`grep` / AST）で
+  `except: pass` と定数条件の分岐は 0 件。到達しない `raise` / `except` は無く、
+  `nodes/{parse_instruction,extract_common}.py` の `except DegradationError: raise` と
+  `tools/llm.py` の縮退ループの `except asyncio.CancelledError: raise` は**到達する**ことを
+  テストで固定（T104）
 
 ---
 
@@ -1205,7 +1226,7 @@ FR-061 / FR-062 / FR-069（実施済みのテストで固定されている）�
 - [X] T101 [US3] `get_model_token_limit` の部分文字列一致（`src/trend_researcher/tools/degradation.py` の `key in model`）を、参照実装の欠陥（辞書の反復順に依存し、短い鍵が長い鍵を影にする）を移植しない形へ直す。実測: `openai:o1-pro` / `openai:o3-pro` が先行キーに影にされ（`openai:o1` の値を変えると `openai:o1-pro` が 111111 を返す＝自身の登録値 200000 は到達不能）、未登録の `google:gemini-pro-vision` が 32768 で拾われる。完全一致優先の規則と「影になる鍵が無い」ことをテストで固定する（ファイル: `src/trend_researcher/tools/degradation.py` / `tests/unit/test_degradation.py`）per FR-063 (contradicts)
 - [X] T102 [US3] 圧縮と縮退が同じ実行で起きる経路（圧縮で素材を削った後に上限超過で梯子を登る）を実経路のテストで固定する。AST 走査では両方を扱うテストが 0 件（`tests/unit/test_compile_report.py` の 2 件は状態の手注入のみ）で、統合の縮退シナリオも `parse_instruction` だけである（ファイル: `tests/unit/test_analyze_content.py` / `tests/integration/test_cli_contract.py`）per FR-019 (partial)
 - [X] T103 [US6] `tests/eval/axes.md` の観点↔制約の対応表を機械的に固定する。変異探針では観点 3 と 4 の制約を入れ替えても `tests/unit/test_evaluation.py` が 39 passed（識別子が表に現れるかしか見ていない）（ファイル: `tests/unit/test_evaluation.py` / `tests/eval/axes.md`）per FR-048 / FR-074 (partial)
-- [ ] T104 [US3] 実装メモ §7「参照実装の欠陥を移植していないことの確認」の未チェック 3 項目（無効なオプションを渡す経路・ツール契約の対称性・常に真の条件と到達しない分岐）をコード走査と実測で確定してチェックを付ける。到達しない分岐の実例: `tools/degradation.py` の `_budget` の `tokens <= 0` はテーブル最小 32768 − 予約 10,000 > 0 で到達不能（カバレッジでも未実行）。到達不能を論証できるなら削除し、残す場合は根拠をコメントとテストで固定する（ファイル: `specs/003-pipeline-hardening-and-evaluation/tasks.md` / `src/trend_researcher/tools/degradation.py`）per FR-063 / FR-064 (partial)
+- [X] T104 [US3] 実装メモ §7「参照実装の欠陥を移植していないことの確認」の未チェック 3 項目（無効なオプションを渡す経路・ツール契約の対称性・常に真の条件と到達しない分岐）をコード走査と実測で確定してチェックを付ける。到達しない分岐の実例: `tools/degradation.py` の `_budget` の `tokens <= 0` はテーブル最小 32768 − 予約 10,000 > 0 で到達不能（カバレッジでも未実行）。到達不能を論証できるなら削除し、残す場合は根拠をコメントとテストで固定する（ファイル: `specs/003-pipeline-hardening-and-evaluation/tasks.md` / `src/trend_researcher/tools/degradation.py`）per FR-063 / FR-064 (partial)
 - [X] T105 [US6] `script/evaluate.py` の commit 解決（`resolve_commit` / `_git_dir` / `_commit_from_git_dir` / `_packed_ref`）をテストで固定する。現在は commit 文字列を直接注入するテストのみで、`.git` から読む経路と解決できないときに `unknown` へ落ちる経路が未検証である（ファイル: `tests/unit/test_evaluation_entrypoint.py` / `script/evaluate.py`）per FR-043 (partial)
 - [X] T106 [US6] `build_judge` と `_judge_callable` が `build_model` / `ainvoke_structured` の既存経路だけを使い、`ChatOpenAI` を直接構築しないことを固定するテストを足す（`TR_MODEL` を退避して戻すことも含む）（ファイル: `tests/unit/test_evaluation_entrypoint.py` / `script/evaluate.py`）per FR-045 (partial)
 - [X] T107 [US6] 判定の再試行の規則が全観点で同一であること（観点による分岐が無く、同じ `retry_max` 経路を通る）を固定する。現在のテストは「観点ごとに 1 回呼ぶ」ことしか見ていない（ファイル: `tests/unit/test_evaluation.py` / `script/evaluate.py`）per FR-068 (partial)
@@ -1230,3 +1251,6 @@ Issue を閉じる。ゲートは各コミットで `uv run pytest -q` / `uv run
 
 **観測（T102・修正はしていない）**: 解析が縮退を使い切って失敗した候補の `CompressedSource` は状態に残らない（`_analyze_one` が圧縮の記録を解析結果と対で返し、失敗時は例外が先に立つため）。圧縮が走ったことは「圧縮プロンプトの記録」と「縮小対象のプロンプトに圧縮結果の固有語が載っていること」で確かめられるようにし、テストの docstring に明記した。
 | T100 | `script/evaluate.py` の `_generate` が実行時設定に `include_intermediate: True` を入れて走り（`cache_dir` は載せないので一時ファイルは作らない。evaluation-contract §2 の「結果の JSONL のみ」を維持）、戻り値の中間データを `records.intermediate_entry` で写して**実行の行**へ載せる（呼び出し側が渡す受け皿へ追記する形にし、戻り値 2 項目の既存契約を変えない。FR-035）。`_judge_only` は保存済みの中間データを引き継ぐ（生データは解放後は再取得できない。FR-027 / SC-010）。`tests/eval/records.py` に `INTERMEDIATE_KEYS` と `intermediate_entry`（採用クエリ・解析件数・圧縮の前後＝**素材長**・縮退・失敗／項目が無い・形が違う状態でも空の項目で組み立てる）、`RunContext.intermediate` と `to_dict` の `intermediate`。テストは `tests/unit/test_evaluation_records.py` 3 件＋ `tests/unit/test_evaluation_entrypoint.py` 3 件（設定に切り替えが入ること・状態の 5 項目が記録へ写ること・失敗した件は中間データも無いこと・実行の行まで配線されていること） | **1,090 passed / カバレッジ 97.42% / ruff 0 件 / mypy 29 ファイル 0 件**（100.80 秒） | 4 件の変異（切り替えを入れない／戻り値の写しをやめる／採用クエリを写さない／実行の行に載せない）が**すべて検出**（1 / 2 / 2 / 1 failed。復元後にフルスイート green。`script/evaluate.py` の sha256 `3b191b0f…` と `tests/eval/records.py` の `a86a55ef…` の一致を確認） |
+| T104 | 実装メモ §7 の未チェック 3 項目をコード走査と実測で確定した。`src/trend_researcher/tools/degradation.py` の `_budget` から到達不能な `tokens <= 0` を削除して下限を `max(…, 0)` に、`src/trend_researcher/tools/transcript.py` から冗長な自動字幕の `elif` を削除、`src/trend_researcher/nodes/parse_instruction.py` の到達しない `return None` は残して根拠をコメントとテストで固定。テストは 6 ファイルに 10 件追加（`test_degradation.py` 3・`test_transcript.py` 1・`test_parse_instruction.py` 2・`test_extract_common.py` 1・`test_llm.py` 2・`test_compile_report.py` 1）。`src/` の変更は 3 ファイルだけで、既定の入力に対する `messages` / レポート / 終了コード / 呼び出し回数は変えていない | **1,100 passed / カバレッジ 97.67% / ruff 0 件 / mypy 29 ファイル 0 件**（101.90 秒） | 5 件の変異: (1) `_budget` を旧実装へ戻す (2) `nodes/parse_instruction.py` の再送出を削除 (3) `nodes/extract_common.py` の再送出を削除 → **すべて検出**（1 / 1 / 1 failed）、(4) `tools/transcript.py` の冗長な `elif` を戻す (5) `tools/llm.py` の縮退ループの `except asyncio.CancelledError: raise` を削除 → **緑のまま＝等価**（戻しても挙動が変わらないことを実測。この分節は契約 §3 が「対象外＝再送出」の行を要求するため残す）。復元後にフルスイート green（5 ファイルの sha256 の一致を確認） |
+
+**観測（T104・分岐カバレッジの残り）**: `--cov-branch` で `src/trend_researcher/` に残る未実行は `__main__.py`（31 行＋8 分岐）と `providers/base.py`（`Protocol` の `...` 本体）だけ。前者は層 A のサブプロセスと層 B のハーネスが実行するためプロセス内の測定には現れない（例: `--since` の形式違反は `tests/integration/test_cli_contract.py` が文言まで固定し、`DegradationError` / タイムアウト / レポート無しの各経路は `tests/integration/cli_harness.py` のシナリオが固定）。後者は抽象メソッドの本体で、どちらも到達しない分岐ではない。

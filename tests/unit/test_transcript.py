@@ -293,3 +293,29 @@ def test_fetch_transcript_degrades_when_info_is_not_dict(info):
         t = fetch_transcript("vid1", language="ja")
     assert t.text == ""
     assert t.source == TranscriptSource.AUTOMATIC_CAPTION
+
+
+def test_fetch_transcript_keeps_the_automatic_source_when_the_language_is_not_listed():
+    """`requested_subtitles` にある言語が `subtitles` / `automatic_captions` の
+    どちらにも無い場合は `AUTOMATIC_CAPTION` のまま（T104）。
+
+    この分岐は既定値（`AUTOMATIC_CAPTION`）と同じ値の再代入でしかなく、条件が偽でも
+    真でも観測結果が変わらない。到達不能で冗長な分岐は残さない（FR-063 の「常に真に
+    なる条件分岐」を持ち込まない）ため実装からは削除し、**観測結果が変わらないこと**を
+    この検査で固定する（字幕本文は `requested_subtitles` のエントリから読む）。
+    """
+    path = _write_sub_file("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n字幕本文\n")
+    info = {
+        "subtitles": {},
+        "automatic_captions": {},
+        "requested_subtitles": {"ja": {"ext": "vtt", "filepath": path}},
+    }
+
+    with mock.patch("yt_dlp.YoutubeDL") as ydl_mock:
+        ydl_mock.return_value.__enter__.return_value.extract_info.side_effect = (
+            lambda url, download=False: info
+        )
+        t = fetch_transcript("vid1", language="ja")
+
+    assert t.source == TranscriptSource.AUTOMATIC_CAPTION
+    assert "字幕本文" in t.text

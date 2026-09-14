@@ -25,6 +25,7 @@ from trend_researcher.tools.degradation import (
     Ladder,
     get_model_token_limit,
     is_token_limit_exceeded,
+    next_ladder,
     shrink,
 )
 
@@ -502,3 +503,44 @@ def test_the_reason_is_not_the_compression_reason() -> None:
     _drain(ladder)
 
     assert ladder.options.records[0].reason != "compressed"
+
+
+# --- 到達不能な分岐の棚卸し（T104 / FR-063 / FR-064） ------------------------
+#
+# 分岐カバレッジの実測で「未実行」だった分岐を triage した結果を固定する。判定の
+# 規則は 2 つ: (a) 到達不能を論証でき、削除しても危険が増えないなら**削除**する、
+# (b) 削除すると危険が増える（未検証の入力で KeyError になる等）なら**残して根拠を
+# コメントとテストで固定する**。ここは (a) の対象（`_budget` の `tokens <= 0`）。
+
+
+def test_the_budget_is_positive_for_every_registered_limit() -> None:
+    """表の**すべて**の上限で予算が正になる（`tokens <= 0` は到達しない。T104）。
+
+    上限テーブルの最小値は 32768 で、出力枠の控除 10000 を引いても 22768 が残る。
+    したがって「予算が 0 以下」の分岐は現行の表からは到達できない。到達不能な
+    分岐は削除し（`max(..., 0)` で下限だけを残す）、この検査がその前提を固定する。
+    """
+    budgets = {key: Ladder._budget(limit) for key, limit in MODEL_TOKEN_LIMITS.items()}
+
+    assert all(budget is not None and budget > 0 for budget in budgets.values())
+    assert budgets == {key: limit - 10000 for key, limit in MODEL_TOKEN_LIMITS.items()}
+    # 削除した分岐の前提そのもの（表の最小値でも控除を引いて正が残る）
+    assert min(MODEL_TOKEN_LIMITS.values()) - 10000 > 0
+
+
+def test_the_budget_is_none_only_when_the_limit_is_unknown() -> None:
+    """上限が分からないときだけ `None`（予算の制約なし＝比率のみで縮退する。R-18）。"""
+    assert Ladder._budget(None) is None
+    assert Ladder._budget(32768) == 22768
+
+
+def test_a_limit_within_the_output_reserve_leaves_no_budget() -> None:
+    """上限が出力枠以下なら予算は 0（`None` に落とさない。T104）。
+
+    0 は「これ以上縮められない」を意味し、梯子は 1 段も進まない（`min_input_chars`
+    の停止条件で打ち切られる）。`None`（＝無制限）へ落とすと、上限より大きい入力の
+    まま呼び直して同じ失敗を繰り返す。
+    """
+    assert Ladder._budget(5000) == 0
+    assert Ladder._budget(10000) == 0
+    assert next_ladder("x" * 10000, ratio=0.9, min_input_chars=100, char_budget=0) is None

@@ -767,3 +767,49 @@ def test_the_sync_wrapper_records_the_same_way() -> None:
         )
 
     assert [record.input_tokens for record in meter.records] == [120]
+
+
+# --- 分岐カバレッジの棚卸しで見つかった未実行の分岐（T104） --------------------
+
+
+def test_the_session_id_comes_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`TR_SESSION_ID` があればそれを使う（無いときだけプロセス内で 1 つ生成する）。
+
+    セッション ID の**生成**（`x-opencode-session` が毎回同じ値になること）は既存の
+    検査が固定している。ここは環境変数から来る側（分岐カバレッジで未実行だった行）を
+    固定する（T104）。
+    """
+    monkeypatch.setenv("TR_SESSION_ID", "session-from-env")
+
+    with mock.patch("trend_researcher.tools.llm.init_chat_model") as m:
+        m.return_value = "fake-model"
+        build_model("research")
+
+    _, kwargs = m.call_args
+    assert kwargs["default_headers"] == {"x-opencode-session": "session-from-env"}
+
+
+def test_cancellation_during_a_degraded_call_is_propagated(no_retry_sleep: Any) -> None:
+    """縮退の段の呼び直し中のキャンセルも握り潰さない（T104）。
+
+    初回の上限超過で梯子に入り、1 段目の呼び直しでキャンセルされる経路。キャンセルを
+    縮退のループで握り潰すと、グラフを外から止められなくなる（既存の
+    `test_cancellation_is_not_retried` は初回呼び出し側だけを固定している）。
+    """
+    options = _degrade_options()
+    model, patch = _patch_model([_context_length_error(), asyncio.CancelledError()])
+
+    with patch, pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            ainvoke_text(
+                _LONG_PROMPT,
+                env_prefix=None,
+                retry_max=2,
+                retry_wait_seconds=0.0,
+                degrade=options,
+            )
+        )
+
+    # 初回（上限超過）＋ 1 段目（キャンセル）。再試行も次の段も起こらない
+    assert model.runnable.calls == 2
+    assert [len(prompt) for prompt in model.runnable.prompts] == [10000, 9000]

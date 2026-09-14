@@ -7,8 +7,12 @@ LLM の解釈）と、自然言語の期間表現・日付表現の解釈。
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
+from unittest import mock
 
+import httpx
+import openai
 import pytest
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -18,9 +22,11 @@ from trend_researcher.nodes.parse_instruction import (
     _extract_count_from_text,
     _extract_published_after_from_text,
     _parse_date_from_text,
+    _period_to_date,
     parse_instruction,
 )
 from trend_researcher.state import AgentInputState, AgentState
+from trend_researcher.tools.degradation import DegradationError
 
 
 def test_use_trends_is_not_in_the_state_declarations():
@@ -536,3 +542,83 @@ def test_structured_method_comes_from_the_configuration(fake_model_factory: Any)
     options = fake_model_factory.structured_options_for("parse_instruction")
     assert options and options[0]["method"] == "function_calling"
     assert options[0]["schema"] is ResearchInstruction
+
+
+# --- 到達不能な分岐の棚卸し（T104 / FR-063） --------------------------------
+
+
+def test_an_unknown_period_label_yields_none(frozen_now: Any) -> None:
+    """既知でない期間ラベルは `None`（辞書引きを無条件にしない。T104）。
+
+    この `return None` は唯一の呼び出し元の正規表現（`半年` / `N月` / `1年` / `年` /
+    `本年` / `今年` / `最近`）からは到達しない（分岐カバレッジでも未実行）。ただし
+    削除すると `_RELATIVE_PERIOD_DAYS[label]` が未検証のラベルで `KeyError` になり
+    得るため、分岐は残し「知らないラベルは `None`」という契約をここで固定する。
+    """
+    assert _period_to_date("未知の期間", datetime(2026, 9, 14, tzinfo=UTC)) is None
+
+
+# --- US3: 構造化出力が上限超過を使い切ったらフォールバックしない（FR-015） -----
+
+
+class _AlwaysLimitStructured:
+    """構造化出力が常に上限超過になる runnable（縮退を使い切る経路を作る）。"""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def ainvoke(self, prompt: str) -> Any:
+        self.attempts += 1
+        raise _context_length_error()
+
+
+class _StructuredLimitLLM:
+    """構造化だけが上限超過で失敗するフェイク（テキスト呼び出しは成功する）。
+
+    テキストを成功させておくと「`DegradationError` を握り潰してフォールバックへ
+    落ちる」実装ではノードが正常終了するため、テストが確実に赤になる（非空虚）。
+    """
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.text_calls = 0
+        self.structured = _AlwaysLimitStructured()
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        return self.structured
+
+    async def ainvoke(self, prompt: str) -> Any:
+        self.text_calls += 1
+        return SimpleNamespace(content=self.content)
+
+
+def _context_length_error() -> Exception:
+    """上限超過（400 ＋ `context_length_exceeded`）を模した例外（契約 §5）。"""
+    return openai.BadRequestError(
+        message="This endpoint's maximum context length is 1048576 tokens.",
+        response=httpx.Response(400, request=httpx.Request("POST", "https://example.test/v1")),
+        body={"error": {"code": "context_length_exceeded"}},
+    )
+
+
+def test_the_exhausted_degradation_is_not_swallowed_by_the_fallback() -> None:
+    """縮退を使い切ったらフォールバックへ落とさず例外を伝える（FR-015 / T104）。
+
+    飲み込むと、失敗した呼び出しが「簡易解析の成功」に化けて終了コード 1 にならない
+    （`__main__.py` は `DegradationError` を見て exit 1 にする）。
+    """
+    llm = _StructuredLimitLLM(LLM_JSON)
+    state = {"messages": [HumanMessage(content="AI の話題を5件")], "platform": "x"}
+
+    with (
+        mock.patch("trend_researcher.nodes.parse_instruction.build_model", return_value=llm),
+        pytest.raises(DegradationError),
+    ):
+        parse_instruction(state, _config())
+
+    assert llm.structured.attempts >= 1
+    assert llm.text_calls == 0
+
+
+# 対照（上限超過**以外**の失敗は従来どおりフォールバックする）は既存の
+# `test_structured_failure_falls_back_and_is_reported` が固定している。

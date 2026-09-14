@@ -60,7 +60,6 @@ def fetch_transcript(video_id: str, language: str = "ja") -> Transcript:
         return Transcript(video_id=video_id, language=language, text="", source=TranscriptSource.AUTOMATIC_CAPTION)
 
     subs = info.get("subtitles") or {}
-    auto_subs = info.get("automatic_captions") or {}
     requested = info.get("requested_subtitles") or {}
 
     chosen_lang = language if language in requested else None
@@ -68,12 +67,15 @@ def fetch_transcript(video_id: str, language: str = "ja") -> Transcript:
         chosen_lang = next(iter(requested))
 
     text = ""
+    #: 既定は自動字幕。手動字幕（`subtitles`）にあるときだけ `CAPTION` へ上げる。
+    #: かつては「自動字幕（`automatic_captions`）にあるか」を見て既定と同じ
+    #: `AUTOMATIC_CAPTION` を再代入する分岐があったが、条件が真でも偽でも観測結果が
+    #: 変わらない（分岐カバレッジでも真側は未実行＝片側だけの分岐）ため削除した。
+    #: 分岐を戻しても挙動が変わらないことは変異探針で確認する（FR-063 / T104）。
     source = TranscriptSource.AUTOMATIC_CAPTION
     if chosen_lang:
         if chosen_lang in subs:
             source = TranscriptSource.CAPTION
-        elif chosen_lang in auto_subs:
-            source = TranscriptSource.AUTOMATIC_CAPTION
         sub = requested.get(chosen_lang, {})
         text = _read_subtitle_file(sub)
 

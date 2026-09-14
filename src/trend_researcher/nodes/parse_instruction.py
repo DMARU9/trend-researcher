@@ -104,6 +104,13 @@ def _period_to_date(label: str, now: datetime) -> datetime | None:
     if label in _RELATIVE_PERIOD_DAYS:
         days = _RELATIVE_PERIOD_DAYS[label]
         return datetime(now.year, 1, 1, tzinfo=UTC) if days == 0 else now - timedelta(days=days)
+    # `label` は唯一の呼び出し元（`_extract_published_after_from_text`）の正規表現が
+    # 返す選択肢のいずれかで、`月` を含むか `_RELATIVE_PERIOD_DAYS` の鍵である（実測:
+    # 呼び出し元は 1 箇所で、選択肢は `半年` / `N月` / `1年` / `年` / `本年` / `今年` /
+    # `最近`）。したがってこの `return None` は**通常の経路では到達しない**。分岐
+    # カバレッジでも未実行である（T104）。ここは (a) 削除すると辞書引きが
+    # `KeyError` になり得る（未検証のラベルで呼ばれた場合）ため削除せず、(b) 根拠を
+    # このコメントと `test_an_unknown_period_label_yields_none` で固定する。
     return None
 
 

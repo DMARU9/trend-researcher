@@ -8,13 +8,18 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
+from unittest import mock
 
+import httpx
+import openai
 import pytest
 from langchain_core.runnables import RunnableConfig
 
 from trend_researcher.models import AnalysisFinding
 from trend_researcher.nodes.extract_common import extract_common
+from trend_researcher.tools.degradation import DegradationError
 
 #: プロンプトが要求する形式（`### テーマ名` + `- 説明:` / `- 代表抜粋:`）。
 PROMPT_STYLE = (
@@ -343,3 +348,68 @@ def test_fallback_does_not_add_progress_lines(fake_model_factory: Any) -> None:
     contents = [m.content for m in out["messages"]]
     assert len(contents) == 2
     assert not any("補足" in c or "構造化出力" in c for c in contents)
+
+
+# --- US3: 構造化出力が上限超過を使い切ったらフォールバックしない（FR-015 / T104） --
+
+
+class _AlwaysLimitStructured:
+    """構造化出力が常に上限超過になる runnable（縮退を使い切る経路を作る）。"""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def ainvoke(self, prompt: str) -> Any:
+        self.attempts += 1
+        raise _context_length_error()
+
+
+class _StructuredLimitLLM:
+    """構造化だけが上限超過で失敗するフェイク（テキスト呼び出しは成功する）。
+
+    テキストを成功させておくと「`DegradationError` を握り潰して見出し解析へ落ちる」
+    実装ではノードが正常終了するため、テストが確実に赤になる（非空虚）。
+    """
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.text_calls = 0
+        self.structured = _AlwaysLimitStructured()
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        return self.structured
+
+    async def ainvoke(self, prompt: str) -> Any:
+        self.text_calls += 1
+        return SimpleNamespace(content=self.content)
+
+
+def _context_length_error() -> Exception:
+    """上限超過（400 ＋ `context_length_exceeded`）を模した例外（契約 §5）。"""
+    return openai.BadRequestError(
+        message="This endpoint's maximum context length is 1048576 tokens.",
+        response=httpx.Response(400, request=httpx.Request("POST", "https://example.test/v1")),
+        body={"error": {"code": "context_length_exceeded"}},
+    )
+
+
+def test_the_exhausted_degradation_is_not_swallowed_by_the_fallback() -> None:
+    """縮退を使い切ったら見出し解析へ落とさず例外を伝える（FR-015 / T104）。
+
+    飲み込むと、失敗した呼び出しが「共通テーマ 0 件の成功」に化けて終了コード 1 に
+    ならない（`__main__.py` は `DegradationError` を見て exit 1 にする）。
+    """
+    llm = _StructuredLimitLLM(PROMPT_STYLE)
+
+    with (
+        mock.patch("trend_researcher.nodes.extract_common.build_model", return_value=llm),
+        pytest.raises(DegradationError),
+    ):
+        extract_common({"analyses": _ANALYSES, "platform": "x"}, _config())
+
+    assert llm.structured.attempts >= 1
+    assert llm.text_calls == 0
+
+
+# 対照（上限超過**以外**の失敗は見出し解析へフォールバックする）は既存の
+# `test_fallback_extracts_quotes_with_the_existing_parsers` が固定している。

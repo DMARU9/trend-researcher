@@ -273,13 +273,21 @@ class Ladder:
 
     @staticmethod
     def _budget(limit: int | None) -> int | None:
-        """上限トークンから「上限に収まる文字数」を求める（求まらないなら `None`）。"""
+        """上限トークンから「上限に収まる文字数」を求める（求まらないなら `None`）。
+
+        上限が分からないとき（`None`）だけ `None` を返し、予算の制約を外す（比率のみで
+        縮退する。R-18）。上限が分かっているときは**必ず**文字数を返し、0 で下限を切る。
+
+        かつては「控除後のトークンが 0 以下なら `None`」という分岐があったが、これは
+        到達不能だった（`MODEL_TOKEN_LIMITS` の最小値は 32768、控除は 10000 なので
+        控除後は必ず 22768 以上。分岐カバレッジでも未実行）。到達不能な分岐は残さず、
+        下限だけを `max(..., 0)` で表す。**`None`（無制限）へ落とさない**のが要点で、
+        予算 0 は「これ以上縮められない」として `next_ladder` の停止条件で打ち切られる
+        （上限より大きい入力のまま呼び直して同じ失敗を繰り返さない。FR-065 / T104）。
+        """
         if limit is None:
             return None
-        tokens = limit - _OUTPUT_RESERVE_TOKENS
-        if tokens <= 0:
-            return None
-        return tokens * _CHARS_PER_TOKEN
+        return max(limit - _OUTPUT_RESERVE_TOKENS, 0) * _CHARS_PER_TOKEN
 
     def advance(self) -> str | None:
         """1 段縮めて、その段の入力を返す（停止条件を満たすなら `None`）。

@@ -807,3 +807,17 @@ def test_the_usage_is_not_put_into_the_report(tmp_path: Path) -> None:
     assert set(report.model_dump(mode="json")) == REPORT_JSON_KEYS
     assert not hasattr(report, "usage")
 
+
+
+def test_the_release_does_not_add_the_candidates_key_when_absent() -> None:
+    """`candidates` を持たない入力に新しいキーを足さない（既定の出力を変えない）。
+
+    `contexts` の同種の検査と対にする（どちらも分岐カバレッジで片側だけが実行されて
+    いた。T104）。状態のキーは `NotRequired` なので、ノードを直接呼ぶ経路では欠け得る。
+    """
+    state = _state()
+    del state["candidates"]
+
+    result = compile_report(state, _config())
+
+    assert "candidates" not in result
