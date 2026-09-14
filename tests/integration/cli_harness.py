@@ -30,6 +30,8 @@ from unittest import mock
 if __package__ in (None, ""):  # スクリプトとして起動された場合のパス解決
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from langchain_core.exceptions import OutputParserException
+
 from trend_researcher.models import Candidate, Context
 from trend_researcher.tools.transcript import Transcript
 
@@ -92,16 +94,23 @@ _NO_BOUNDARY_SCENARIOS = frozenset({"no_report"})
 
 
 class _FakeMessage:
-    """`.content` のみを持つ LLM 応答。"""
+    """`.content` と `usage_metadata` を持つ LLM 応答（conftest の同名ダブルと同型）。"""
 
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, usage_metadata: dict[str, int] | None = None) -> None:
         self.content = content
+        #: 既定は `None`（実 API が使用量を返さない場合と同じ欠落経路）。
+        self.usage_metadata = usage_metadata
 
 
 class _FakeLLM:
-    """1 ノード分の応答を返す LLM フェイク。"""
+    """1 ノード分の応答を返す LLM フェイク。
 
-    def __init__(self, content: str) -> None:
+    `with_structured_output()` は conftest の同名ダブルと同じ契約（既定で
+    `OutputParserException`）を持つ。CLI のシナリオは構造化出力に依存しないため、
+    既定の失敗のままでよい。
+    """
+
+    def __init__(self, content: str | None) -> None:
         self._content = content
 
     def invoke(self, *args: Any, **kwargs: Any) -> _FakeMessage:
@@ -109,6 +118,27 @@ class _FakeLLM:
 
     async def ainvoke(self, *args: Any, **kwargs: Any) -> _FakeMessage:
         return _FakeMessage(self._content)
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> _FakeStructuredRunnable:
+        return _FakeStructuredRunnable(schema)
+
+
+class _FakeStructuredRunnable:
+    """`with_structured_output()` のラン（常に `OutputParserException`）。"""
+
+    def __init__(self, schema: Any) -> None:
+        self._schema = schema
+
+    def _fail(self) -> Any:
+        raise OutputParserException(
+            "cli_harness: 構造化出力は差し替えていません（既定の失敗経路）"
+        )
+
+    def invoke(self, *args: Any, **kwargs: Any) -> Any:
+        return self._fail()
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        return self._fail()
 
 
 class _RecordingBoundary:

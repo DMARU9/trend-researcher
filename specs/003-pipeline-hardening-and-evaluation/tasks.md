@@ -124,7 +124,7 @@ US5（注入と拒否の挙動）と US8（宣言の検証と Studio）で**使�
 - [X] T010 [P] 新規モデルと状態フィールドのテストを作成する: `CompressedSource` / `Degradation` / `Failure` / `ModelUsage` の必須項目と不変条件（`after_chars < before_chars` 等）、`AgentState` に 4 フィールドが載ること、`usage` が `Annotated[..., operator.add]` で**並列結果を連結**すること。`tests/unit/test_models.py`（拡張）
 - [X] T011 [P] `Configuration` の宣言と値域の走査テストを作成する: 全項目に `description` があること、`ge` / `le` / `Literal` の宣言が期待どおりであること、`x_oap_ui_config` が付いていること、`ConfigurationError` のメッセージに項目名・入力値・期待する値域が入ること。`tests/unit/test_configuration.py`（拡張）
 - [X] T012 [P] `ProgressEmitter.note()` のテストを作成する: stderr に 1 行（書式 `[補足] ...`）を書き、**`get_messages()` が増えない**こと、`emit()` の既存書式と `messages` の内容が不変であること。`tests/unit/test_progress.py`（拡張）
-- [ ] T013 [P] テスト境界のフェイクを検証するテストを作成する: `_FakeLLM` が `with_structured_output` と `usage_metadata` を持つこと、`FakeModelFactory` が `trend_researcher.tools.compression.build_model` も差し替えること、`no_retry_sleep` が `tools.llm.asyncio.sleep` を対象にすること（既存の「フィクスチャが実際に patch しているか」検証の延長）。`tests/unit/test_fixtures.py`（拡張）
+- [X] T013 [P] テスト境界のフェイクを検証するテストを作成する: `_FakeLLM` が `with_structured_output` と `usage_metadata` を持つこと、`FakeModelFactory` が `trend_researcher.tools.compression.build_model` も差し替えること、`no_retry_sleep` が `tools.llm.asyncio.sleep` を対象にすること（既存の「フィクスチャが実際に patch しているか」検証の延長）。`tests/unit/test_fixtures.py`（拡張）
 
 ### Implementation for Foundational
 
@@ -132,7 +132,7 @@ US5（注入と拒否の挙動）と US8（宣言の検証と Studio）で**使�
 - [X] T015 [P] `src/trend_researcher/state.py` の `AgentState` に 4 フィールドを追加する: `compressed` / `degradations` / `failures`（通常フィールド）、`usage`（`Annotated[list[ModelUsage], operator.add]`）。`AgentInputState` は**変更しない**（US6 の実走は 3 項目のみを使う）
 - [X] T016 `src/trend_researcher/configuration.py` に次の 3 つを追加する（T007 の実測結果に従う）: (a) 追加 11 項目の宣言（`ge` / `le` / `Literal` / `description` / `json_schema_extra={"x_oap_ui_config": ...}`。値域は `data-model.md` §1.1 と `research.md` §R-20 の表）、(b) `ConfigurationError(field, value, expected, message)`、(c) 上書き適用後の再検証（`_check_bounds` または `model_validate` のうち `model_fields_set` を保つ方）。`resolve_env` と `load()` の解決順は**変えない**
 - [X] T017 [P] `src/trend_researcher/progress.py` の `ProgressEmitter` に `note(text)` を追加する: stderr に `[補足] {text}` を 1 行書き、`self._messages` へは**積まない**。`NODE_ORDER` と `emit` は変更しない
-- [ ] T018 [P] テスト境界のフェイクを拡張する: (a) `tests/conftest.py` の `_FakeLLM` に `with_structured_output(schema, **kwargs)` を追加し既定で `OutputParserException` を送出するランを返す、(b) `FakeModelFactory.install(responses, *, structured=None)` を追加（`structured` 指定時は成功するラン）、(c) `_FakeMessage` に `usage_metadata`（既定 `None`）、(d) patch 対象に `trend_researcher.tools.compression` を追加、(e) `no_retry_sleep` の対象に `tools.llm.asyncio.sleep` を追加し `autouse` にする、(f) `tests/integration/cli_harness.py` の `_FakeLLM` にも同じ 2 つを追加する
+- [X] T018 [P] テスト境界のフェイクを拡張する: (a) `tests/conftest.py` の `_FakeLLM` に `with_structured_output(schema, **kwargs)` を追加し既定で `OutputParserException` を送出するランを返す、(b) `FakeModelFactory.install(responses, *, structured=None)` を追加（`structured` 指定時は成功するラン）、(c) `_FakeMessage` に `usage_metadata`（既定 `None`）、(d) patch 対象に `trend_researcher.tools.compression` を追加、(e) `no_retry_sleep` の対象に `tools.llm.asyncio.sleep` を追加し `autouse` にする、(f) `tests/integration/cli_harness.py` の `_FakeLLM` にも同じ 2 つを追加する（**(d) は `tools/compression.py` が未作成のため T024 で追加**。実装メモ §6 の乖離表を参照）
 - [ ] T019 `tests/unit/test_platform_scan.py` を実行して規則 (a)+(b) が**0 件のまま**であることを確認し、新規モジュール（`tools/compression.py` / `tools/degradation.py` / `usage.py` 相当）と `Configuration` の追加が走査に引っかからないことを確かめる（原則 IV）。引っかかった場合は走査テストではなく**ソース側を直す**（FR-035）
 
 **Checkpoint**: 基盤が完成。共有モデル・状態フィールド・設定の宣言・`note()`・フェイクの拡張が
@@ -452,6 +452,24 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 
 復元後: フルスイート **647 passed / 96.93% / 49.53 秒** で green に戻ることを確認済み。
 
+**実装中に回した探針（T013 / T018、`tests/conftest.py`。各 1 回で復元）**
+
+| 変異 | 落ちたテスト | 復元確認 |
+|---|---|---|
+| `_FakeStructuredRunnable` が既定で送出しない（`if self._llm.structured is None` → `if False`） | `test_fake_llm_structured_output_fails_by_default` / `..._awaits_and_fails_too`（2 failed） | sha256 一致（`674beefd…`） |
+| `_FakeMessage.usage_metadata` の既定を `None` 以外にする | `test_fake_message_carries_no_usage_by_default`（1 failed） | sha256 一致 |
+| `no_retry_sleep` から `autouse=True` を外す | `test_sleep_spy_is_installed_without_requesting_the_fixture`（1 failed） | sha256 一致 |
+| 成功時に `schema.model_validate` を通さない（生の dict を返す） | `test_fake_model_factory_structured_output_succeeds_when_configured` / `..._requires_the_configured_schema`（2 failed） | sha256 一致 |
+| 構造化出力のプロンプトを記録しない | `test_fake_model_factory_structured_calls_are_recorded`（1 failed） | sha256 一致 |
+
+復元後: フルスイート **656 passed / 96.93% / 49.81 秒** で green に戻ることを確認済み。
+
+**autouse 化で判明した実測（T018 (e) の設計を変えた根拠）**: `asyncio.sleep` を一律に
+無効化するスパイは `tests/unit/test_analyze_content.py::test_parallelism_is_capped_at_two` を
+落とした（`max_in_flight` が 2 → 1）。`await asyncio.sleep(0)` は待機ではなく
+**制御の譲渡**で、並列上限の検証には譲渡が必要である。対策として `SleepSpy` は
+`seconds <= 0` の呼び出しを実物へ委譲し、`sleeps` には正の待機だけを記録する。
+
 ### 4. 最終ゲート（T095）
 
 - `uv run pytest -q`: （記入）
@@ -469,6 +487,7 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 | `settings-contract.md` §2「`sort_by` は `relevance` / `recency` の 2 択」 | 実測は `relevance` / `likes`（`__main__.py` の検証と `providers/base.py` の `selection_note` が 2 値） | 記録のみ。既存 7 項目の宣言（`Literal` 化）は凍結契約のため T016 では触らない（US8 / T085 の範囲） |
 | `settings-contract.md` §2「`max_results` は 1 以上（0 を弾く）」 | T016 時点では既存 7 項目に `ge` を足していないため 0 を通す（`tests/unit/test_configuration.py` の `test_falsy_values_are_treated_as_specified[max_results-0]` が green） | §6 の「申し送り」のとおり US8（T085）で宣言を足すときに再判定 |
 | T016 の記述 `ConfigurationError(field, value, expected, message)` | 実装は `ConfigurationError(field, value, expected)` の 3 引数で `message` を**組み立てる**（属性としては `message` を持つ） | 契約 §3 の stderr 書式を属性から必ず再現するため、4 つ目を渡させない設計にした（記録のみ） |
+| T013 / T018(d)「`FakeModelFactory` が `trend_researcher.tools.compression.build_model` も差し替える」 | **`src/trend_researcher/tools/compression.py` は未作成**（T024 で追加される）。この時点で patch 対象に足すと `ModuleNotFoundError` になり、`fake_model_factory` を使う全テストが落ちる | 記録のみ。T018 では (a)(b)(c)(e)(f) を実装し、**(d) はモジュールを作る T024 で追加する**（下の「申し送り」参照） |
 
 ### 6. 更新または削除したテスト（FR-035 / SC-008）
 
@@ -498,6 +517,12 @@ US3（縮退）と US8（使用量）は同じ関数に層を足すため、こ�
 T016 の指示は「追加 11 項目の宣言」であるため既存 7 項目には値域を足していない。
 `test_falsy_values_are_treated_as_specified[max_results-0]` は green のまま（実測）。
 既存 7 項目に宣言を足すのは US8（T085）の範囲で、そのときにこのテストの要否を再判定する。
+
+**申し送り（T024 で必ず実施する）**: T018(d) の `trend_researcher.tools.compression` の
+差し替えは、`tools/compression.py` を作る T024 で `FakeModelFactory.install()` の patch 対象に
+追加し、併せて `tests/unit/test_fixtures.py` に「`compression.build_model` が差し替わっている」
+テストを足す（モジュールが存在しないうちに条件分岐で黙って skip する形にしない。
+静かに無効化されたフィクスチャは憲法 原則 I の「無効なテスト」と同じ欠陥クラス）。
 
 ### 7. 参照実装の欠陥を移植していないことの確認（FR-063 / FR-064）
 

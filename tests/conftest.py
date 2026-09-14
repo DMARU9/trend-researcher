@@ -14,7 +14,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+import asyncio
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,6 +23,8 @@ from typing import Any
 from unittest import mock
 
 import pytest
+from langchain_core.exceptions import OutputParserException
+from pydantic import BaseModel
 
 from trend_researcher.models import Candidate, Context
 from trend_researcher.nodes import parse_instruction as parse_instruction_module
@@ -101,23 +104,73 @@ LLM_NODES = ("parse_instruction", "plan_search", "analyze_content", "extract_com
 
 
 class _FakeMessage:
-    """`invoke` / `ainvoke` の戻り値（`.content` のみを持つ）。"""
+    """`invoke` / `ainvoke` の戻り値（`.content` と `usage_metadata`）。"""
 
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, usage_metadata: dict[str, int] | None = None) -> None:
         self.content = content
+        #: 使用量は既定で**欠落**させる。実 API の応答に含まれない場合と同じ
+        #: 状態を既定にして、観測できない経路（FR-061）を素通りさせない。
+        self.usage_metadata = usage_metadata
+
+
+class _FakeStructuredRunnable:
+    """`with_structured_output()` の戻り値（ラン）。
+
+    既定では**必ず** `OutputParserException` を送出する。構造化出力が黙って
+    成功すると、US2 の「契約を満たさない応答」を通すテストが緑のまま何も
+    検証しなくなるため、成功は `install(..., structured={...})` でのみ有効化する。
+    """
+
+    def __init__(self, llm: _FakeLLM, schema: type[BaseModel], options: dict[str, Any]) -> None:
+        self._llm = llm
+        self._schema = schema
+        #: `method=` などの引き渡し値をテストから観測できるように残す。
+        self.options = options
+
+    def _parse(self, prompt: str) -> Any:
+        self._llm.record(prompt)
+        if self._llm.structured is None:
+            raise OutputParserException(
+                f"{self._llm.node}: 構造化出力が設定されていません"
+                "（fake_model_factory.install(..., structured={...}) で指定します）"
+            )
+        return self._schema.model_validate(self._llm.structured)
+
+    def invoke(self, prompt: str, *args: Any, **kwargs: Any) -> Any:
+        return self._parse(prompt)
+
+    async def ainvoke(self, prompt: str, *args: Any, **kwargs: Any) -> Any:
+        return self._parse(prompt)
 
 
 class _FakeLLM:
     """1 ノード分の応答だけを知る LLM フェイク。"""
 
-    def __init__(self, node: str, content: str, prompts: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        node: str,
+        content: str | None,
+        prompts: list[str] | None = None,
+        structured: Any | None = None,
+    ) -> None:
         self.node = node
         self.content = content
+        #: 構造化出力の応答（`None` なら必ず `OutputParserException`）。
+        self.structured = structured
         # 同一ノードの複数インスタンスで共有できるよう、外部からリストを注入できる
         self.prompts: list[str] = prompts if prompts is not None else []
 
-    def _next(self, prompt: str) -> _FakeMessage:
+    def record(self, prompt: str) -> None:
+        """プロンプトを記録する（通常／構造化の両経路の唯一の入口）。"""
         self.prompts.append(prompt)
+
+    def _next(self, prompt: str) -> _FakeMessage:
+        self.record(prompt)
+        if self.content is None:
+            raise AssertionError(
+                f"fake_model_factory: ノード {self.node} の応答が指定されていません。"
+                " 構造化出力だけを指定したノードで `invoke` は呼べません。"
+            )
         return _FakeMessage(self.content)
 
     def invoke(self, prompt: str, *args: Any, **kwargs: Any) -> _FakeMessage:
@@ -125,6 +178,10 @@ class _FakeLLM:
 
     async def ainvoke(self, prompt: str, *args: Any, **kwargs: Any) -> _FakeMessage:
         return self._next(prompt)
+
+    def with_structured_output(self, schema: type[BaseModel], **kwargs: Any) -> Any:
+        """構造化出力のランを返す（既定では失敗する）。"""
+        return _FakeStructuredRunnable(self, schema, kwargs)
 
 
 class FakeModelFactory:
@@ -146,24 +203,36 @@ class FakeModelFactory:
         #: いるか（コアが接頭辞を組み立てていないか）を観測できる。
         self.env_prefix_log: dict[str, list[str | None]] = {}
 
-    def _build_model(self, node: str, content: str | None) -> Callable[..., _FakeLLM]:
+    def _build_model(
+        self, node: str, content: str | None, structured: Any | None
+    ) -> Callable[..., _FakeLLM]:
         def _build(role: str = "research", env_prefix: str | None = None) -> _FakeLLM:
             self.env_prefix_log.setdefault(node, []).append(env_prefix)
-            if content is None:
+            if content is None and structured is None:
                 raise AssertionError(
                     f"fake_model_factory: ノード {node} の応答が指定されていません。"
                     "プロンプト本文によるディスパッチは行いません（LAYOUT-004-4）。"
                 )
-            model = _FakeLLM(node, content, self.prompt_log.setdefault(node, []))
+            model = _FakeLLM(node, content, self.prompt_log.setdefault(node, []), structured)
             self.models[node] = model
             return model
 
         return _build
 
     @contextmanager
-    def install(self, responses: dict[str, str]) -> Iterator[FakeModelFactory]:
-        """`responses` のノードだけ応答を注入した状態を作る。"""
-        unknown = set(responses) - set(LLM_NODES)
+    def install(
+        self,
+        responses: dict[str, str],
+        *,
+        structured: dict[str, Any] | None = None,
+    ) -> Iterator[FakeModelFactory]:
+        """`responses` のノードだけ応答を注入した状態を作る。
+
+        `structured` を渡すと、そのノードの `with_structured_output()` だけが
+        成功する（他のノードは `OutputParserException` のまま）。
+        """
+        structured = structured or {}
+        unknown = (set(responses) | set(structured)) - set(LLM_NODES)
         if unknown:
             raise AssertionError(f"fake_model_factory: 未知のノード名 {sorted(unknown)}")
 
@@ -173,10 +242,11 @@ class FakeModelFactory:
         with ExitStack() as stack:
             for node in LLM_NODES:
                 content = responses.get(node)
+                structured_content = structured.get(node)
                 stack.enter_context(
                     mock.patch(
                         f"trend_researcher.nodes.{node}.build_model",
-                        side_effect=self._build_model(node, content),
+                        side_effect=self._build_model(node, content, structured_content),
                     )
                 )
             yield self
@@ -285,13 +355,23 @@ def frozen_now() -> Iterator[FrozenClock]:
 
 
 class SleepSpy:
-    """`asyncio.sleep` のスパイ。待機値を実時間で消費せず観測する。"""
+    """`asyncio.sleep` のスパイ。待機値を実時間で消費せず観測する。
 
-    def __init__(self) -> None:
+    `0` 以下の待機は実物へ委譲する。`asyncio.sleep(0)` は待機ではなく
+    「制御を譲る」意図であり、並列性（同時実行数の上限）の検証には譲渡が
+    必要である。観測値（`sleeps`）には正の待機だけを記録する。
+    """
+
+    def __init__(self, real_sleep: Callable[..., Awaitable[None]] | None = None) -> None:
         self.sleeps: list[float] = []
+        self._real_sleep = real_sleep
 
     async def __call__(self, seconds: float, *args: Any, **kwargs: Any) -> None:
-        self.sleeps.append(seconds)
+        if seconds > 0:
+            self.sleeps.append(seconds)
+            return
+        if self._real_sleep is not None:
+            await self._real_sleep(seconds)
 
     @property
     def total(self) -> float:
@@ -299,15 +379,21 @@ class SleepSpy:
         return sum(self.sleeps)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def no_retry_sleep() -> Iterator[SleepSpy]:
-    """X 検索のリトライ待機をスパイに差し替える（FR-010 / LAYOUT-004-2）。
+    """リトライ待機をスパイに差し替える（FR-010 / LAYOUT-004-2）。
 
-    対象は `trend_researcher.tools.x_search` が参照する `asyncio.sleep` のみ。
-    観測値は `spy.sleeps` / `spy.total` で断言できる。
+    `asyncio.sleep` は各モジュールが `import asyncio` の属性参照で解決するため、
+    1 箇所（`asyncio` モジュールの属性）の差し替えで `tools/` のどの境界にも効く。
+    モジュールを名指しした差し替えは、新しい境界（`tools/llm.py` 等）を追加した
+    ときに静かに漏れる。
+
+    `autouse=True` の理由: リトライ待機（US2）が入ると既定 1 秒 × 試行回数が
+    スイート全体の実行時間（SC-013 の 60 秒）に効くため、フィクスチャを要求して
+    いないテストでも実時間の待機を排除する。観測値は `spy.sleeps` / `spy.total`。
     """
-    spy = SleepSpy()
-    with mock.patch("trend_researcher.tools.x_search.asyncio.sleep", new=spy):
+    spy = SleepSpy(real_sleep=asyncio.sleep)
+    with mock.patch("asyncio.sleep", new=spy):
         yield spy
 
 

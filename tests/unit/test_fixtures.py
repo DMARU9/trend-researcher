@@ -14,10 +14,12 @@ import time
 from datetime import UTC, datetime
 
 import pytest
+from langchain_core.exceptions import OutputParserException
+from pydantic import ValidationError
 
 from trend_researcher import nodes, providers
 from trend_researcher.configuration import Configuration
-from trend_researcher.models import Candidate
+from trend_researcher.models import Candidate, ResearchInstruction
 from trend_researcher.tools import x_search, youtube_search
 from trend_researcher.tools.transcript import Transcript, fetch_transcript
 
@@ -182,3 +184,111 @@ def test_tmp_cache_dir_isolates_repository_cache(tmp_cache_dir):
     assert _REPO_ROOT / "cache" != tmp_cache_dir
     assert Configuration.load().cache_dir == str(tmp_cache_dir)
     assert Configuration.load(env_prefix="YTR").cache_dir == str(tmp_cache_dir)
+
+
+# --- 構造化出力と使用量のフェイク（T013 / T018） ----------------------------
+
+#: 構造化出力の検証に使うスキーマ（`parse_instruction` の出力型）。
+INSTRUCTION = {
+    "raw_text": "AI 動画のトレンドを 3 件",
+    "topic": "AI 動画",
+    "max_results": 3,
+}
+
+
+def test_fake_llm_structured_output_fails_by_default(fake_model_factory):
+    """既定では `OutputParserException` を送出する（全回失敗 → フォールバックの経路）。
+
+    構造化出力が黙って成功すると、US2 の「契約を満たさない応答」のテストが
+    緑のまま何も検証しなくなる。
+    """
+    with fake_model_factory.install({"plan_search": "q1"}):
+        model = nodes.plan_search.build_model("research")
+
+        with pytest.raises(OutputParserException):
+            model.with_structured_output(ResearchInstruction).invoke("プロンプト")
+
+
+def test_fake_llm_structured_output_awaits_and_fails_too(fake_model_factory):
+    """非同期経路も同じく失敗する（`ainvoke` の分岐を素通りさせない）。"""
+    with fake_model_factory.install({"plan_search": "q1"}):
+        model = nodes.plan_search.build_model("research")
+
+        with pytest.raises(OutputParserException):
+            asyncio.run(model.with_structured_output(ResearchInstruction).ainvoke("プロンプト"))
+
+
+def test_fake_model_factory_structured_output_succeeds_when_configured(fake_model_factory):
+    """`structured=` を渡したノードだけ成功し、戻り値はスキーマで検証される。"""
+    with fake_model_factory.install({"plan_search": "q1"}, structured={"plan_search": INSTRUCTION}):
+        model = nodes.plan_search.build_model("research")
+
+        result = model.with_structured_output(ResearchInstruction).invoke("プロンプト")
+
+        assert isinstance(result, ResearchInstruction)
+        assert (result.topic, result.max_results) == ("AI 動画", 3)
+
+
+def test_fake_model_factory_structured_output_requires_the_configured_schema(
+    fake_model_factory,
+):
+    """`structured=` の値がスキーマに合わなければ失敗する（素通ししない）。"""
+    with fake_model_factory.install(
+        {"plan_search": "q1"}, structured={"plan_search": {"unknown_field": 1}}
+    ):
+        model = nodes.plan_search.build_model("research")
+
+        with pytest.raises(ValidationError, match="raw_text"):
+            model.with_structured_output(ResearchInstruction).invoke("プロンプト")
+
+
+def test_fake_model_factory_structured_calls_are_recorded(fake_model_factory):
+    """構造化出力のプロンプトも同じ記録に残る（呼び出し回数を数えられる）。"""
+    with fake_model_factory.install({"plan_search": "q1"}, structured={"plan_search": INSTRUCTION}):
+        model = nodes.plan_search.build_model("research")
+        model.with_structured_output(ResearchInstruction).invoke("構造化プロンプト")
+        model.invoke("通常プロンプト")
+
+        assert fake_model_factory.prompts_for("plan_search") == [
+            "構造化プロンプト",
+            "通常プロンプト",
+        ]
+
+
+def test_fake_model_factory_rejects_unknown_structured_node(fake_model_factory):
+    """`structured=` の未知のノード名も即座に拒否する（応答を無言で捨てない）。"""
+    with pytest.raises(AssertionError, match="未知のノード名"):
+        fake_model_factory.install({"plan_search": "q1"}, structured={"unknown": {}}).__enter__()
+
+
+def test_fake_message_carries_no_usage_by_default(fake_model_factory):
+    """`_FakeMessage` は `usage_metadata` を持ち、既定は `None`（FR-061 の欠落経路）。"""
+    with fake_model_factory.install({"plan_search": "q1"}):
+        message = nodes.plan_search.build_model("research").invoke("プロンプト")
+
+        assert message.usage_metadata is None
+
+
+def test_no_retry_sleep_covers_every_module(no_retry_sleep):
+    """スパイは**どのモジュールからの**待機も捕まえる（ノード以外の境界も含む）。
+
+    `tools/llm.py` のような呼び出し境界は `import asyncio` の属性参照で待つため、
+    モジュールを名指しした差し替えは同じ 1 箇所（`asyncio.sleep`）を対象にする。
+    """
+
+    async def _run() -> None:
+        await asyncio.sleep(3)
+
+    asyncio.run(_run())
+
+    assert no_retry_sleep.sleeps == [3]
+
+
+def test_sleep_spy_is_installed_without_requesting_the_fixture():
+    """`no_retry_sleep` は autouse（要求しないテストでも待機で実時間を消費しない）。
+
+    US2 でリトライ待機が入ると、`retry_wait_seconds` の既定 1 秒 × 試行回数が
+    スイート全体（SC-013 の 60 秒）に効いてくる。
+    """
+    assert hasattr(asyncio.sleep, "sleeps")
+    assert hasattr(asyncio.sleep, "total")
