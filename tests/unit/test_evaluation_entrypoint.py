@@ -16,8 +16,9 @@ import ast
 import asyncio
 import importlib
 import importlib.util
+import re
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from types import ModuleType
 
@@ -387,3 +388,143 @@ def test_the_run_passes_the_usage_of_the_graph_to_the_result(
     assert summary["status"] == "取得"
     assert summary["calls"] == 1
     assert summary["total_tokens"] == 150
+
+
+# --- (g) 実行したコミットの解決（FR-043） ----------------------------------
+
+#: `HEAD` に入れる 40 桁の識別子（先頭 7 文字が記録される）。
+_LONG = "0123456789abcdef0123456789abcdef01234567"
+_OTHER = "fedcba9876543210fedcba9876543210fedcba98"
+
+
+def _make_repo(tmp_path: Path, *, head: str, refs: Mapping[str, str] | None = None,
+               packed: str | None = None, as_file: bool = False) -> Path:
+    """偽の `.git` を作り、`REPO_ROOT` に置いたことにする（`git` を起動しない。FR-065）。"""
+    root = tmp_path / "repo"
+    root.mkdir(parents=True, exist_ok=True)
+    git_dir = root / ".git"
+    if as_file:
+        # worktree: `.git` は `gitdir:` を書いたファイル。
+        worktree = root / "worktrees" / "x"
+        worktree.mkdir(parents=True)
+        (worktree / "HEAD").write_text(head, encoding="utf-8")
+        git_dir.write_text("gitdir: worktrees/x\n", encoding="utf-8")
+        return root
+    git_dir.mkdir(parents=True, exist_ok=True)
+    (git_dir / "HEAD").write_text(head, encoding="utf-8")
+    for name, value in (refs or {}).items():
+        path = git_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(value + "\n", encoding="utf-8")
+    if packed is not None:
+        (git_dir / "packed-refs").write_text(packed, encoding="utf-8")
+    return root
+
+
+def _commit_of(monkeypatch: pytest.MonkeyPatch, root: Path) -> str:
+    """`REPO_ROOT` を偽のリポジトリへ差し替えて解決する（引数も env も無し）。"""
+    module = _load_entrypoint()
+    monkeypatch.delenv("TR_EVAL_COMMIT", raising=False)
+    monkeypatch.setattr(module, "REPO_ROOT", root)
+    return module.resolve_commit(None)
+
+
+def test_the_argument_wins_over_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """引数の識別子が最優先（FR-043）。"""
+    module = _load_entrypoint()
+    monkeypatch.setenv("TR_EVAL_COMMIT", "from-env")
+
+    assert module.resolve_commit("from-arg") == "from-arg"
+
+
+def test_the_environment_is_used_without_an_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+    """引数が無ければ `TR_EVAL_COMMIT`、それも無ければ `.git` を読む（FR-043）。"""
+    module = _load_entrypoint()
+    monkeypatch.setenv("TR_EVAL_COMMIT", "from-env")
+
+    assert module.resolve_commit(None) == "from-env"
+
+
+def test_the_commit_is_read_from_the_ref_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`.git/HEAD` の `ref:` を ref ファイルで解決し、先頭 7 文字を記録する（FR-065）。"""
+    root = _make_repo(
+        tmp_path, head="ref: refs/heads/main\n", refs={"refs/heads/main": _LONG}
+    )
+
+    assert _commit_of(monkeypatch, root) == _LONG[:7]
+
+
+def test_the_commit_is_read_from_the_packed_refs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ref ファイルが無い（clone 直後の）状態は `packed-refs` から解決する（FR-065）。"""
+    root = _make_repo(
+        tmp_path,
+        head="ref: refs/heads/main\n",
+        packed=f"# pack-refs with: peeled fully-peeled sorted \n{_OTHER} refs/heads/main\n",
+    )
+
+    assert _commit_of(monkeypatch, root) == _OTHER[:7]
+
+
+def test_a_detached_head_is_recorded_as_is(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`HEAD` が ref でない（detached）ときは `HEAD` の中身を使う（FR-065）。"""
+    root = _make_repo(tmp_path, head=_LONG + "\n")
+
+    assert _commit_of(monkeypatch, root) == _LONG[:7]
+
+
+def test_a_worktree_gitdir_file_is_followed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`.git` がファイル（worktree）のときは `gitdir:` の指す先を読む（FR-065）。"""
+    root = _make_repo(tmp_path, head="ref: refs/heads/main\n", refs={"refs/heads/main": _LONG}, as_file=True)
+    git_dir = root / "worktrees" / "x"
+    (git_dir / "refs" / "heads").mkdir(parents=True)
+    (git_dir / "refs" / "heads" / "main").write_text(_LONG + "\n", encoding="utf-8")
+
+    assert _commit_of(monkeypatch, root) == _LONG[:7]
+
+
+def test_an_unresolvable_repository_is_recorded_as_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`.git` が無い・`HEAD` が空・ref が解決できないときは `unknown`（実行は止めない。FR-043）。"""
+    module = _load_entrypoint()
+    root = _make_repo(tmp_path, head="ref: refs/heads/missing\n")
+    monkeypatch.delenv("TR_EVAL_COMMIT", raising=False)
+    monkeypatch.setattr(module, "REPO_ROOT", root)
+    assert module.resolve_commit(None) == module.UNKNOWN_COMMIT
+
+    empty = tmp_path / "no-head"
+    (empty / ".git").mkdir(parents=True)
+    monkeypatch.setattr(module, "REPO_ROOT", empty)
+    assert module.resolve_commit(None) == module.UNKNOWN_COMMIT
+
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path / "without-git")
+    assert module.resolve_commit(None) == module.UNKNOWN_COMMIT
+
+
+def test_packed_refs_only_accepts_the_matching_line(tmp_path: Path) -> None:
+    """`packed-refs` の解釈（一致する行だけを採り、無い・壊れている場合は `None`）。"""
+    module = _load_entrypoint()
+    git_dir = tmp_path / ".git"
+    git_dir.mkdir()
+
+    assert module._packed_ref(git_dir, "refs/heads/main") is None  # ファイルが無い
+
+    (git_dir / "packed-refs").write_text(
+        f"# pack-refs with: peeled\n{_LONG} refs/heads/other\nbroken\n", encoding="utf-8"
+    )
+    assert module._packed_ref(git_dir, "refs/heads/main") is None  # 一致する行が無い
+    assert module._packed_ref(git_dir, "refs/heads/other") == _LONG[:7]
+
+
+def test_the_real_repository_head_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
+    """このリポジトリの `HEAD` から短い識別子が取れる（作り物の `.git` だけで済ませない）。
+
+    実測: ブランチ `specs/003-pipeline-hardening-and-evaluation` の作業ツリーで
+    `resolve_commit(None)` は `git rev-parse --short=7 HEAD` と同じ 7 文字を返す。
+    """
+    if not (REPO_ROOT / ".git").exists():
+        pytest.skip("作業ツリーに .git が無い（書き出したソースだけの環境）")
+    module = _load_entrypoint()
+    monkeypatch.delenv("TR_EVAL_COMMIT", raising=False)
+
+    assert re.fullmatch(r"[0-9a-f]{7}", module.resolve_commit(None))
