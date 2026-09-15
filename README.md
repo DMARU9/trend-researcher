@@ -21,12 +21,20 @@ uv sync --extra dev
 変更を提出する前に、次の 3 つがすべて通ることを確認します（`.specify/memory/constitution.md`）。
 
 ```bash
-uv run pytest -q      # テスト（ネットワーク・認証情報不要で完走する）＋行カバレッジ計測
-uv run ruff check .   # Lint
-uv run mypy src       # 型チェック
+uv run pytest -q -n auto   # テスト（ネットワーク・認証情報不要で完走する）＋行カバレッジ計測
+uv run ruff check .        # Lint
+uv run mypy src            # 型チェック
 ```
 
-`uv run pytest -q` は同時に行カバレッジを計測し、対象範囲の**合計が 90% を下回ると非ゼロ終了**します
+`uv run pytest -q -n auto` の `-n auto` は `pytest-xdist` による**並列実行**です（開発用の追加依存。
+実行時依存は増えていません）。テストを 1 件も削らず、期待値も書き換えずに **60 秒以内**を満たします。
+
+| 実行方法 | 実測（2026-09-15。1,102 件 / カバレッジ 97.64%） |
+|---|---|
+| `uv run pytest -q -n auto`（既定のゲート） | **34.2〜34.4 秒**（並列 16。`/usr/bin/time` の総計 36.5〜36.7 秒） |
+| `uv run pytest -q`（直列） | 93.63 秒（総計 96.0 秒） |
+
+`uv run pytest -q -n auto` は同時に行カバレッジを計測し、対象範囲の**合計が 90% を下回ると非ゼロ終了**します
 （`pyproject.toml` の `[tool.coverage.report] fail_under = 90`）。未実行行は
 `--cov-report=term-missing` で表示されるため、そのまま追記できます。
 
@@ -160,7 +168,7 @@ uv run python -m trend_researcher \
 | `INSTRUCTION`（位置引数） | 必須 | 自然言語のリサーチ指示（空文字・空白のみは不可 → 終了コード 2） |
 | `--platform {x,youtube}` | 必須 | 対象プラットフォーム（省略すると終了コード 2） |
 | `--format {markdown,json}` | `markdown` | 最終レポートの出力形式 |
-| `--max-results N` | `5` | 解析対象の件数 |
+| `--max-results N` | `5` | 解析対象の件数（`1`〜`100`。範囲外・整数以外は起動時に拒否 → 終了コード 2） |
 | `--lang CODE` | `ja` | 字幕取得の優先言語（YouTube 用） |
 | `--output PATH` | 標準出力 | レポート書き込み先ファイル |
 | `--since YYYY-MM-DD` | なし | 投稿日下限 |
@@ -179,20 +187,38 @@ uv run python -m trend_researcher \
 | 群 | 変数 | 既定値 | 説明 |
 |---|---|---|---|
 | 共通 | `TR_MODEL` | `openai:mimo-v2.5` | LLM のモデル名 |
-| 共通 | `TR_MAX_RESULTS` | `5` | 解析対象の件数 |
+| 共通 | `TR_MAX_RESULTS` | `5` | 解析対象の件数（`1`〜`100`） |
 | 共通 | `TR_TRANSCRIPT_LANG` | `ja` | 字幕取得の優先言語 |
 | 共通 | `TR_CACHE_DIR` | `cache` | 中間成果物の永続化先（相対パスはリポジトリ直下基準） |
+| 共通 | `TR_ANALYSIS_CONCURRENCY` | `2` | 個別解析の同時実行数（`1`〜`16`） |
+| 共通 | `TR_RETRY_MAX` | `2` | LLM 応答が契約を満たさないときの再試行回数・初回を除く（`0`〜`10`） |
+| 共通 | `TR_RETRY_WAIT_SECONDS` | `1.0` | 再試行の前に待つ秒数（`0`〜`60`） |
+| 共通 | `TR_COMPRESSION_THRESHOLD` | `20000` | 素材がこの文字数を超えたら LLM で圧縮する（`1000` 以上） |
+| 共通 | `TR_COMPRESSION_TIMEOUT_SECONDS` | `60.0` | 圧縮 1 回あたりのタイムアウト秒（`1`〜`300`） |
+| 共通 | `TR_DEGRADE_MAX_ATTEMPTS` | `3` | 上限超過のときに入力を縮小して呼び直す最大段数（`1`〜`10`） |
+| 共通 | `TR_SHRINK_RATIO` | `0.9` | 縮退 1 段あたりの入力長の比率（`0.1`〜`0.9`） |
+| 共通 | `TR_MIN_INPUT_CHARS` | `1000` | 縮退を打ち切る入力長の下限（`100` 以上） |
+| 共通 | `TR_SELF_REVIEW` | `true` | 検索クエリを生成直後に点検するか（`true` / `false`） |
+| 共通 | `TR_INCLUDE_INTERMEDIATE` | `false` | 圧縮・縮退・失敗の中間データを `cache/` に書き出すか（`true` / `false`） |
+| 共通 | `TR_STRUCTURED_METHOD` | `function_calling` | 構造化出力の方式（`json_schema` / `function_calling`） |
 | X 固有 | `XTR_ACCOUNTS_DB` | `accounts.db` | `twscrape` のアカウント DB（クッキー保存先） |
 | X 固有 | `XTR_SEARCH_POOL_SIZE` | `50` | いいね順ソート用の検索プールサイズ |
 | X 固有 | `XTR_MAX_RETRIES` | `3` | X 境界の最大リトライ回数 |
 | YouTube 固有 | `YTR_TRANSCRIPT_LANG` | `ja` | 字幕取得の優先言語（YouTube で変えたいとき） |
 | LLM 接続 | `OPENAI_API_KEY` / `OPENAI_BASE_URL` | — / `https://opencode.ai/zen/go/v1` | OpenAI 互換 API の接続情報 |
+| 評価 | `TR_EVAL_MODEL` | `openai:mimo-v2.5` | 判定（採点）に使うモデル名。出荷する `Configuration` には現れない（評価の実走専用） |
 
 解決の順序は **明示指定（CLI オプション） > 環境変数（`TR_*` → `XTR_*` / `YTR_*`） > 既定値**です。
 たとえば `--max-results 10` は `TR_MAX_RESULTS` より優先され、`TR_MAX_RESULTS` は
 `XTR_MAX_RESULTS`（`--platform x` のとき）より優先されます。
 設定の入口は `Configuration`（実行時設定の唯一の型）で、ノードは環境変数を直接読みません。
 実際の値の一覧は `.env.example` を参照してください。
+
+**宣言した値域は起動時に検査します**。環境変数（`TR_*`）や `--max-results` などで範囲外の値を
+渡すと、LLM 呼び出しや検索を始める前に `[エラー] 設定が不正です: <項目>=<値>（期待: …）`
+を stderr に出して**終了コード 2** で止まります（丸めたり既定値へ置き換えたりしません）。
+`Configuration` の全項目は `x_oap_ui_config`（型・ラベル・説明・値域）を持つため、
+LangGraph Studio の `configurable` から同じ制約の下で変更できます。
 
 ### 出力チャネル
 
@@ -221,7 +247,7 @@ uv run python -m trend_researcher "Claude Code の使い方" --platform x --outp
 |--------|------|----------|
 | `0` | 成功 | レポートの生成 / 検索結果が 0 件 / 要求件数より取得件数が少ない / `--output` への書き出し成功 / `--help` |
 | `1` | 実行時エラー | 実行中の例外 / 時間上限 / レポート未生成 / `--output` の書き込み失敗 |
-| `2` | 引数エラー | 指示の省略・空文字・空白のみ / `--platform` の省略または未知の値 / 未知の `--format`・`--sort` / `--since` が `YYYY-MM-DD` 以外 / `--max-results` が整数以外 |
+| `2` | 引数エラー | 指示の省略・空文字・空白のみ / `--platform` の省略または未知の値 / 未知の `--format`・`--sort` / `--since` が `YYYY-MM-DD` 以外 / `--max-results` が整数以外・`1`〜`100` の範囲外 / 宣言した値域外の環境変数（例: `TR_ANALYSIS_CONCURRENCY=0`） |
 
 この 3 値以外を返しません（`0` = 成功、`1` = 実行時エラー、`2` = 引数エラー）。
 契約の全条件は `specs/001-test-suite-hardening/contracts/cli-contract.md` を参照してください。
@@ -239,4 +265,42 @@ parse_instruction → plan_search → search → fetch
 ```
 
 プラットフォーム差（検索・ソース取得・レンダリング）は `src/trend_researcher/providers/` に集約。
-中間成果物は `cache/` に JSON で永続化される（FR-012）。
+中間成果物は `cache/` に JSON で永続化される（FR-012）。`analyze_content` の並列度は
+`--max-results` とは独立で、既定 2（`TR_ANALYSIS_CONCURRENCY` で変更可）。
+
+### `cache/` に書かれるもの
+
+`--cache-dir`（既定 `cache/`）を指定した実行では、次の JSON が書かれます。
+
+| ファイル | 内容 |
+|---|---|
+| `report.json` | 最終レポート。**使用量は入れない**（本文に描画される `notes` を汚さないため。集計は `usage.json` 側） |
+| `usage.json` | LLM 呼び出しとトークンの集計（`calls` / `unknown_calls` / `input_tokens` / `output_tokens` / `total_tokens` / `by_node` / `by_role`） |
+| `compressed.json` | 圧縮の記録（`TR_INCLUDE_INTERMEDIATE=true` のときだけ） |
+| `degradations.json` | 縮退の記録（同上） |
+| `failures.json` | 失敗の記録（同上） |
+
+`usage.json` は**必ず**書かれます（LLM を 1 回も呼ばなかった実行も `calls: 0` として残ります）。
+トークン数を返さないプロバイダ（設定によっては `usage_metadata` が空）では、件数を
+`unknown_calls` に分けて計上します。実行の最後には stderr に 1 行の集計が出ます。
+
+```
+[i/7] compile_report ... 完了
+[補足] LLM 呼び出し合計 9 回（入力 0 / 出力 0 トークン、不明 9 回）
+```
+
+なお `[補足]` は追加の観測（圧縮・縮退・失敗・使用量）だけに使う行で、進捗の番号は進めず、
+stdout にも出ません（`emit()` の書式と `messages` は変えません）。
+
+### 評価の実走
+
+品質（指示追従・網羅性・根拠の有無など）を外部の判定モデルで採点したいときは `script/evaluate.py`
+を使います。**通常の実行（CLI の既定値）とは別経路**で、出荷する `Configuration` には影響しません。
+
+```bash
+uv run python script/evaluate.py                 # 既定のケースを実行して採点
+TR_EVAL_MODEL=openai:gpt-5-mini uv run python script/evaluate.py   # 判定モデルを差し替える
+```
+
+結果は `artifacts/eval/`（**追跡外**。`.gitignore` 済み）に保存されます。ケースの軸と対応表は
+`tests/eval/axes.md`、プロンプトは `tests/eval/prompts.py` を参照してください。

@@ -46,6 +46,16 @@ class ProgressEmitter:
         """蓄積された進捗メッセージのリストを返す。"""
         return list(self._messages)
 
+    def note(self, text: str) -> None:
+        """補足 1 行を stderr へ出力する（追加の観測の唯一の入口。FR-029）。
+
+        `emit()` と違い `self._messages` には**積まない**。`messages` は 7 ノード ×
+        開始/完了の契約として凍結されており（T009 の回帰テスト）、圧縮・縮退・失敗・
+        使用量の通知を混ぜると既定の入力の `messages` と レポートが変わってしまう
+        （D-3）。進捗の番号も進めない（補足は段ではない）。
+        """
+        print(f"[補足] {text}", file=self._stream, flush=True)
+
 
 # ノード名の固定定義（順序と一致させる）
 NODE_PARSE_INSTRUCTION = "parse_instruction"

@@ -7,20 +7,26 @@ LLM の解釈）と、自然言語の期間表現・日付表現の解釈。
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
+from unittest import mock
 
+import httpx
+import openai
 import pytest
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from trend_researcher.models import OutputFormat
+from trend_researcher.models import OutputFormat, ResearchInstruction
 from trend_researcher.nodes.parse_instruction import (
     _extract_count_from_text,
     _extract_published_after_from_text,
     _parse_date_from_text,
+    _period_to_date,
     parse_instruction,
 )
 from trend_researcher.state import AgentInputState, AgentState
+from trend_researcher.tools.degradation import DegradationError
 
 
 def test_use_trends_is_not_in_the_state_declarations():
@@ -422,3 +428,226 @@ def test_progress_messages_report_topic_and_count(fake_model_factory: Any) -> No
         "[1/7] parse_instruction ... 開始",
         '[1/7] parse_instruction ... 完了（トピック: "LLM のトピック" / 件数: 20）',
     ]
+
+
+# --- US2: 構造化出力とフォールバック（FR-009 / FR-011 / FR-012） ----------------
+#
+# 正常系（構造化出力が成功）とフォールバック（決定的解析）の**両方**を固定する。
+
+#: 構造化出力で受け取る指示。`raw_text` はスキーマが必須とするため埋めるが、
+#: ノードは状態から組み立てるため使わない（値が混ざらないことを下のテストで見る）。
+_STRUCTURED_INSTRUCTION: dict[str, Any] = {
+    "raw_text": "（LLM が返した指示文。ノードは使わない）",
+    "topic": "LLM のトピック",
+    "max_results": 3,
+    "output": {"format": "json"},
+}
+
+
+def _run_structured(
+    fake_model_factory: Any,
+    raw: str,
+    *,
+    structured: dict[str, Any],
+    response: str = LLM_JSON,
+    config: RunnableConfig | None = None,
+) -> dict[str, Any]:
+    """構造化出力を注入して 1 回実行する（テキスト応答も注入しておく）。"""
+    node_state: dict[str, Any] = {"messages": [HumanMessage(content=raw)], "platform": "x"}
+    with fake_model_factory.install(
+        {"parse_instruction": response}, structured={"parse_instruction": structured}
+    ):
+        return parse_instruction(node_state, config if config is not None else _config())
+
+
+def test_structured_output_matches_the_fallback_parse(
+    fake_model_factory: Any, capsys: Any
+) -> None:
+    """構造化出力が成功しても、同じ値なら既存の解析と同一の `ResearchInstruction`。
+
+    LLM の推定で決まってよいのは `topic` / `max_results` / `output_format` だけ。
+    `raw_text` / `platform` / `published_after` / `sort_by` は状態・Configuration・
+    自然言語から決まる（構造化出力の値で揺れない）。
+    """
+    raw = "AI 動画の動向を調べたい"
+
+    structured_out = _run_structured(
+        fake_model_factory, raw, structured=_STRUCTURED_INSTRUCTION
+    )
+    assert "[補足]" not in capsys.readouterr().err
+
+    fallback_out = _run(fake_model_factory, raw)
+
+    assert structured_out["instruction"] == fallback_out["instruction"]
+    assert structured_out["instruction"].raw_text == raw
+    assert structured_out["instruction"].platform == "x"
+
+
+def test_structured_failure_falls_back_and_is_reported(
+    fake_model_factory: Any, capsys: Any
+) -> None:
+    """規定回数失敗したら JSON ブロック解析へ切り替え、補足行に残す（FR-011 / FR-012）。"""
+    out = _run(fake_model_factory, "AI 動画の動向を調べたい")
+
+    err = capsys.readouterr().err
+    assert (
+        "[補足] 構造化出力を取得できなかったため簡易解析へ切り替えました"
+        "（OutputParserException）" in err
+    )
+    # フォールバックでも LLM の値は使える（既存の優先順位規則はそのまま）
+    assert out["instruction"].topic == "LLM のトピック"
+    # 試行回数 = 1 + retry_max（既定 3）。テキスト呼び出しは 1 回だけ
+    assert len(fake_model_factory.structured_prompts_for("parse_instruction")) == 3
+    assert len(fake_model_factory.prompts_for("parse_instruction")) == 1
+
+
+def test_structured_none_is_treated_as_a_parse_failure(
+    fake_model_factory: Any, structured_none: Any, capsys: Any
+) -> None:
+    """構造化出力が `None` でも実行を継続する（FR-010 / FR-011 / SC-005）。
+
+    `function_calling` はツール呼び出しが無いと**例外ではなく `None`** を返す。
+    素通しすると `_structured_to_parsed` の属性参照で実行全体が落ちる（実測:
+    `'NoneType' object has no attribute 'topic'` → 終了コード 1）。境界がこれを
+    パース失敗へ正規化するため、再試行の対象になり（`retry_max = 2` で 3 回）、
+    使い切ったら決定的解析へフォールバックして処理が続く。
+    """
+    out = _run_structured(
+        fake_model_factory,
+        "AI 動画の動向を調べたい",
+        structured=structured_none,
+    )
+
+    err = capsys.readouterr().err
+    assert (
+        "[補足] 構造化出力を取得できなかったため簡易解析へ切り替えました"
+        "（OutputParserException）" in err
+    )
+    # フォールバックでも値が入る（既存の優先順位規則はそのまま）
+    assert out["instruction"].topic == "LLM のトピック"
+    # `None` は再試行の対象（1 + retry_max = 3）。テキストはフォールバックの 1 回だけ
+    assert len(fake_model_factory.structured_prompts_for("parse_instruction")) == 3
+    assert len(fake_model_factory.prompts_for("parse_instruction")) == 1
+
+
+def test_fallback_does_not_add_progress_lines(fake_model_factory: Any) -> None:
+    """フォールバックは進捗行を増やさない（補足は stderr のみ。既定の出力は不変）。"""
+    out = _run(fake_model_factory, "AI 動画の動向を調べたい")
+
+    contents = [m.content for m in out["messages"]]
+    assert len(contents) == 2
+    assert not any("補足" in c or "構造化出力" in c for c in contents)
+
+
+def test_retry_max_zero_makes_a_single_structured_attempt(fake_model_factory: Any) -> None:
+    """`retry_max = 0` では 1 回で確定し、失敗なら即フォールバックする（FR-010 / FR-024）。"""
+    node_state: dict[str, Any] = {
+        "messages": [HumanMessage(content="AI 動画の動向を調べたい")],
+        "platform": "x",
+    }
+    with fake_model_factory.install({"parse_instruction": LLM_PLAIN}):
+        out = parse_instruction(node_state, _config(retry_max=0))
+
+    assert len(fake_model_factory.structured_prompts_for("parse_instruction")) == 1
+    assert out["instruction"].topic == "AI 動画の動向を調べたい"
+
+
+def test_fallback_with_a_plain_response_uses_the_raw_text(fake_model_factory: Any) -> None:
+    """JSON ブロックが無い応答にフォールバックしたら、トピックは指示本文になる。"""
+    out = _run(fake_model_factory, "AI 動画の動向を調べたい", response=LLM_PLAIN)
+
+    assert out["instruction"].topic == "AI 動画の動向を調べたい"
+
+
+def test_structured_method_comes_from_the_configuration(fake_model_factory: Any) -> None:
+    """`structured_method` の設定値が境界まで届く（既定値と同じでも配線を固定する）。"""
+    _run_structured(
+        fake_model_factory,
+        "AI 動画の動向を調べたい",
+        structured=_STRUCTURED_INSTRUCTION,
+        config=_config(structured_method="function_calling"),
+    )
+
+    options = fake_model_factory.structured_options_for("parse_instruction")
+    assert options and options[0]["method"] == "function_calling"
+    assert options[0]["schema"] is ResearchInstruction
+
+
+# --- 到達不能な分岐の棚卸し（T104 / FR-063） --------------------------------
+
+
+def test_an_unknown_period_label_yields_none(frozen_now: Any) -> None:
+    """既知でない期間ラベルは `None`（辞書引きを無条件にしない。T104）。
+
+    この `return None` は唯一の呼び出し元の正規表現（`半年` / `N月` / `1年` / `年` /
+    `本年` / `今年` / `最近`）からは到達しない（分岐カバレッジでも未実行）。ただし
+    削除すると `_RELATIVE_PERIOD_DAYS[label]` が未検証のラベルで `KeyError` になり
+    得るため、分岐は残し「知らないラベルは `None`」という契約をここで固定する。
+    """
+    assert _period_to_date("未知の期間", datetime(2026, 9, 14, tzinfo=UTC)) is None
+
+
+# --- US3: 構造化出力が上限超過を使い切ったらフォールバックしない（FR-015） -----
+
+
+class _AlwaysLimitStructured:
+    """構造化出力が常に上限超過になる runnable（縮退を使い切る経路を作る）。"""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def ainvoke(self, prompt: str) -> Any:
+        self.attempts += 1
+        raise _context_length_error()
+
+
+class _StructuredLimitLLM:
+    """構造化だけが上限超過で失敗するフェイク（テキスト呼び出しは成功する）。
+
+    テキストを成功させておくと「`DegradationError` を握り潰してフォールバックへ
+    落ちる」実装ではノードが正常終了するため、テストが確実に赤になる（非空虚）。
+    """
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.text_calls = 0
+        self.structured = _AlwaysLimitStructured()
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        return self.structured
+
+    async def ainvoke(self, prompt: str) -> Any:
+        self.text_calls += 1
+        return SimpleNamespace(content=self.content)
+
+
+def _context_length_error() -> Exception:
+    """上限超過（400 ＋ `context_length_exceeded`）を模した例外（契約 §5）。"""
+    return openai.BadRequestError(
+        message="This endpoint's maximum context length is 1048576 tokens.",
+        response=httpx.Response(400, request=httpx.Request("POST", "https://example.test/v1")),
+        body={"error": {"code": "context_length_exceeded"}},
+    )
+
+
+def test_the_exhausted_degradation_is_not_swallowed_by_the_fallback() -> None:
+    """縮退を使い切ったらフォールバックへ落とさず例外を伝える（FR-015 / T104）。
+
+    飲み込むと、失敗した呼び出しが「簡易解析の成功」に化けて終了コード 1 にならない
+    （`__main__.py` は `DegradationError` を見て exit 1 にする）。
+    """
+    llm = _StructuredLimitLLM(LLM_JSON)
+    state = {"messages": [HumanMessage(content="AI の話題を5件")], "platform": "x"}
+
+    with (
+        mock.patch("trend_researcher.nodes.parse_instruction.build_model", return_value=llm),
+        pytest.raises(DegradationError),
+    ):
+        parse_instruction(state, _config())
+
+    assert llm.structured.attempts >= 1
+    assert llm.text_calls == 0
+
+
+# 対照（上限超過**以外**の失敗は従来どおりフォールバックする）は既存の
+# `test_structured_failure_falls_back_and_is_reported` が固定している。

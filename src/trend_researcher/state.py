@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import operator
 from datetime import datetime
-from typing import NotRequired
+from typing import Annotated, NotRequired
 
 from langgraph.graph import MessagesState
 
@@ -11,7 +12,11 @@ from trend_researcher.models import (
     AnalysisFinding,
     Candidate,
     CommonTheme,
+    CompressedSource,
     Context,
+    Degradation,
+    Failure,
+    ModelUsage,
     OutputFormat,
     ResearchInstruction,
     ResearchReport,
@@ -62,3 +67,13 @@ class AgentState(MessagesState):
     sort_by: str
     transcript_language: str
     cache_dir: str | None
+
+    # --- 実行中の観測（data-model §2.1。レポートには含めない。D-3） -----------
+    # 圧縮した対象の記録（`analyze_content` が設定する）
+    compressed: list[CompressedSource]
+    # 縮退の段の記録（段ごとに追記される）
+    degradations: list[Degradation]
+    # 部分失敗（解析・追加文脈の取得）の記録
+    failures: list[Failure]
+    # LLM 呼び出し 1 回につき 1 要素。**並列ノードの結果を連結**する
+    usage: Annotated[list[ModelUsage], operator.add]

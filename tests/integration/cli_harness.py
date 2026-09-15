@@ -27,8 +27,13 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import httpx
+import openai
+
 if __package__ in (None, ""):  # スクリプトとして起動された場合のパス解決
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from langchain_core.exceptions import OutputParserException
 
 from trend_researcher.models import Candidate, Context
 from trend_researcher.tools.transcript import Transcript
@@ -68,6 +73,17 @@ _COMMON_OK = """### 編集の自動化
 
 _COMMON_EMPTY = "共通テーマは見つかりませんでした。"
 
+#: 圧縮（FR-001）と縮退（US3）を**同じ実行で**起こすシナリオの圧縮応答。
+#: 圧縮結果は `compression_threshold` で切り詰められるため、応答自体は長めにする。
+_COMPRESSION_OK = (
+    "<summary>\n編集ワークフローの自動化が進んでいる。\n"
+    + "圧縮後の要約。" * 400
+    + "\n</summary>\n<key_excerpts>\n- 編集時間が半分になった\n</key_excerpts>\n"
+)
+
+#: 圧縮を発動させる長文スレッド（既定のしきい値 20,000 文字を超える長さ）
+_LONG_THREAD = "埋め草" * 800
+
 #: ノード名 → 応答。`analyze_content` / `extract_common` はシナリオで差し替える。
 LLM_RESPONSES: dict[str, str] = {
     "parse_instruction": _PARSE_OK,
@@ -87,21 +103,44 @@ LLM_NODES = ("parse_instruction", "plan_search", "analyze_content", "extract_com
 #: 境界（検索・字幕）を持たないシナリオ
 _NO_BOUNDARY_SCENARIOS = frozenset({"no_report"})
 
+#: 縮退（US3 / FR-015）のシナリオ。`parse_instruction` の LLM だけを上限超過の
+#: ダブルに差し替える（他ノードは既定の応答のまま）。
+_DEGRADE_SCENARIOS = frozenset({"degrade_success", "degrade_exhausted", "degrade_other_error"})
+
+#: 圧縮（FR-001）を発動させるシナリオ（`fetch_threads` が 1 件だけ長文を返す）
+_COMPRESSION_SCENARIOS = frozenset({"compress_and_degrade"})
+
+#: シナリオ → 上限超過のダブルに差し替えるノード。`compress_and_degrade` は
+#: `analyze_content`（圧縮の後段）で上限超過を起こし、圧縮と縮退を同居させる。
+_DEGRADED_NODES: dict[str, str] = {
+    "degrade_success": "parse_instruction",
+    "degrade_exhausted": "parse_instruction",
+    "degrade_other_error": "parse_instruction",
+    "compress_and_degrade": "analyze_content",
+}
+
 
 # --- テストダブル ---------------------------------------------------------
 
 
 class _FakeMessage:
-    """`.content` のみを持つ LLM 応答。"""
+    """`.content` と `usage_metadata` を持つ LLM 応答（conftest の同名ダブルと同型）。"""
 
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, usage_metadata: dict[str, int] | None = None) -> None:
         self.content = content
+        #: 既定は `None`（実 API が使用量を返さない場合と同じ欠落経路）。
+        self.usage_metadata = usage_metadata
 
 
 class _FakeLLM:
-    """1 ノード分の応答を返す LLM フェイク。"""
+    """1 ノード分の応答を返す LLM フェイク。
 
-    def __init__(self, content: str) -> None:
+    `with_structured_output()` は conftest の同名ダブルと同じ契約（既定で
+    `OutputParserException`）を持つ。CLI のシナリオは構造化出力に依存しないため、
+    既定の失敗のままでよい。
+    """
+
+    def __init__(self, content: str | None) -> None:
         self._content = content
 
     def invoke(self, *args: Any, **kwargs: Any) -> _FakeMessage:
@@ -109,6 +148,92 @@ class _FakeLLM:
 
     async def ainvoke(self, *args: Any, **kwargs: Any) -> _FakeMessage:
         return _FakeMessage(self._content)
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> _FakeStructuredRunnable:
+        return _FakeStructuredRunnable(schema)
+
+
+class _FakeStructuredRunnable:
+    """`with_structured_output()` のラン（常に `OutputParserException`）。"""
+
+    def __init__(self, schema: Any) -> None:
+        self._schema = schema
+
+    def _fail(self) -> Any:
+        raise OutputParserException(
+            "cli_harness: 構造化出力は差し替えていません（既定の失敗経路）"
+        )
+
+    def invoke(self, *args: Any, **kwargs: Any) -> Any:
+        return self._fail()
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        return self._fail()
+
+
+def _limit_error() -> Exception:
+    """上限超過（400 ＋ `context_length_exceeded`）を模した例外（契約 §5 の条件 1〜3）。"""
+    return openai.BadRequestError(
+        message="This endpoint's maximum context length is 1048576 tokens.",
+        response=httpx.Response(400, request=_request()),
+        body={"error": {"code": "context_length_exceeded"}},
+    )
+
+
+def _excluded_error() -> Exception:
+    """400 でも上限超過とみなさない例外（除外語彙。契約 §5 の条件 4）。"""
+    return openai.BadRequestError(
+        message="Invalid API key provided.",
+        response=httpx.Response(400, request=_request()),
+        body={"error": {"code": "invalid_api_key"}},
+    )
+
+
+def _request() -> httpx.Request:
+    return httpx.Request("POST", "https://example.test/v1/chat/completions")
+
+
+class _DegradingLLM:
+    """上限超過 → 縮小 → 成功（または使い切って失敗）を作る LLM フェイク。
+
+    `fail_times` 回までは `error`（既定は上限超過）を投げ、その後は応答を返す。
+    `None` なら常に投げる（梯子を使い切る経路）。テキスト経路だけが縮退の対象
+    なので、構造化経路は既定の失敗（`OutputParserException`）のままにする。
+    """
+
+    def __init__(
+        self, content: str, *, fail_times: int | None, error: Exception | None = None
+    ) -> None:
+        self._content = content
+        self._fail_times = fail_times
+        self._error = error
+        self.calls = 0
+
+    def _outcome(self) -> _FakeMessage:
+        self.calls += 1
+        if self._fail_times is None or self.calls <= self._fail_times:
+            raise self._error if self._error is not None else _limit_error()
+        return _FakeMessage(self._content)
+
+    def invoke(self, *args: Any, **kwargs: Any) -> _FakeMessage:
+        return self._outcome()
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> _FakeMessage:
+        return self._outcome()
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> _FakeStructuredRunnable:
+        return _FakeStructuredRunnable(schema)
+
+
+def _degrade_double(scenario: str, content: str) -> _DegradingLLM:
+    """縮退のシナリオに応じた `parse_instruction` 用のダブルを作る。"""
+    if scenario == "degrade_exhausted":
+        # 常に上限超過 → 3 段を使い切って `DegradationError`（CLI は exit 1）
+        return _DegradingLLM(content, fail_times=None)
+    if scenario == "degrade_other_error":
+        # 400 でも除外語彙を含むものは上限超過ではない（縮退へ渡さない）
+        return _DegradingLLM(content, fail_times=1, error=_excluded_error())
+    return _DegradingLLM(content, fail_times=1)
 
 
 class _RecordingBoundary:
@@ -157,6 +282,18 @@ def _contexts_for(candidates: list[Candidate]) -> list[Context]:
     return [Context(id=c.id, text=f"{c.text} のスレッド") for c in candidates]
 
 
+def _contexts_with_a_long_thread(candidates: list[Candidate]) -> list[Context]:
+    """1 件だけしきい値超えの長文スレッドを持つ素材を返す（圧縮の発動条件。FR-001）。"""
+    return [
+        Context(
+            id=c.id,
+            text=f"{c.text} のスレッド",
+            thread_text=_LONG_THREAD if index == 0 else "",
+        )
+        for index, c in enumerate(candidates)
+    ]
+
+
 # --- シナリオのパッチ -----------------------------------------------------
 
 
@@ -193,10 +330,16 @@ def _patched_boundaries(scenario: str) -> Iterator[None]:
                     new=_RecordingBoundary(lambda *a, **kw: list(x_candidates)),
                 )
             )
+            # 圧縮のシナリオだけ 1 件を長文スレッドにする（他は短いまま）
+            threads_responder = (
+                _contexts_with_a_long_thread
+                if scenario in _COMPRESSION_SCENARIOS
+                else _contexts_for
+            )
             stack.enter_context(
                 mock.patch(
                     "trend_researcher.providers.x.fetch_threads",
-                    new=_RecordingBoundary(lambda cands, **kw: _contexts_for(cands)),
+                    new=_RecordingBoundary(lambda cands, **kw: threads_responder(cands)),
                 )
             )
 
@@ -218,11 +361,34 @@ def _patched_boundaries(scenario: str) -> Iterator[None]:
         )
 
         responses = {**LLM_RESPONSES, **LLM_OVERRIDES.get(scenario, {})}
+        degraded_node = _DEGRADED_NODES.get(scenario)
         for node in LLM_NODES:
+            if node == degraded_node:
+                # 縮退のシナリオは 1 ノードだけを上限超過のダブルにする
+                stack.enter_context(
+                    mock.patch(
+                        f"trend_researcher.nodes.{node}.build_model",
+                        side_effect=lambda role="research", _content=responses[node], _s=scenario: (
+                            _degrade_double(_s, _content)
+                        ),
+                    )
+                )
+                continue
             stack.enter_context(
                 mock.patch(
                     f"trend_researcher.nodes.{node}.build_model",
                     side_effect=lambda role="research", _content=responses[node]: _FakeLLM(_content),
+                )
+            )
+
+        if scenario in _COMPRESSION_SCENARIOS:
+            # 圧縮は `tools/compression.py` の経路でモデルを組み立てる（FR-045）
+            stack.enter_context(
+                mock.patch(
+                    "trend_researcher.tools.compression.build_model",
+                    side_effect=lambda role="compression", env_prefix=None: _FakeLLM(
+                        _COMPRESSION_OK
+                    ),
                 )
             )
 
@@ -257,6 +423,8 @@ def main() -> None:
     known = (
         set(LLM_OVERRIDES)
         | _NO_BOUNDARY_SCENARIOS
+        | _DEGRADE_SCENARIOS
+        | _COMPRESSION_SCENARIOS
         | {"x_success", "x_zero", "x_fewer", "youtube_success", "youtube_zero", "raise_search", "timeout", "write_error"}
     )
     if scenario not in known:

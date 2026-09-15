@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
@@ -12,7 +13,12 @@ from trend_researcher.models import OutputFormat, OutputSpec, ResearchInstructio
 from trend_researcher.progress import NODE_PARSE_INSTRUCTION, make_emitter
 from trend_researcher.providers import get_provider
 from trend_researcher.state import AgentState
-from trend_researcher.tools.llm import build_model
+from trend_researcher.tools.degradation import (
+    DegradationError,
+    DegradeOptions,
+    options_for,
+)
+from trend_researcher.tools.llm import UsageMeter, build_model, invoke_structured, invoke_text
 from trend_researcher.tools.parse import extract_json_block
 
 # 期間ラベル（数字+月以外）を投稿日下限の相対日数に変換するマッピング。
@@ -98,6 +104,13 @@ def _period_to_date(label: str, now: datetime) -> datetime | None:
     if label in _RELATIVE_PERIOD_DAYS:
         days = _RELATIVE_PERIOD_DAYS[label]
         return datetime(now.year, 1, 1, tzinfo=UTC) if days == 0 else now - timedelta(days=days)
+    # `label` は唯一の呼び出し元（`_extract_published_after_from_text`）の正規表現が
+    # 返す選択肢のいずれかで、`月` を含むか `_RELATIVE_PERIOD_DAYS` の鍵である（実測:
+    # 呼び出し元は 1 箇所で、選択肢は `半年` / `N月` / `1年` / `年` / `本年` / `今年` /
+    # `最近`）。したがってこの `return None` は**通常の経路では到達しない**。分岐
+    # カバレッジでも未実行である（T104）。ここは (a) 削除すると辞書引きが
+    # `KeyError` になり得る（未検証のラベルで呼ばれた場合）ため削除せず、(b) 根拠を
+    # このコメントと `test_an_unknown_period_label_yields_none` で固定する。
     return None
 
 
@@ -146,9 +159,22 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     raw = content if isinstance(content, str) else str(content)
     model = build_model("research", provider.env_prefix)
     prompt = provider.parse_instruction_prompt.format(instruction=raw)
-    result = model.invoke(prompt)
-    text = result.content if hasattr(result, "content") else str(result)
-    parsed = extract_json_block(text) or {}
+    # 縮退（US3）は 1 ノード実行につき 1 つ用意し、段の記録を状態へ返す（FR-017）
+    degrade = options_for(configurable, NODE_PARSE_INSTRUCTION)
+    # 使用量（FR-061）はこのノードの呼び出しを 1 つの受け皿に集める
+    meter = UsageMeter(NODE_PARSE_INSTRUCTION)
+    parsed, fallback_note = _parse_with_llm(
+        prompt,
+        model=model,
+        configurable=configurable,
+        degrade=degrade,
+        env_prefix=provider.env_prefix,
+        meter=meter,
+    )
+    if fallback_note:
+        # 進捗行（`messages`）ではなく補足行に出す。既定の入力の `messages` と
+        # レポートを変えないための区別（D-3 / FR-029）。
+        emitter.note(fallback_note)
 
     topic = str(parsed.get("topic", "")).strip() or raw
     # 件数: ユーザー入力（state）> Configuration > 自然言語 > LLM
@@ -195,4 +221,79 @@ def parse_instruction(state: AgentState, config: RunnableConfig) -> dict:
     emitter.emit(NODE_PARSE_INSTRUCTION, "完了", detail=f'トピック: "{topic}" / 件数: {max_results}')
     # 蓄積済みの「開始」を二重に載せない（`extend` すると開始行が重複する）。
     progress_messages = emitter.get_messages()
-    return {"instruction": instruction, "messages": progress_messages}
+    return {
+        "instruction": instruction,
+        "degradations": degrade.records,
+        # 使用量は reducer（`operator.add`）で連結される（FR-061 / data-model §2.1）
+        "usage": meter.records,
+        "messages": progress_messages,
+    }
+
+
+# --- LLM 呼び出し（US2: 構造化出力 → 失敗時に既存の解析へフォールバック） ---------
+
+
+def _structured_to_parsed(instruction: ResearchInstruction) -> dict[str, Any]:
+    """構造化出力を `extract_json_block` と同じ形の辞書へ写す。
+
+    写すのは `topic` / `max_results` / `output.format` の 3 つだけ。他の項目
+    （`raw_text` / `platform` / `published_after` / `sort_by`）は決定的解析
+    （状態・Configuration・自然言語）が正であり、LLM の推定で上書きしない
+    （FR-011）。キーの形を揃えることで、正常系もフォールバックも同じ優先順位
+    規則（state > Configuration > 自然言語 > LLM）をそのまま通る。
+    """
+    return {
+        "topic": instruction.topic,
+        "max_results": instruction.max_results,
+        "output_format": instruction.output.format.value,
+    }
+
+
+def _parse_with_llm(
+    prompt: str,
+    *,
+    model: Any,
+    configurable: Configuration,
+    degrade: DegradeOptions,
+    env_prefix: str | None,
+    meter: UsageMeter | None = None,
+) -> tuple[dict[str, Any], str]:
+    """LLM の応答から解析結果を得る（構造化出力 → 全失敗なら JSON ブロック抽出）。
+
+    戻り値は `(解析結果, 補足行)`。補足行はフォールバックしたときだけ空でない。
+    規定回数を使い切ったら**例外を送出せず**既存の `tools/parse.py` の経路へ
+    切り替える（FR-011 / FR-012）。
+
+    縮退（上限超過）を使い切った場合だけは例外を伝える（FR-015 の「終了コード 1」を
+    このフォールバックで飲み込むと、失敗が成功に化ける）。
+    """
+    try:
+        structured = invoke_structured(
+            ResearchInstruction,
+            prompt,
+            model=model,
+            env_prefix=env_prefix,
+            retry_max=configurable.retry_max,
+            retry_wait_seconds=configurable.retry_wait_seconds,
+            method=configurable.structured_method,
+            degrade=degrade,
+            meter=meter,
+        )
+    except DegradationError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - 応答の失敗はすべてフォールバックで継続する（FR-011）
+        text = invoke_text(
+            prompt,
+            model=model,
+            env_prefix=env_prefix,
+            retry_max=configurable.retry_max,
+            retry_wait_seconds=configurable.retry_wait_seconds,
+            degrade=degrade,
+            meter=meter,
+        )
+        content = text.content if hasattr(text, "content") else str(text)
+        return extract_json_block(content) or {}, (
+            "構造化出力を取得できなかったため簡易解析へ切り替えました"
+            f"（{type(exc).__name__}）"
+        )
+    return _structured_to_parsed(structured), ""

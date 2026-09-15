@@ -26,6 +26,9 @@ class Provider(Protocol):
     env_prefix: str
     #: 検索クエリ数の上限。`None` は無制限（単一クエリ設計のプラットフォーム用）。
     max_search_queries: int | None
+    #: 生成プロンプトが指示する検索クエリの件数。`None` は指示なし。
+    #: コアは値を解釈しない（点検の補充で「下回らない」基準に使うだけ。契約 §2）。
+    required_query_count: int | None
     #: 検索 0 件時の文面に使う名詞（「該当する<content_noun>が見つかりませんでした」）。
     content_noun: str
     #: 選定リストの見出し行（`render_markdown` がそのまま使う）。
@@ -82,6 +85,14 @@ class Provider(Protocol):
 
     @property
     def plan_search_prompt(self) -> str:
+        ...
+
+    @property
+    def review_search_prompt(self) -> str:
+        """生成した検索クエリを点検させるプロンプト（US7 / FR-049）。
+
+        `{topic}` と `{queries}` を差し込む。点検はループしない（FR-050）。
+        """
         ...
 
     @property

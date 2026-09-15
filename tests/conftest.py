@@ -14,7 +14,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+import asyncio
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,6 +23,8 @@ from typing import Any
 from unittest import mock
 
 import pytest
+from langchain_core.exceptions import OutputParserException
+from pydantic import BaseModel
 
 from trend_researcher.models import Candidate, Context
 from trend_researcher.nodes import parse_instruction as parse_instruction_module
@@ -101,23 +104,102 @@ LLM_NODES = ("parse_instruction", "plan_search", "analyze_content", "extract_com
 
 
 class _FakeMessage:
-    """`invoke` / `ainvoke` の戻り値（`.content` のみを持つ）。"""
+    """`invoke` / `ainvoke` の戻り値（`.content` と `usage_metadata`）。"""
 
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, usage_metadata: dict[str, int] | None = None) -> None:
         self.content = content
+        #: 使用量は既定で**欠落**させる。実 API の応答に含まれない場合と同じ
+        #: 状態を既定にして、観測できない経路（FR-061）を素通りさせない。
+        self.usage_metadata = usage_metadata
+
+
+#: `install(..., structured={...})` の値に渡すと、そのノードの構造化出力が `None` を
+#: 返す。`function_calling` はツール呼び出しが無いとき**例外ではなく `None`** を返す
+#: ため、その応答を再現する（`None` は「未設定 = 必ず例外」の意味で既に使っている
+#: ので、区別できるよう別の値で表す）。
+STRUCTURED_NONE: Any = object()
+
+
+class _FakeStructuredRunnable:
+    """`with_structured_output()` の戻り値（ラン）。
+
+    既定では**必ず** `OutputParserException` を送出する。構造化出力が黙って
+    成功すると、US2 の「契約を満たさない応答」を通すテストが緑のまま何も
+    検証しなくなるため、成功は `install(..., structured={...})` でのみ有効化する。
+    """
+
+    def __init__(self, llm: _FakeLLM, schema: type[BaseModel], options: dict[str, Any]) -> None:
+        self._llm = llm
+        self._schema = schema
+        #: `method=` などの引き渡し値をテストから観測できるように残す。
+        self.options = options
+
+    def _parse(self, prompt: str) -> Any:
+        self._llm.record_structured(prompt)
+        if self._llm.structured is STRUCTURED_NONE:
+            # ツール呼び出しを返さなかったモデルの応答（例外ではなく `None`）。
+            return None
+        if self._llm.structured is None:
+            raise OutputParserException(
+                f"{self._llm.node}: 構造化出力が設定されていません"
+                "（fake_model_factory.install(..., structured={...}) で指定します）"
+            )
+        return self._schema.model_validate(self._llm.structured)
+
+    def invoke(self, prompt: str, *args: Any, **kwargs: Any) -> Any:
+        return self._parse(prompt)
+
+    async def ainvoke(self, prompt: str, *args: Any, **kwargs: Any) -> Any:
+        return self._parse(prompt)
 
 
 class _FakeLLM:
     """1 ノード分の応答だけを知る LLM フェイク。"""
 
-    def __init__(self, node: str, content: str, prompts: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        node: str,
+        content: str | None,
+        prompts: list[str] | None = None,
+        structured: Any | None = None,
+        raise_error: BaseException | None = None,
+        structured_prompts: list[str] | None = None,
+    ) -> None:
         self.node = node
         self.content = content
+        #: 構造化出力の応答（`None` なら必ず `OutputParserException`）。
+        self.structured = structured
+        #: 呼び出し時に送出する例外（`invoke` / `ainvoke` / 構造化の両方）。
+        self.raise_error = raise_error
         # 同一ノードの複数インスタンスで共有できるよう、外部からリストを注入できる
         self.prompts: list[str] = prompts if prompts is not None else []
+        #: 構造化出力（`with_structured_output`）のプロンプト記録。
+        #: **テキスト呼び出しの記録とは分ける**。US2 で構造化呼び出しが既定の
+        #: 経路に入ると、同じリストへ積む実装では凍結した「ノードごとの
+        #: テキスト呼び出し回数」（`test_frozen_contracts.py`）が壊れる。
+        self.structured_prompts: list[str] = (
+            structured_prompts if structured_prompts is not None else []
+        )
+        #: 構造化出力のオプション（`method=` などの引き渡し値）の記録。
+        self.structured_options: list[dict[str, Any]] = []
+
+    def record(self, prompt: str) -> None:
+        """テキスト呼び出しのプロンプトを記録する。"""
+        self.prompts.append(prompt)
+
+    def record_structured(self, prompt: str) -> None:
+        """構造化呼び出しのプロンプトを記録する（試行回数を数えられる）。"""
+        self.structured_prompts.append(prompt)
 
     def _next(self, prompt: str) -> _FakeMessage:
-        self.prompts.append(prompt)
+        self.record(prompt)
+        if self.raise_error is not None:
+            raise self.raise_error
+        if self.content is None:
+            raise AssertionError(
+                f"fake_model_factory: ノード {self.node} の応答が指定されていません。"
+                " 構造化出力だけを指定したノードで `invoke` は呼べません。"
+            )
         return _FakeMessage(self.content)
 
     def invoke(self, prompt: str, *args: Any, **kwargs: Any) -> _FakeMessage:
@@ -125,6 +207,11 @@ class _FakeLLM:
 
     async def ainvoke(self, prompt: str, *args: Any, **kwargs: Any) -> _FakeMessage:
         return self._next(prompt)
+
+    def with_structured_output(self, schema: type[BaseModel], **kwargs: Any) -> Any:
+        """構造化出力のランを返す（既定では失敗する）。"""
+        self.structured_options.append({"schema": schema, **kwargs})
+        return _FakeStructuredRunnable(self, schema, kwargs)
 
 
 class FakeModelFactory:
@@ -142,49 +229,126 @@ class FakeModelFactory:
         #: （例: analyze_content は候補ごとに呼ぶ）でも全件残すため、
         #: インスタンスごとのリストではなくノード単位で共有する。
         self.prompt_log: dict[str, list[str]] = {}
+        #: ノードごとの構造化出力の試行記録（テキスト呼び出しとは別に数える）。
+        self.structured_prompt_log: dict[str, list[str]] = {}
         #: ノードごとの `env_prefix` 記録。各ノードが provider の接頭辞を渡して
         #: いるか（コアが接頭辞を組み立てていないか）を観測できる。
         self.env_prefix_log: dict[str, list[str | None]] = {}
+        #: 圧縮（`tools/compression.py` の `build_model`）のプロンプト記録。
+        #: 分析の記録と混ぜない（混ざると分析側の断言が誤って緑になる）。
+        self.compression_prompts: list[str] = []
+        #: 圧縮の呼び出し（role, env_prefix）の記録。
+        self.compression_calls: list[tuple[str, str | None]] = []
 
-    def _build_model(self, node: str, content: str | None) -> Callable[..., _FakeLLM]:
+    def _build_model(
+        self, node: str, content: str | None, structured: Any | None
+    ) -> Callable[..., _FakeLLM]:
         def _build(role: str = "research", env_prefix: str | None = None) -> _FakeLLM:
             self.env_prefix_log.setdefault(node, []).append(env_prefix)
-            if content is None:
+            if content is None and structured is None:
                 raise AssertionError(
                     f"fake_model_factory: ノード {node} の応答が指定されていません。"
                     "プロンプト本文によるディスパッチは行いません（LAYOUT-004-4）。"
                 )
-            model = _FakeLLM(node, content, self.prompt_log.setdefault(node, []))
+            model = _FakeLLM(
+                node,
+                content,
+                self.prompt_log.setdefault(node, []),
+                structured,
+                structured_prompts=self.structured_prompt_log.setdefault(node, []),
+            )
             self.models[node] = model
             return model
 
         return _build
 
+    def _build_compression(
+        self, content: str | None, error: BaseException | None
+    ) -> Callable[..., _FakeLLM]:
+        """`tools/compression.py` の `build_model` の差し替えを作る。
+
+        `compression` を指定していないのに圧縮が呼ばれたら落とす。黙って分析用の
+        応答を返すと、想定外の圧縮呼び出し（呼び出し回数の増加）を検出できない。
+        """
+
+        def _build(role: str = "compression", env_prefix: str | None = None) -> _FakeLLM:
+            self.compression_calls.append((role, env_prefix))
+            if error is not None:
+                return _FakeLLM(
+                    "compression", None, self.compression_prompts, raise_error=error
+                )
+            if content is None:
+                raise AssertionError(
+                    "fake_model_factory: 圧縮の応答が指定されていません。"
+                    "install(..., compression=...) で指定します。"
+                )
+            return _FakeLLM("compression", content, self.compression_prompts)
+
+        return _build
+
     @contextmanager
-    def install(self, responses: dict[str, str]) -> Iterator[FakeModelFactory]:
-        """`responses` のノードだけ応答を注入した状態を作る。"""
-        unknown = set(responses) - set(LLM_NODES)
+    def install(
+        self,
+        responses: dict[str, str],
+        *,
+        structured: dict[str, Any] | None = None,
+        compression: str | None = None,
+        compression_error: BaseException | None = None,
+    ) -> Iterator[FakeModelFactory]:
+        """`responses` のノードだけ応答を注入した状態を作る。
+
+        `structured` を渡すと、そのノードの `with_structured_output()` だけが
+        成功する（他のノードは `OutputParserException` のまま）。`compression` は
+        `tools/compression.py` が構築するモデル（長文素材の圧縮）の応答で、
+        `compression_error` を渡すとその呼び出しだけが失敗する（FR-003 の入力）。
+        """
+        structured = structured or {}
+        unknown = (set(responses) | set(structured)) - set(LLM_NODES)
         if unknown:
             raise AssertionError(f"fake_model_factory: 未知のノード名 {sorted(unknown)}")
 
         self.models = {}
         self.prompt_log = {}
+        self.structured_prompt_log = {}
         self.env_prefix_log = {}
+        self.compression_prompts = []
+        self.compression_calls = []
         with ExitStack() as stack:
             for node in LLM_NODES:
                 content = responses.get(node)
+                structured_content = structured.get(node)
                 stack.enter_context(
                     mock.patch(
                         f"trend_researcher.nodes.{node}.build_model",
-                        side_effect=self._build_model(node, content),
+                        side_effect=self._build_model(node, content, structured_content),
                     )
                 )
+            # 圧縮のモデル構築も 1 経路に集約されている（FR-045）ため、ここも差し替える
+            stack.enter_context(
+                mock.patch(
+                    "trend_researcher.tools.compression.build_model",
+                    side_effect=self._build_compression(compression, compression_error),
+                )
+            )
             yield self
 
     def prompts_for(self, node: str) -> list[str]:
-        """指定ノードの `build_model` に渡されたプロンプトの一覧（全インスタンス分）。"""
+        """指定ノードの `build_model` に渡されたプロンプトの一覧（全インスタンス分）。
+
+        構造化出力の試行は含まない（`structured_prompts_for` で数える）。
+        """
         instance = self.models.get(node)
         return list(instance.prompts) if instance else []
+
+    def structured_prompts_for(self, node: str) -> list[str]:
+        """指定ノードの構造化出力の試行プロンプトの一覧（試行ごとに 1 件）。"""
+        instance = self.models.get(node)
+        return list(instance.structured_prompts) if instance else []
+
+    def structured_options_for(self, node: str) -> list[dict[str, Any]]:
+        """指定ノードが `with_structured_output` に渡したオプション（`method=` 等）。"""
+        instance = self.models.get(node)
+        return list(instance.structured_options) if instance else []
 
     def env_prefixes_for(self, node: str) -> list[str | None]:
         """指定ノードが `build_model` に渡した `env_prefix` の一覧（呼び出し順）。"""
@@ -242,6 +406,16 @@ def fake_model_factory() -> FakeModelFactory:
     return FakeModelFactory()
 
 
+@pytest.fixture
+def structured_none() -> Any:
+    """`install(..., structured={...})` の値に渡すと、そのノードの構造化出力が `None`。
+
+    `function_calling` がツール呼び出しを返さなかった場合の応答を再現する
+    （例外ではないため、例外だけを見張るフォールバックでは拾えない。FR-011）。
+    """
+    return STRUCTURED_NONE
+
+
 # --- 非決定性の固定（data-model 1.2 / FR-010 / LAYOUT-004） ----------------
 
 #: 既定の固定時刻。テストは `frozen_now.set(...)` で任意の時点を再現できる。
@@ -285,13 +459,23 @@ def frozen_now() -> Iterator[FrozenClock]:
 
 
 class SleepSpy:
-    """`asyncio.sleep` のスパイ。待機値を実時間で消費せず観測する。"""
+    """`asyncio.sleep` のスパイ。待機値を実時間で消費せず観測する。
 
-    def __init__(self) -> None:
+    `0` 以下の待機は実物へ委譲する。`asyncio.sleep(0)` は待機ではなく
+    「制御を譲る」意図であり、並列性（同時実行数の上限）の検証には譲渡が
+    必要である。観測値（`sleeps`）には正の待機だけを記録する。
+    """
+
+    def __init__(self, real_sleep: Callable[..., Awaitable[None]] | None = None) -> None:
         self.sleeps: list[float] = []
+        self._real_sleep = real_sleep
 
     async def __call__(self, seconds: float, *args: Any, **kwargs: Any) -> None:
-        self.sleeps.append(seconds)
+        if seconds > 0:
+            self.sleeps.append(seconds)
+            return
+        if self._real_sleep is not None:
+            await self._real_sleep(seconds)
 
     @property
     def total(self) -> float:
@@ -299,15 +483,21 @@ class SleepSpy:
         return sum(self.sleeps)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def no_retry_sleep() -> Iterator[SleepSpy]:
-    """X 検索のリトライ待機をスパイに差し替える（FR-010 / LAYOUT-004-2）。
+    """リトライ待機をスパイに差し替える（FR-010 / LAYOUT-004-2）。
 
-    対象は `trend_researcher.tools.x_search` が参照する `asyncio.sleep` のみ。
-    観測値は `spy.sleeps` / `spy.total` で断言できる。
+    `asyncio.sleep` は各モジュールが `import asyncio` の属性参照で解決するため、
+    1 箇所（`asyncio` モジュールの属性）の差し替えで `tools/` のどの境界にも効く。
+    モジュールを名指しした差し替えは、新しい境界（`tools/llm.py` 等）を追加した
+    ときに静かに漏れる。
+
+    `autouse=True` の理由: リトライ待機（US2）が入ると既定 1 秒 × 試行回数が
+    スイート全体の実行時間（SC-013 の 60 秒）に効くため、フィクスチャを要求して
+    いないテストでも実時間の待機を排除する。観測値は `spy.sleeps` / `spy.total`。
     """
-    spy = SleepSpy()
-    with mock.patch("trend_researcher.tools.x_search.asyncio.sleep", new=spy):
+    spy = SleepSpy(real_sleep=asyncio.sleep)
+    with mock.patch("asyncio.sleep", new=spy):
         yield spy
 
 

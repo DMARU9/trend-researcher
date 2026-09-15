@@ -1,0 +1,14 @@
+[1/7] parse_instruction ... 開始
+[1/7] parse_instruction ... 完了（トピック: "AI動画のトレンドを3件" / 件数: 3）
+[2/7] plan_search ... 開始（LLM が検索クエリを生成中）
+[2/7] plan_search ... 完了（クエリ 1 件: XTR）
+[3/7] search ... 開始
+[3/7] search ... 完了（3 件を選定）
+[4/7] fetch ... 開始
+[4/7] fetch ... 完了（コンテキスト取得 3 件（追加文脈なし 0 件））
+[5/7] analyze_content ... 開始（並列上限 2）
+[5/7] analyze_content ... 完了（3 件を要約）
+[6/7] extract_common ... 開始
+[6/7] extract_common ... 完了（0 件の共通テーマ）
+[7/7] compile_report ... 開始
+[7/7] compile_report ... 完了

@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class OutputFormat(str, Enum):
@@ -113,6 +114,16 @@ class CommonTheme(BaseModel):
     example_quotes: list[str] = Field(default_factory=list)
 
 
+class CommonThemes(BaseModel):
+    """`extract_common` の構造化出力（複数の共通テーマを 1 応答で受ける）。
+
+    構造化出力はルートがオブジェクトでなければならない（配列をルートにできない）
+    ため、`themes` を 1 段挟んで受ける。空リストは正常（共通点なし）。
+    """
+
+    themes: list[CommonTheme] = Field(default_factory=list)
+
+
 class ResearchReport(BaseModel):
     """最終アウトプット。"""
 
@@ -123,3 +134,83 @@ class ResearchReport(BaseModel):
     common_themes: list[CommonTheme] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+
+
+# --- 実行中の観測（data-model §3。レポートには含めない） ---------------------
+
+
+class CompressedSource(BaseModel):
+    """圧縮した素材 1 件の記録（data-model 3.1）。
+
+    `applied = True` は LLM で圧縮できたこと、`False` は圧縮できず**生素材を
+    切り詰めて**解析に渡したことを表す。後者の理由は `reason` に残す
+    （`"compressed"` / `"timeout"` / `"error"` / `"empty"`）。
+
+    項目に既定値を持たせない。既定値があると記録もれが「0 文字を圧縮した」
+    という嘘の観測として通ってしまう。
+    """
+
+    source_id: str
+    input_chars: int
+    output_chars: int
+    applied: bool
+    reason: str
+
+
+class Degradation(BaseModel):
+    """上限超過による縮退の 1 段の記録（data-model 3.2）。
+
+    圧縮（`CompressedSource`）とは**別の型**で記録する（FR-019）。`reason` は
+    上限超過を表す `"token_limit"` を使い、圧縮と混ぜない。
+    """
+
+    node_name: str
+    stage: int
+    before_chars: int
+    after_chars: int
+    reason: str
+    limit_known: bool
+
+    @model_validator(mode="after")
+    def _require_a_real_shrink(self) -> Degradation:
+        """縮小しない段は記録できない（R-4 の停止条件 2）。
+
+        同じ長さの段を允許するど、「縮退した」という記録だけが増えて入力が
+        減らず、呼び出し回数だけが増える。
+        """
+        if self.after_chars >= self.before_chars:
+            raise ValueError(
+                "縮退の段は縮小していなければなりません: "
+                f"before_chars={self.before_chars} / after_chars={self.after_chars}"
+            )
+        return self
+
+
+class Failure(BaseModel):
+    """部分失敗の記録（data-model 3.3）。
+
+    `kind` は失敗を記録する 2 つの段だけを取る（個別解析 / 追加文脈の取得）。
+    無言の欠落を禁止するため、失敗した対象は必ずこの型で残す（FR-021）。
+    """
+
+    kind: Literal["analysis", "context"]
+    id: str
+    error_type: str
+    message: str
+
+
+class ModelUsage(BaseModel):
+    """LLM 呼び出し 1 回分の使用量（data-model 3.4）。
+
+    トークン数は不明なら `None` のままにする（FR-061）。0 に潰すと「0 トークンで
+    呼んだ」という嘘の集計になる。`node_name` は呼び出し元のノード（圧縮は
+    `analyze_content`）、`role` は `build_model` に渡した役割。
+    """
+
+    node_name: str
+    role: str
+    model: str
+    input_tokens: int | None
+    output_tokens: int | None
+    total_tokens: int | None
+    structured: bool

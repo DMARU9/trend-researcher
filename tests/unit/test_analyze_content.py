@@ -15,11 +15,14 @@ import asyncio
 from typing import Any
 from unittest import mock
 
+import httpx
+import openai
 import pytest
+from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 
-from trend_researcher.models import Candidate, Context
+from trend_researcher.models import AnalysisFinding, Candidate, Context
 from trend_researcher.nodes.analyze_content import (
     _build_source_text,
     _parse_angles_table,
@@ -78,15 +81,21 @@ def _run(
     config: RunnableConfig | None = None,
     candidates: list[Candidate] | None = None,
     contexts: list[Context] | None = None,
+    structured: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """`analyze_content` をノード単位注入で 1 回実行し、出力 state を返す。"""
+    """`analyze_content` をノード単位注入で 1 回実行し、出力 state を返す。
+
+    `structured` を渡すと構造化出力が成功する（省略時は必ず失敗し、US2 の
+    フォールバック経路を通る）。
+    """
     node_state: dict[str, Any] = {
         "candidates": [_candidate(1)] if candidates is None else candidates,
         "contexts": [] if contexts is None else contexts,
     }
     if platform is not None:
         node_state["platform"] = platform
-    with fake_model_factory.install({"analyze_content": response}):
+    injected = {} if structured is None else {"analyze_content": structured}
+    with fake_model_factory.install({"analyze_content": response}, structured=injected):
         return analyze_content(node_state, _config() if config is None else config)
 
 
@@ -333,17 +342,32 @@ def test_prompt_uses_placeholder_when_source_text_is_empty(fake_model_factory):
     assert "（本文なし・メタデータのみ）" in fake_model_factory.prompts_for("analyze_content")[0]
 
 
-def test_source_text_is_truncated_at_twenty_thousand_chars(fake_model_factory):
-    # 位置ごとに異なる文字列にする（同一文字の繰り返しだと「切断された」ことを
+def test_over_threshold_source_is_compressed_not_silently_truncated(fake_model_factory):
+    """しきい値超過の素材は先頭だけで切り捨てず、**全体**を圧縮してから載せる。
+
+    旧 `test_source_text_is_truncated_at_twenty_thousand_chars` の置き換え。
+    FR-001 の MUST NOT「先頭のみを無言で切り捨ててはならない」により期待する
+    振る舞いが変わる唯一の既存テスト（実装メモ §6）。圧縮の入力には 25,005 文字の
+    **全体**が渡り、解析プロンプトには圧縮結果が載る（生素材は載らない）。
+    """
+    # 位置ごとに異なる文字列にする（同一文字の繰り返しだと「切られた」ことを
     # 部分文字列の有無で判定できない）。
     candidate = _candidate(1, text="".join(f"{i:05d}" for i in range(5000)))
-    _run(fake_model_factory, _STRUCTURED_RESPONSE, candidates=[candidate])
-    prompt = fake_model_factory.prompts_for("analyze_content")[0]
     source = _build_source_text(candidate, None)  # "[本文]\n" + 25000 字
     assert len(source) == 25005
-    assert source[:20000] in prompt
-    # 20000 文字を超える部分（`source[20000:]`）はプロンプトに載らない。
-    assert source[20000:] not in prompt
+
+    with fake_model_factory.install(
+        {"analyze_content": _STRUCTURED_RESPONSE}, compression=_COMPRESSION_RESPONSE
+    ):
+        analyze_content(_node_state(candidate), _config())
+
+    compression_prompt = fake_model_factory.compression_prompts[0]
+    assert source[:20000] in compression_prompt
+    assert source[20000:] in compression_prompt  # 後半も捨てない（FR-001）
+
+    analyze_prompt = fake_model_factory.prompts_for("analyze_content")[0]
+    assert _TAIL_KEYWORD in analyze_prompt  # 圧縮結果の固有語が載る
+    assert source[20000:] not in analyze_prompt  # 生素材は載らない
 
 
 # --- ノードの結線 ---------------------------------------------------------
@@ -387,17 +411,152 @@ def test_progress_reports_zero_when_no_candidates(fake_model_factory):
     )
 
 
+# --- 長文素材の圧縮（US1 / FR-001〜008 / SC-001〜004） ---------------------
+
+#: 圧縮の応答（`COMPRESSION_PROMPT` の出力契約: `<summary>` ＋ `<key_excerpts>`）
+_COMPRESSION_RESPONSE = (
+    "<summary>素材全体の要点。後半で「独自用語XYZ」が語られている。</summary>\n"
+    "<key_excerpts>- 独自用語XYZ は後半にのみ現れる</key_excerpts>"
+)
+
+#: 後半にだけ現れる固有語（旧実装の `source_text[:20000]` では落ちていた）
+_TAIL_KEYWORD = "独自用語XYZ"
+
+#: 既定のしきい値（20,000 文字）を超え、固有語が 20,000 文字より後にある素材
+_OVER_THRESHOLD_SOURCE = "埋め草" * 7000 + _TAIL_KEYWORD
+
+
+def _node_state(candidate: Candidate) -> dict[str, Any]:
+    return {"candidates": [candidate], "contexts": [], "platform": "x"}
+
+
+def test_compressed_source_reaches_the_analyze_prompt(fake_model_factory):
+    """しきい値超過の素材は圧縮されてから解析プロンプトに載る（FR-001 / FR-007）。
+
+    素材の**後半**にある固有語がプロンプトに現れること、逆に生素材（20,000 文字を
+    超える塊）がそのまま載っていないことの両方を見る。片方だけでは「圧縮せずに
+    全体を渡した」実装でも緑になる。
+    """
+    candidate = _candidate(1, text=_OVER_THRESHOLD_SOURCE)
+
+    with fake_model_factory.install(
+        {"analyze_content": _STRUCTURED_RESPONSE},
+        compression=_COMPRESSION_RESPONSE,
+    ):
+        out = analyze_content(_node_state(candidate), _config())
+
+    compression_prompts = fake_model_factory.compression_prompts
+    assert len(compression_prompts) == 1  # 素材 1 件につき 1 回（FR-001）
+    assert _TAIL_KEYWORD in compression_prompts[0]  # 素材全体を渡している（FR-001）
+
+    analyze_prompt = fake_model_factory.prompts_for("analyze_content")[0]
+    assert _TAIL_KEYWORD in analyze_prompt
+    assert _OVER_THRESHOLD_SOURCE not in analyze_prompt  # 生素材は載らない
+
+    records = out["compressed"]
+    assert len(records) == 1
+    assert (records[0].applied, records[0].reason) == (True, "compressed")
+    assert records[0].input_chars == len(_build_source_text(candidate, None))
+    assert records[0].output_chars <= 20000
+
+
+def test_below_threshold_source_is_passed_unchanged(fake_model_factory):
+    """しきい値以下では追加の呼び出しをせず、素材をそのまま渡す（FR-008 / SC-003）。"""
+    candidate = _candidate(1, text="短い本文")
+
+    with fake_model_factory.install({"analyze_content": _STRUCTURED_RESPONSE}):
+        out = analyze_content(_node_state(candidate), _config())
+
+    assert fake_model_factory.compression_prompts == []
+    assert "短い本文" in fake_model_factory.prompts_for("analyze_content")[0]
+    assert out["compressed"] == []
+
+
+def test_the_threshold_comes_from_the_configuration(fake_model_factory):
+    """しきい値は実行時設定から取る（FR-005。コードに固定値を持たない）。"""
+    candidate = _candidate(1, text="あ" * 1200)  # 本文の長さは 1205 文字（接頭辞込み）
+
+    with fake_model_factory.install(
+        {"analyze_content": _STRUCTURED_RESPONSE}, compression=_COMPRESSION_RESPONSE
+    ):
+        triggered = analyze_content(_node_state(candidate), _config(compression_threshold=1000))
+        not_triggered = analyze_content(
+            _node_state(candidate), _config(compression_threshold=1205)
+        )
+
+    assert len(fake_model_factory.compression_prompts) == 1
+    assert triggered["compressed"] and not_triggered["compressed"] == []
+
+
+def test_compression_failure_keeps_the_analysis_running(fake_model_factory):
+    """圧縮がタイムアウトしても解析は続き、理由が記録される（FR-003 / FR-004）。"""
+    candidate = _candidate(1, text=_OVER_THRESHOLD_SOURCE)
+
+    with fake_model_factory.install(
+        {"analyze_content": _STRUCTURED_RESPONSE}, compression_error=TimeoutError()
+    ):
+        out = analyze_content(_node_state(candidate), _config())
+
+    assert len(out["analyses"]) == 1
+    records = out["compressed"]
+    assert [(r.applied, r.reason) for r in records] == [(False, "timeout")]
+    # 縮退は生素材を（先頭から）しきい値で切ったもの。素材全体は載らない。
+    # 長さはプロンプト全体ではなく**素材の部分**で見る（プロンプト全体には
+    # テンプレートの文面も含まれ、その量は FR-055〜058 で増減しうるため）。
+    prompt = fake_model_factory.prompts_for("analyze_content")[0]
+    assert "埋め草" in prompt
+    assert _TAIL_KEYWORD not in prompt
+    assert prompt.count("埋め草") < _OVER_THRESHOLD_SOURCE.count("埋め草")
+
+
+def test_progress_note_reports_how_many_were_compressed(
+    fake_model_factory, capsys: pytest.CaptureFixture[str]
+):
+    """圧縮した件数は追加の観測として stderr に 1 行で出す（FR-029 / D-3）。"""
+    candidates = [_candidate(1, text=_OVER_THRESHOLD_SOURCE), _candidate(2, text="短い本文")]
+
+    with fake_model_factory.install(
+        {"analyze_content": _STRUCTURED_RESPONSE}, compression=_COMPRESSION_RESPONSE
+    ):
+        analyze_content(
+            {"candidates": candidates, "contexts": [], "platform": "x"}, _config()
+        )
+
+    err = capsys.readouterr().err
+    # US2 のフォールバックの補足行と混同しないよう、圧縮の文言で固定する
+    assert "[補足] 長文素材 1 件を圧縮（成功 1/1" in err
+
+
+def test_no_note_when_nothing_was_compressed(
+    fake_model_factory, capsys: pytest.CaptureFixture[str]
+):
+    """圧縮が 0 件なら圧縮の追加行を出さない（既定入力の stderr を変えない。FR-035）。
+
+    US2 で「構造化出力のフォールバック」の補足行も出るようになったため、このテストは
+    圧縮の補足行に限定して確認する（フォールバックの補足行は別の契約）。
+    """
+    with fake_model_factory.install({"analyze_content": _STRUCTURED_RESPONSE}):
+        analyze_content(_node_state(_candidate(1, text="短い本文")), _config())
+
+    assert "長文素材" not in capsys.readouterr().err
+
+
 class _TrackingLLM:
     """同時実行数を記録する計測用 LLM フェイク。
 
     `FakeModelFactory` のフェイクは即座に応答を返すため同時実行数が観測できない。
     差し替える境界（`build_model`）は R-7 と同じで、計測用の実装だけをここに置く。
+    構造化出力は常に失敗させ、計測対象をテキスト呼び出し（フォールバック）に
+    絞る。
     """
 
     def __init__(self) -> None:
         self.calls = 0
         self.in_flight = 0
         self.max_in_flight = 0
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        raise OutputParserException("計測用フェイクは構造化出力を返さない")
 
     async def ainvoke(self, prompt: str) -> AIMessage:
         self.calls += 1
@@ -420,3 +579,471 @@ def test_parallelism_is_capped_at_two():
     assert tracking.calls == 5
     assert tracking.max_in_flight == 2
     assert len(out["analyses"]) == 5
+
+
+# --- US2: 構造化出力とフォールバック（FR-009 / FR-011 / FR-012） -------------
+
+#: 構造化出力で受け取る解析結果。`id` / `title` は候補が正なので上書きされる。
+_STRUCTURED_FINDING: dict[str, Any] = {
+    "id": "（LLM が返した id。候補の id で上書きされる）",
+    "title": "（LLM が返したタイトル）",
+    "summary": "モデルが返した要約",
+    "angles": [
+        {"angle": "入門解説", "value": "初心者に刺さる", "key_phrase": "「モデルA」"},
+        {"angle": "失敗談", "value": "共感を呼ぶ", "key_phrase": "「モデルB」"},
+    ],
+    "key_points": ["入門解説", "失敗談"],
+    "evidence": ["「モデルの引用」"],
+}
+
+
+def test_structured_finding_is_used_with_the_candidate_identity(
+    fake_model_factory: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """構造化出力が成功したらその内容を使い、`id` / `title` だけ候補で揃える。
+
+    LLM には素材の識別子を渡していないため、`id` を上書きしないとレポートの
+    紐づけが壊れる（`compile_report` は候補と解析を id で突き合わせる）。
+    """
+    out = _run(
+        fake_model_factory,
+        _STRUCTURED_RESPONSE,
+        candidates=[_candidate(1)],
+        structured=_STRUCTURED_FINDING,
+    )
+
+    finding = out["analyses"][0]
+    assert finding.summary == "モデルが返した要約"
+    assert finding.id == "t1"
+    assert finding.title == ""
+    assert [a.angle for a in finding.angles] == ["入門解説", "失敗談"]
+    assert finding.key_points == ["入門解説", "失敗談"]
+    assert finding.evidence == ["「モデルの引用」"]
+    # 成功時は決定的解析を走らせない（テキスト呼び出し 0 回）
+    assert fake_model_factory.prompts_for("analyze_content") == []
+    assert len(fake_model_factory.structured_prompts_for("analyze_content")) == 1
+    assert "[補足]" not in capsys.readouterr().err
+
+
+def test_structured_output_keeps_candidate_id_for_every_candidate(fake_model_factory: Any) -> None:
+    """複数件でも `id` は候補ごとに揃う（同じ id が並ぶとレポートが壊れる）。"""
+    candidates = [_candidate(1), _candidate(2), _candidate(3)]
+
+    out = _run(
+        fake_model_factory,
+        _STRUCTURED_RESPONSE,
+        candidates=candidates,
+        structured=_STRUCTURED_FINDING,
+    )
+
+    assert [f.id for f in out["analyses"]] == ["t1", "t2", "t3"]
+
+
+def test_structured_failure_uses_the_existing_parser(
+    fake_model_factory: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """規定回数失敗したら見出し表の解析へ切り替え、件数を補足行に残す（FR-011）。"""
+    out = _run(fake_model_factory, _STRUCTURED_RESPONSE, candidates=[_candidate(1)])
+
+    err = capsys.readouterr().err
+    assert (
+        "[補足] 構造化出力を取得できなかったため見出し表の解析へ切り替えました（1 件）" in err
+    )
+    finding = out["analyses"][0]
+    assert finding.summary == "ブログでどう扱えるかの観点でまとめた要約。"
+    assert [a.angle for a in finding.angles] == ["入門解説", "失敗談"]
+    # 試行回数 = 1 + retry_max（既定 3）。テキスト呼び出しはフォールバックの 1 回だけ
+    assert len(fake_model_factory.structured_prompts_for("analyze_content")) == 3
+    assert len(fake_model_factory.prompts_for("analyze_content")) == 1
+
+
+def test_fallback_note_counts_every_candidate(fake_model_factory: Any) -> None:
+    """フォールバックは候補ごとに 1 行ではなく、まとめて 1 行にする。"""
+    candidates = [_candidate(i) for i in range(1, 4)]
+
+    with fake_model_factory.install({"analyze_content": _STRUCTURED_RESPONSE}):
+        analyze_content(
+            {"candidates": candidates, "contexts": [], "platform": "x"}, _config()
+        )
+
+    assert len(fake_model_factory.prompts_for("analyze_content")) == 3
+
+
+def test_fallback_does_not_add_progress_lines(fake_model_factory: Any) -> None:
+    """フォールバックは進捗行を増やさない（補足は stderr のみ。既定の出力は不変）。"""
+    out = _run(fake_model_factory, _STRUCTURED_RESPONSE, candidates=[_candidate(1)])
+
+    contents = [m.content for m in out["messages"]]
+    assert len(contents) == 2
+    assert not any("補足" in c or "構造化出力" in c for c in contents)
+
+
+def test_structured_method_comes_from_the_configuration(fake_model_factory: Any) -> None:
+    """`structured_method` の設定値が境界まで届く（既定値と同じでも配線を固定する）。"""
+    _run(
+        fake_model_factory,
+        _STRUCTURED_RESPONSE,
+        config=_config(structured_method="function_calling"),
+        structured=_STRUCTURED_FINDING,
+    )
+
+    options = fake_model_factory.structured_options_for("analyze_content")
+    assert options and options[0]["method"] == "function_calling"
+    assert options[0]["schema"] is AnalysisFinding
+
+
+# --- US4: 部分失敗の隔離（FR-020 / FR-021 / FR-023 / SC-007） ----------------
+
+#: 失敗させる候補の目印。素材（プロンプト）にこの文字列が含まれる候補だけが失敗する。
+_FAILURE_MARKER = "壊れた素材"
+
+
+class _SelectiveLLM:
+    """目印を含む素材だけを失敗させる計測用フェイク（US4 の隔離の観測）。
+
+    `FakeModelFactory` のフェイクは「ノード単位で 1 つの応答」しか持てないため、
+    「10 件中 3 件だけ失敗」を作れない。`_TrackingLLM` と同じく、差し替える境界
+    （`build_model`）は R-7 のまま、候補ごとの成否を判定する実装だけをここに置く。
+
+    失敗は構造化出力とテキスト呼び出しの**両方**で起こす。片方だけだと
+    `_structured_finding` のフォールバックがもう片方を呼び、失敗が消えてしまう
+    （隔離のテストが「フォールバックで救えた」経路に化ける）。
+    """
+
+    def __init__(self, marker: str = _FAILURE_MARKER, error: BaseException | None = None) -> None:
+        self.marker = marker
+        self.error = error if error is not None else RuntimeError(f"{marker} を解析できません")
+        self.structured_calls = 0
+        self.text_calls = 0
+
+    def _decide(self, prompt: str) -> None:
+        if self.marker in prompt:
+            raise self.error
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        return _SelectiveStructured(self, schema)
+
+    async def ainvoke(self, prompt: str) -> AIMessage:
+        self.text_calls += 1
+        self._decide(prompt)
+        return AIMessage(content=_STRUCTURED_RESPONSE)
+
+
+class _SelectiveStructured:
+    """`with_structured_output` の戻り（目印の判定だけを行う runnable）。"""
+
+    def __init__(self, llm: _SelectiveLLM, schema: Any) -> None:
+        self._llm = llm
+        self._schema = schema
+
+    async def ainvoke(self, prompt: str) -> Any:
+        self._llm.structured_calls += 1
+        self._llm._decide(prompt)
+        return self._schema.model_validate({"id": "目印", "summary": "構造化の要約"})
+
+
+def _run_selective(
+    candidates: list[Candidate], llm: _SelectiveLLM
+) -> dict[str, Any]:
+    """隔離用のフェイクで `analyze_content` を 1 回実行し、出力 state を返す。"""
+    with mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=llm):
+        return analyze_content(
+            {"candidates": candidates, "contexts": [], "platform": "x"}, _config()
+        )
+
+
+def _partial_candidates(total: int = 10, failing: tuple[int, ...] = (2, 5, 9)) -> list[Candidate]:
+    """`failing` に挙げた番号の候補だけ素材に目印を入れる（SC-007 の 10 中 3）。"""
+    return [
+        _candidate(i, text=f"{_FAILURE_MARKER} {i}" if i in failing else f"本文{i}")
+        for i in range(1, total + 1)
+    ]
+
+
+def test_one_failed_candidate_does_not_stop_the_others() -> None:
+    """10 件中 3 件が失敗しても 7 件の解析が得られる（FR-020 / SC-007）。"""
+    out = _run_selective(_partial_candidates(), _SelectiveLLM())
+
+    assert len(out["analyses"]) == 7
+    assert len(out["failures"]) == 3
+
+
+def test_every_candidate_ends_up_in_analyses_or_failures() -> None:
+    """成功と失敗の和集合が候補全体と一致する（無言の欠落の禁止。FR-021）。"""
+    candidates = _partial_candidates()
+    out = _run_selective(candidates, _SelectiveLLM())
+
+    covered = {a.id for a in out["analyses"]} | {f.id for f in out["failures"]}
+    assert covered == {c.id for c in candidates}
+    assert {f.id for f in out["failures"]} == {"t2", "t5", "t9"}
+
+
+def test_the_failure_record_carries_the_id_and_the_reason() -> None:
+    """失敗は `kind` / `id` / 例外型 / 理由が分かる形で残る（FR-021 / FR-023）。"""
+    out = _run_selective(_partial_candidates(total=1, failing=(1,)), _SelectiveLLM())
+
+    (failure,) = out["failures"]
+    assert failure.kind == "analysis"
+    assert failure.id == "t1"
+    assert failure.error_type == "RuntimeError"
+    assert _FAILURE_MARKER in failure.message
+
+
+def test_all_candidates_failing_still_completes() -> None:
+    """全件失敗でも例外にせず、失敗の事実と理由を残す（US4 シナリオ 3）。"""
+    out = _run_selective(_partial_candidates(total=1, failing=(1,)), _SelectiveLLM())
+
+    assert out["analyses"] == []
+    assert [f.id for f in out["failures"]] == ["t1"]
+
+
+def test_cancellation_is_not_swallowed_as_a_partial_failure() -> None:
+    """`asyncio.CancelledError` は部分失敗として飲み込まず再送出する（原則 V / 契約 §3）。
+
+    `CancelledError` は `BaseException` なので `except Exception` では捕まらない。
+    `return_exceptions=True` を付けた `gather` は**戻り値として**返してくるため、
+    明示的に再送出しないと「キャンセルされたのに正常完了」になる。
+    """
+    candidates = _partial_candidates(total=2, failing=(1,))
+    llm = _SelectiveLLM(error=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError):
+        _run_selective(candidates, llm)
+
+
+# --- US4: 失敗の可視化（FR-023） ------------------------------------------
+
+
+def test_the_failure_note_reports_the_count_and_the_reasons(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """失敗の件数と理由を補足行に 1 行で出す（FR-023。stderr のみ）。"""
+    _run_selective(_partial_candidates(), _SelectiveLLM())
+
+    err = capsys.readouterr().err
+    assert "[補足] 解析できなかった対象 3 件" in err
+    assert err.count("[補足] 解析できなかった") == 1
+    assert "RuntimeError" in err
+
+
+def test_no_failure_note_when_nothing_failed(capsys: pytest.CaptureFixture[str]) -> None:
+    """失敗が無ければ補足行を出さない（既定の入力の stderr を変えない。FR-035）。"""
+    _run_selective([_candidate(1), _candidate(2)], _SelectiveLLM())
+
+    assert "解析できなかった" not in capsys.readouterr().err
+
+
+# --- US5: 実行時設定の注入（FR-005 / FR-010 / FR-015 / FR-025） --------------
+#
+# このノードが読む値（同時実行数・再試行・縮退）は**すべて** `Configuration` から
+# 来る。コードに固定値を残すと、Studio / CLI から変更しても挙動が変わらない
+# （FR-025）。ここでは値そのものではなく「設定を変えると観測が変わること」を
+# 固定する。
+
+
+@pytest.mark.parametrize("concurrency", [1, 2])
+def test_the_concurrency_limit_comes_from_the_configuration(concurrency: int) -> None:
+    """同時実行数は設定から注入される（`Semaphore(2)` の固定値を持たない）。
+
+    `analysis_concurrency = 1` で同時実行数が 1 にならなければ、値は配線されて
+    いない（既定の 2 と一致してしまうため、既定値だけでは検出できない）。
+    """
+    tracking = _TrackingLLM()
+    candidates = [_candidate(i) for i in range(1, 6)]
+
+    with mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=tracking):
+        out = analyze_content(
+            {"platform": "x", "candidates": candidates, "contexts": []},
+            _config(analysis_concurrency=concurrency),
+        )
+
+    assert tracking.calls == 5
+    assert tracking.max_in_flight == concurrency
+    assert len(out["analyses"]) == 5
+
+
+def test_the_start_line_reports_the_configured_concurrency(fake_model_factory: Any) -> None:
+    """開始行の同時実行数は設定値を映す（既定 2 の文言は変えない。FR-035）。"""
+    out = _run(fake_model_factory, _STRUCTURED_RESPONSE, config=_config(analysis_concurrency=3))
+
+    assert out["messages"][0].content == "[5/7] analyze_content ... 開始（並列上限 3）"
+
+
+class _StructuredFailingLLM:
+    """構造化出力だけが失敗する計測用フェイク（再試行の回数を数える）。
+
+    テキスト経路は 1 回で成功させる。両方を失敗させると再試行の回数が
+    「構造化 ＋ フォールバック」の合計になり、どちらの配線が効いたのか分からなく
+    なるため。
+    """
+
+    def __init__(self) -> None:
+        self.structured_calls = 0
+        self.text_calls = 0
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        return _StructuredFailingRunnable(self)
+
+    async def ainvoke(self, prompt: Any) -> AIMessage:
+        self.text_calls += 1
+        return AIMessage(content=_STRUCTURED_RESPONSE)
+
+
+class _StructuredFailingRunnable:
+    """`with_structured_output` の戻り（毎回 `OutputParserException` を送出）。"""
+
+    def __init__(self, llm: _StructuredFailingLLM) -> None:
+        self._llm = llm
+
+    async def ainvoke(self, prompt: Any) -> Any:
+        self._llm.structured_calls += 1
+        raise OutputParserException("スキーマに一致しません")
+
+
+@pytest.mark.parametrize(("retry_max", "expected_calls"), [(0, 1), (2, 3)])
+def test_the_retry_count_comes_from_the_configuration(
+    retry_max: int, expected_calls: int
+) -> None:
+    """`retry_max` が試行回数（1 + retry_max）になる（FR-010 / FR-025）。"""
+    llm = _StructuredFailingLLM()
+
+    with mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=llm):
+        out = analyze_content(
+            {"platform": "x", "candidates": [_candidate(1)], "contexts": []},
+            _config(retry_max=retry_max, retry_wait_seconds=0.5),
+        )
+
+    assert llm.structured_calls == expected_calls
+    assert llm.text_calls == 1
+    assert len(out["analyses"]) == 1
+
+
+def test_the_wait_between_retries_comes_from_the_configuration(no_retry_sleep: Any) -> None:
+    """`retry_wait_seconds` が待機として境界へ届く（FR-010 / FR-025）。"""
+    llm = _StructuredFailingLLM()
+
+    with mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=llm):
+        analyze_content(
+            {"platform": "x", "candidates": [_candidate(1)], "contexts": []},
+            _config(retry_max=2, retry_wait_seconds=0.5),
+        )
+
+    # 2 回の再試行の前だけ待つ（成功したフォールバックでは待たない）
+    assert no_retry_sleep.sleeps == [0.5, 0.5]
+
+
+def _context_length_error() -> Exception:
+    """上限超過（400 ＋ `context_length_exceeded`）を模した例外（契約 §5）。"""
+    return openai.BadRequestError(
+        message="This endpoint's maximum context length is 1048576 tokens.",
+        response=httpx.Response(400, request=httpx.Request("POST", "https://example.test/v1")),
+        body={"error": {"code": "context_length_exceeded"}},
+    )
+
+
+class _LimitErrorLLM:
+    """構造化出力が常に上限超過になる計測用フェイク（縮退の段数を数える）。
+
+    上限超過は再試行の対象ではないため、呼び出し回数がそのまま「初回 ＋ 段数」に
+    なる（契約 §3 の対象外）。
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        return self
+
+    async def ainvoke(self, prompt: Any) -> AIMessage:
+        self.calls += 1
+        raise _context_length_error()
+
+
+@pytest.mark.parametrize(("max_attempts", "expected_stages"), [(1, 1), (3, 3)])
+def test_the_degrade_stages_come_from_the_configuration(
+    max_attempts: int, expected_stages: int
+) -> None:
+    """`degrade_max_attempts` が縮退の段数になる（FR-015 / FR-025）。
+
+    素材は縮小の下限（`min_input_chars` の既定 1000）より十分に長くし、段数が
+    設定値で決まるようにする。段を使い切った `DegradationError` は部分失敗として
+    記録され、ノードは完了する（FR-020。US3 の exit 1 は CLI が捕捉して作る）。
+    """
+    llm = _LimitErrorLLM()
+
+    with mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=llm):
+        out = analyze_content(
+            {"platform": "x", "candidates": [_candidate(1, text="あ" * 5000)], "contexts": []},
+            _config(degrade_max_attempts=max_attempts, retry_max=0),
+        )
+
+    assert llm.calls == 1 + expected_stages
+    assert [d.stage for d in out["degradations"]] == list(range(1, expected_stages + 1))
+    (failure,) = out["failures"]
+    assert failure.error_type == "DegradationError"
+    assert f"試した段数: {expected_stages}" in failure.message
+
+
+class _LimitErrorWithPrompt:
+    """常に上限超過になる計測用フェイク（縮小の対象になった入力を記録する）。"""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> _LimitErrorWithPrompt:
+        return self
+
+    async def ainvoke(self, prompt: Any) -> AIMessage:
+        self.prompts.append(str(prompt))
+        raise _context_length_error()
+
+
+def test_compression_and_degradation_happen_in_the_same_run(fake_model_factory):
+    """圧縮で素材を削った後に、上限超過で梯子を登る（同じ実行で両方が起きる。FR-019 / FR-026）。
+
+    既存のテストは片方ずつしか見ていない（圧縮のテストは縮退なし、縮退のテストは
+    圧縮なし）。ここでは 1 回の実行で「しきい値超過 → 圧縮」と「上限超過 → 梯子」を
+    起こし、梯子が縮める対象が**圧縮後の素材で組み立てたプロンプト**であることを
+    長さの実測で固定する（生素材の長さではない）。
+
+    このテストが叩くのは構造化の経路（ダブルが `with_structured_output` で自分自身を
+    返すため `ainvoke_structured` の梯子が回る）。テキスト経路（構造化が使えない
+    ときの決定的解析）の側は `tests/integration/test_cli_contract.py` の
+    `compress_and_degrade` シナリオが同じ前提で固定する。
+
+    観測: 解析が縮退で失敗した候補の `CompressedSource` は状態に残らない（記録は
+    解析結果と対で返るため）。圧縮が走ったことは圧縮プロンプトの記録と、縮小対象に
+    圧縮結果の固有語が載っていることで確かめる。
+    """
+    candidate = _candidate(1, text=_OVER_THRESHOLD_SOURCE)
+    source = _build_source_text(candidate, None)
+    llm = _LimitErrorWithPrompt()
+
+    with (
+        fake_model_factory.install(
+            {"analyze_content": _STRUCTURED_RESPONSE}, compression=_COMPRESSION_RESPONSE
+        ),
+        # 解析の呼び出しだけを常に上限超過にする（圧縮は既定の応答のまま）
+        mock.patch("trend_researcher.nodes.analyze_content.build_model", return_value=llm),
+    ):
+        out = analyze_content(
+            _node_state(candidate),
+            _config(degrade_max_attempts=2, retry_max=0, min_input_chars=100),
+        )
+
+    # 同じ実行で圧縮と縮退の両方が起きている。
+    assert len(fake_model_factory.compression_prompts) == 1  # 圧縮が走った（FR-001）
+    assert [d.stage for d in out["degradations"]] == [1, 2]  # 梯子を 2 段登った
+
+    # 梯子が縮めたのは**圧縮後の素材で組み立てたプロンプト**（生素材ではない）。
+    first = out["degradations"][0]
+    assert _TAIL_KEYWORD in llm.prompts[0]  # 圧縮結果の固有語が載っている
+    assert first.before_chars == len(llm.prompts[0])
+    assert first.before_chars < len(source)  # 生素材を縮めたのではない
+    assert first.after_chars < first.before_chars
+    assert out["degradations"][1].before_chars == first.after_chars  # 段ごとに縮む
+
+    # 段を使い切った解析は部分失敗として残り、ノードは完了する（FR-020）。
+    (failure,) = out["failures"]
+    assert failure.error_type == "DegradationError"
+    assert "試した段数: 2" in failure.message

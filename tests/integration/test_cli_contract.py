@@ -527,5 +527,216 @@ def test_cli_001_05_write_failure_has_single_error_line(cli_runner, tmp_path):
     assert len(error_lines) == 1
 
 
+# --- US3 / FR-015〜019: 上限超過の検出と段階的縮退 -------------------------
+#
+# 固定する契約（contracts/llm-invocation-contract.md §6）:
+#   - 段を使い切ったら stderr に理由（試した段数・縮小前後の長さ）を出して **exit 1**
+#   - 上限超過以外のエラーは縮退せず、既存どおり exit 1（誤認の禁止。FR-018）
+#   - 縮小して成功したら exit 0（既定の入力の出力を変えない）
+
+#: 縮退の検証に使う長い指示。`min_input_chars`（既定 1000）を十分に超え、3 段縮退
+#: しても下限を下回らない長さにする（1 文字 = 1 トークン換算のプロンプト）。
+LONG_INSTRUCTION = "AI 動画のトレンドを調査してください。" * 120
+
+#: 縮退のシナリオで使う共通引数
+DEGRADE_ARGS = (LONG_INSTRUCTION, "--platform", "x", "--max-results", "3")
+
+
+def test_us3_degradation_exhausted_exits_one(cli_runner):
+    """US3 シナリオ 2 / FR-015: 縮退を使い切ったら理由を stderr に出して exit 1。
+
+    理由には**試した段数**と**縮小前後の長さ**が入る（事後に確認できる。FR-017）。
+    """
+    result = cli_runner(*DEGRADE_ARGS, scenario="degrade_exhausted")
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "[エラー] 上限超過のため生成できませんでした" in result.stderr
+    assert "ノード: parse_instruction" in result.stderr
+    assert "試した段数: 3" in result.stderr
+    assert re.search(r"縮小前: \d+ 文字 → 縮小後: \d+ 文字", result.stderr)
+    assert "Traceback" not in result.stderr
+    # 報告は `[エラー]` で始まる 1 行に収まる（既存の失敗報告と同じ形式）
+    error_lines = [line for line in result.stderr_lines() if line.startswith("[エラー]")]
+    assert len(error_lines) == 1
+
+
+def test_us3_degradation_success_exits_zero(cli_runner):
+    """US3 シナリオ 4 / FR-015: 縮小して成功したら exit 0 で完走する。
+
+    実行した段は `note()` の 1 行として stderr に残る（FR-017 / FR-029）。
+    """
+    result = cli_runner(*DEGRADE_ARGS, scenario="degrade_success")
+
+    assert result.exit_code == 0
+    assert result.stdout != ""
+    assert re.search(r"\[補足\] 縮退: parse_instruction / 1 段 / \d+ → \d+ 文字", result.stderr)
+    assert "[エラー]" not in result.stderr
+    # 進捗は stderr のみ（stdout = レポート。CLI-002-1 / CLI-002-3）
+    assert "[1/7]" not in result.stdout
+
+
+def test_us3_non_limit_error_is_not_degraded(cli_runner):
+    """US3 シナリオ 3 / FR-018: 上限超過と判定されない 400 は縮退せず exit 1。
+
+    除外語彙（`invalid api key`）を含む 400 を縮退へ渡すと、入力を切り詰めて同じ
+    失敗を繰り返したうえ、原因が「上限超過」に化ける（誤認の禁止）。
+    """
+    result = cli_runner(*DEGRADE_ARGS, scenario="degrade_other_error")
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "[エラー] リサーチ実行中に問題が発生しました: " in result.stderr
+    assert "縮退" not in result.stderr
+    assert "試した段数" not in result.stderr
+
+
+def test_us3_compression_and_degradation_happen_in_the_same_run(cli_runner):
+    """FR-019 / FR-026: 長文素材の圧縮と上限超過の縮退が**同じ実行**で起きる。
+
+    既存の統合シナリオは片方ずつしか動かしていない（縮退のシナリオは
+    `parse_instruction` だけで、圧縮は起きず、圧縮のシナリオは縮退しない）。
+    ここでは 1 プロセスで両方を起こし、`analyze_content` が「圧縮で削った素材で
+    組み立てたプロンプト」を縮小して続行できることを、実行プロセスの観測結果
+    （FR-002）として固定する。
+
+    しきい値だけをテスト側で下げる（`TR_COMPRESSION_THRESHOLD`）。値域の下限は
+    1000 で、長文スレッド（既定 20,000 文字超）はそれを上回る。縮退の判断
+    （`min_input_chars` 既定 1000 に対する縮小後の長さ）は既定のままにする。
+    """
+    result = cli_runner(
+        *DEGRADE_ARGS,
+        scenario="compress_and_degrade",
+        env={"TR_COMPRESSION_THRESHOLD": "2000"},
+    )
+
+    assert result.exit_code == 0
+    # 圧縮と縮退の両方が、同じ実行の補足行として stderr に残る（FR-029）
+    assert re.search(r"\[補足\] 長文素材 1 件を圧縮（成功 1/1、平均 \d+(\.\d+)?% 削減）", result.stderr)
+    assert re.search(r"\[補足\] 縮退: analyze_content / 1 段 / \d+ → \d+ 文字", result.stderr)
+    assert "[エラー]" not in result.stderr
+    # レポート（stdout）は変わらない。進捗・補足は stderr のみ（CLI-002-1 / CLI-002-3）
+    assert result.stdout != ""
+    assert "[補足]" not in result.stdout
+    assert "Traceback" not in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# US5: 起動時拒否（FR-024 / SC-023 / settings-contract §3）
+# ---------------------------------------------------------------------------
+
+#: 値域外の `max_results` で期待する 1 行（`_expected` が宣言から組み立てる文言）。
+MAX_RESULTS_ZERO = "設定が不正です: max_results=0（期待: 1 以上 100 以下の整数）"
+MAX_RESULTS_TOO_LARGE = "設定が不正です: max_results=101（期待: 1 以上 100 以下の整数）"
+
+
+def test_out_of_range_max_results_is_rejected_before_any_node_runs(cli_module_runner):
+    """層 A / CLI 引数: 値域外は接続前に拒否し **exit 2**（丸めも置換もしない）。
+
+    層 A（`python -m trend_researcher` を直接起動）で検証するのは、拒否が環境変数
+    や境界モックの助けを借りずに成立すること、すなわち**外部接続より前**に完走する
+    ことの証拠になるためである（CLI-006）。
+    """
+    result = cli_module_runner("AI 動画のトレンド", "--platform", "x", "--max-results", "0")
+
+    assert result.exit_code == 2
+    assert MAX_RESULTS_ZERO in result.stderr
+    assert "Traceback" not in result.stderr
+    # 丸め（0 → 1）も既定値への置換（0 → 5）も起きていない
+    assert "max_results=0" in result.stderr
+    assert "max_results=5" not in result.stderr
+    # ノードは 1 つも走らない（走れば進捗の 1 行目が出る）
+    assert "[1/7]" not in result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [("0", MAX_RESULTS_ZERO), ("101", MAX_RESULTS_TOO_LARGE)],
+)
+def test_out_of_range_max_results_from_the_environment_is_rejected_too(
+    cli_module_runner, env_value, expected
+):
+    """層 A / 環境変数: env 経由の値域外も同じ経路で拒否する（settings-contract §3）。"""
+    result = cli_module_runner(
+        "AI 動画のトレンド", "--platform", "x", env={"TR_MAX_RESULTS": env_value}
+    )
+
+    assert result.exit_code == 2
+    assert expected in result.stderr
+    assert "Traceback" not in result.stderr
+    assert "[1/7]" not in result.stderr
+
+
+def test_out_of_range_max_results_does_not_call_the_llm(cli_runner):
+    """層 B / 境界モック: 拒否は LLM の呼び出しより前（FR-024 / SC-023）。
+
+    層 B は成功経路が exit 0 で完走するフィクスチャなので、`exit 2` と
+    `stdout == ""` が同時に成立することは「ノードが 1 つも走っていない」の
+    直接の証拠になる（1 つでも走れば進捗が stderr に出て、成功シナリオなら
+    レポートが stdout に出る）。
+    """
+    result = cli_runner(
+        "AI 動画のトレンドを3件教えて", "--platform", "x", "--max-results", "0", scenario="x_success"
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert MAX_RESULTS_ZERO in result.stderr
+    assert "[1/7]" not in result.stderr
+    assert "[補足]" not in result.stderr
+
+
+def test_a_valid_max_results_still_runs(cli_runner):
+    """境界の内側（1 と 100）は拒否しない（過剰な拒否をしない）。"""
+    for value in ("1", "100"):
+        result = cli_runner(
+            "AI 動画のトレンドを3件教えて",
+            "--platform",
+            "x",
+            "--max-results",
+            value,
+            scenario="x_success",
+        )
+        assert result.exit_code == 0, result.stderr
+
+
+# --- US8: 使用量の集約が実行プロセスの観測結果に現れる（FR-061 / FR-062） ------
+
+
+def test_us8_usage_json_records_the_run(cli_runner, tmp_path):
+    """実プロセスの実行で `cache/usage.json` に集計が残る（SC-022）。
+
+    ハーネスの LLM ダブルは `usage_metadata` を返さない（実 API が使用量を
+    返さない場合と同じ経路）。それでも**実行は成功し**、不明として集計される
+    （FR-061 の「不明でも実行を失敗させない」）。
+    """
+    result = cli_runner(*X_ARGS, scenario="x_success")
+
+    assert result.exit_code == 0
+    written = json.loads((tmp_path / "cache" / "usage.json").read_text(encoding="utf-8"))
+    # 呼び出し回数はノードごとの内訳の合計と一致する（reducer で連結されている）
+    assert written["calls"] == sum(written["by_node"].values())
+    assert written["by_node"] == {
+        "parse_instruction": 1,
+        "plan_search": 2,
+        "analyze_content": 3,
+        "extract_common": 1,
+    }
+    assert written["unknown_calls"] == written["calls"]
+    assert written["input_tokens"] == written["output_tokens"] == 0
+
+
+def test_us8_usage_is_reported_on_stderr_only(cli_runner):
+    """集計は進捗（stderr）に 1 行で出て、stdout のレポートには混ざらない（D-3）。"""
+    result = cli_runner(*X_ARGS, scenario="x_success")
+
+    assert result.exit_code == 0
+    assert "[補足] LLM 呼び出し合計 7 回（入力 0 / 出力 0 トークン、不明 7 回）" in result.stderr
+    assert "LLM 呼び出し合計" not in result.stdout
+    # 使用量はレポート本文にも備考にも入らない（D-3）
+    assert "不明" not in result.stdout
+
+
 
 
